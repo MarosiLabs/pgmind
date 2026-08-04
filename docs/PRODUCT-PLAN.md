@@ -110,7 +110,8 @@ SELECT * FROM knowledge.search('token rotation', query_embedding => $1);
 vault ─── the whole knowledge base in one database (RLS-partitionable)
  └── note ─── addressed by path ('projects/auth'), has title + frontmatter properties
       └── section ─── heading-delimited subtree (addressable by heading path)
-           └── block ─── paragraph / list item / table / code block / quote
+           └── block ─── paragraph / list item / table / code block / …
+                         (quotes and lists are containers; their children are blocks)
                          · permanent surrogate ID (minted on write)
                          · content hash (changes with content)
 links: [[note]] · [[note#Section]] · [[note#^block]] · markdown links · transclusions (![[…]])
@@ -298,7 +299,7 @@ Rules binding all phases (handbook §8/§9): build order parser → storage → 
 ### Phase 1 — Markdown type & parser
 **Goal:** markdown becomes a typed, structurally queryable value with a byte-faithful boundary.
 **RFC-002 must decide:** exact block taxonomy (what is a block); wiki-link/tag/block-ref/transclusion syntax (Obsidian-compatible subset — what we accept, what we normalize); frontmatter handling; sourcepos representation; how content hashes are computed (normalization rules — this quietly determines rebinding quality).
-**Deliverables:** `markdown` type (parse/validate/serialize); AST access functions; per-block hashes; renderer.
+**Deliverables:** `markdown` type (parse/validate/serialize); AST access functions; per-block hashes; internal conformance renderer (no public HTML render function — RFC-002 D9).
 **Gate:** CommonMark conformance suite; byte-faithful round-trip on the corpus (including gnarly real vaults); property-based tests (parse∘serialize = id).
 **Risks:** Obsidian syntax has no spec — RFC-002 defines *our* spec explicitly rather than chasing bug-compat.
 

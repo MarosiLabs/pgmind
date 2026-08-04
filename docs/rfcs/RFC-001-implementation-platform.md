@@ -16,7 +16,7 @@ The audit faulted the original handbook for starting a "documentation drives cod
 
 **D2. Rust toolchain.** Stable channel, pinned exactly via `rust-toolchain.toml` (1.97.1 at acceptance) so local and CI builds agree; rustup installs it automatically and the repo pin never touches a contributor's default toolchain. Bumps ride the same process as D1.
 
-**D3. Markdown engine: comrak.** The production-grade CommonMark + GFM implementation in Rust, with `sourcepos` support (byte positions per node — required for the block model and rebinding). Pinned in `Cargo.toml` when Phase 1 starts. Vault syntax (wiki-links `[[…]]`, tags, block refs `^id`, transclusions `![[…]]`) is *not* upstream comrak behavior: it is specced in RFC-002 and implemented as our own deterministic pass over comrak's AST — we define our spec explicitly rather than chasing Obsidian bug-compatibility.
+**D3. Markdown engine: comrak.** The production-grade CommonMark + GFM implementation in Rust, with per-node source positions (line/column-based; byte spans are derived via a line-offset table — see RFC-002 D5; required for the block model and rebinding). Pinned in `Cargo.toml` when Phase 1 starts. Vault syntax (wiki-links `[[…]]`, tags, block refs `^id`, transclusions `![[…]]`) is *not* upstream comrak behavior: it is specced in RFC-002 and implemented as our own deterministic pass over comrak's AST — we define our spec explicitly rather than chasing Obsidian bug-compatibility.
 
 **D4. Spec anchor: CommonMark + GFM subset** (tables, task lists, strikethrough) as the block taxonomy's foundation; anything beyond (including the vault syntax) requires RFC-002 treatment. The CommonMark conformance suite is a permanent CI fixture from Phase 1.
 

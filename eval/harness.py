@@ -41,7 +41,9 @@ def suite_commonmark_conformance():
 
 SUITES = {
     "commonmark-conformance": suite_commonmark_conformance,
-    # Phase 2 (RFC-003/004): identity-semantics, extraction-correctness, tenant-isolation
+    # Phase 1 (RFC-002):     round-trip, hash-stability, vault-syntax-extraction
+    # Phase 2 (RFC-003/004): identity-semantics, extraction-correctness (seeded by
+    #                        vault-syntax-extraction), tenant-isolation
     # Phase 3 (RFC-004/005): rebinding-edit-corpus, concurrency, storage-growth
     # Phase 4 (RFC-006):     sync-round-trip (incl. unicode/case collisions), torture
     # Phase 5 (RFC-007/008): context-determinism, quality-per-token, dump-restore
