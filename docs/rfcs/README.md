@@ -6,7 +6,7 @@ Canonical index — mirrors [handbook §12](../../PGMIND.md) and the [product pl
 |---|---|---|---|
 | [000](RFC-000-vision-and-scope.md) | Vision & Scope | 0 | **Living — accepted 2026-08-05** |
 | [001](RFC-001-implementation-platform.md) | Implementation Platform | 0 | **Living — accepted 2026-08-05** |
-| 002 | Markdown Type, AST & Vault Syntax | 1 | not started |
+| [002](RFC-002-markdown-type-ast-vault-syntax.md) | Markdown Type, AST & Vault Syntax | 1 | **Draft — awaiting owner acceptance** |
 | 003 | Vault & Block Storage Layout | 2 | not started |
 | 004 | Block Identity & Rebinding Semantics | 2-3 | not started |
 | 005 | Version Engine, Concurrency Semantics & Excision | 3 | not started |

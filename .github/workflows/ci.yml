@@ -30,6 +30,8 @@ jobs:
           # server package too: -server-dev alone has pg_config/headers but no initdb/postgres,
           # which `cargo pgrx test` needs to boot its test cluster
           sudo apt-get install -y -qq postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
+          # cargo pgrx test installs the extension into the system dirs — make them runner-writable
+          sudo chmod a+rwx /usr/lib/postgresql/${{ matrix.pg }}/lib /usr/share/postgresql/${{ matrix.pg }}/extension
 
       # rustup on the runner respects rust-toolchain.toml automatically.
       - uses: Swatinem/rust-cache@v2
