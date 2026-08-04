@@ -15,14 +15,19 @@ endif
 build:
 	cd extension && cargo build --no-default-features --features pg$(PG)
 
-test:
+test: test-core
 	cd extension && cargo pgrx test pg$(PG)
 
+test-core:
+	cd core && cargo test --features conformance
+
 lint:
+	cd core && cargo fmt --check && cargo clippy --features conformance -- -D warnings
 	cd extension && cargo fmt --check
 	cd extension && cargo clippy --no-default-features --features pg$(PG) -- -D warnings
 
 fmt:
+	cd core && cargo fmt
 	cd extension && cargo fmt
 
 eval:

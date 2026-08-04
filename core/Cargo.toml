@@ -1,0 +1,23 @@
+[package]
+name = "pgmind-core"
+version = "0.0.1"
+edition = "2021"
+license = "PostgreSQL"
+description = "Pure deterministic core for pgmind: CommonMark+vault parsing, block model, content hashing (RFC-002). No pgrx, no I/O."
+
+[dependencies]
+comrak = "=0.54.0"
+blake3 = "=1.8.5"
+unicode-normalization = "=0.1.25"
+yaml-rust2 = "=0.11.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Internal conformance renderer (RFC-002 D9): test/eval only, never part of the extension build.
+conformance = []
+
+[[bin]]
+name = "pgmind-eval"
+path = "src/bin/eval.rs"
+required-features = ["conformance"]

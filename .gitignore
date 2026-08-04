@@ -3,8 +3,11 @@ extension/target
 tools/target
 Cargo.lock
 !extension/Cargo.lock
+!core/Cargo.lock
 eval/results/
 eval/corpora/
+!eval/corpora/pgmind/
+core/target/
 __pycache__/
 *.pyc
 .DS_Store
