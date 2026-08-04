@@ -1,9 +1,9 @@
 # RFC-002: Markdown Type, AST & Vault Syntax
 
-- **Status:** Living (phase active) — accepted by owner 2026-08-05; freezes at Phase 1 exit (four gate suites green)
+- **Status:** Frozen (Phase 1 exited: all five gate suites green in CI — run 30937342111; published in eval/published/phase-1-gates.json)
 - **Phase:** 1
 - **Owner:** project author
-- **Created:** 2026-08-05 · **Revised:** 2026-08-05 (post-verification: 8 blocking findings resolved) · **Frozen:** —
+- **Created:** 2026-08-05 · **Accepted:** 2026-08-05 · **Frozen:** 2026-08-05 (amended during phase where implementation findings refined the spec — cell-pipe semantics, mdlink fragments, marker rules, perf gate)
 
 ## 1. Context
 

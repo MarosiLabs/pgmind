@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-08-04T18:14:02Z",
+  "suites": {
+    "commonmark-conformance": {
+      "failures": [],
+      "passed": 652,
+      "status": "ok",
+      "total": 652
+    },
+    "round-trip": {
+      "status": "ok",
+      "corpus": {
+        "failures": [],
+        "passed": 11,
+        "status": "ok",
+        "total": 11
+      },
+      "fuzz": {
+        "first_failure": null,
+        "passed": 100000,
+        "status": "ok",
+        "total": 100000
+      }
+    },
+    "hash-stability": {
+      "failures": [],
+      "passed": 27,
+      "status": "ok",
+      "total": 27
+    },
+    "vault-syntax-extraction": {
+      "failures": [],
+      "passed": 33,
+      "status": "ok",
+      "total": 33
+    },
+    "parse-performance": {
+      "cases": [
+        {
+          "blocks": 1,
+          "bytes": 2100000,
+          "name": "unclosed-wiki-spam",
+          "ok": true,
+          "seconds": 0.264307375
+        },
+        {
+          "blocks": 700000,
+          "bytes": 2100000,
+          "name": "tiny-paragraph-flood",
+          "ok": true,
+          "seconds": 0.472016166
+        },
+        {
+          "blocks": 1400000,
+          "bytes": 2800000,
+          "name": "list-item-flood",
+          "ok": true,
+          "seconds": 0.854708833
+        },
+        {
+          "blocks": 1,
+          "bytes": 2000000,
+          "name": "single-line-8mib",
+          "ok": true,
+          "seconds": 0.022235291
+        }
+      ],
+      "limit_seconds": 10.0,
+      "status": "ok"
+    }
+  }
+}

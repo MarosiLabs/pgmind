@@ -4,6 +4,7 @@ The evaluation harness enforces the phase gates defined in [PRODUCT-PLAN.md Part
 
 - `harness.py` — suite runner. Suites report `ok` / `fail` / `pending`.
 - `corpora/` — fetched or curated test corpora (gitignored when downloadable; the adversarial edit corpus for rebinding will be committed, since it *is* a deliverable).
-- `results/` — machine-readable reports.
+- `results/` — machine-readable reports (gitignored).
+- `published/` — committed gate results at phase exits (`phase-1-gates.json`: all five RFC-002 suites ok).
 
 Rules: gates are defined at RFC acceptance (no gate, no acceptance); numbers get published even when unflattering — the rebinding match-rate especially.
