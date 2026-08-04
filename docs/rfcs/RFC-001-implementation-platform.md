@@ -1,9 +1,9 @@
 # RFC-001: Implementation Platform
 
-- **Status:** Living (phase active) — accepted by owner 2026-08-05; freezes at Phase 0 exit (CI matrix green)
+- **Status:** Frozen (Phase 0 exited: CI matrix green on PG16/17/18, eval + lint passing — run 30930266479/30930762648)
 - **Phase:** 0
 - **Owner:** project author
-- **Created:** 2026-08-04 · **Frozen:** —
+- **Created:** 2026-08-04 · **Accepted:** 2026-08-05 · **Frozen:** 2026-08-05
 
 ## 1. Context
 
