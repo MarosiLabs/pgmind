@@ -1,0 +1,306 @@
+[
+  {
+    "name": "wikilink-basic",
+    "doc": "See [[note]] here.\n",
+    "links": [
+      {
+        "kind": "wikilink",
+        "target": "note"
+      }
+    ]
+  },
+  {
+    "name": "wikilink-anchor-alias",
+    "doc": "[[note#Sec|Alias]]\n",
+    "links": [
+      {
+        "kind": "wikilink",
+        "target": "note",
+        "anchor": "Sec",
+        "alias": "Alias"
+      }
+    ]
+  },
+  {
+    "name": "blockref-anchor",
+    "doc": "[[note#^abc]]\n",
+    "links": [
+      {
+        "kind": "blockref",
+        "target": "note",
+        "anchor": "^abc"
+      }
+    ]
+  },
+  {
+    "name": "escaped-pipe-in-target",
+    "doc": "[[a\\|b]]\n",
+    "links": [
+      {
+        "kind": "wikilink",
+        "target": "a|b"
+      }
+    ]
+  },
+  {
+    "name": "whitespace-trimmed-target",
+    "doc": "[[ spaced target ]]\n",
+    "links": [
+      {
+        "kind": "wikilink",
+        "target": "spaced target"
+      }
+    ]
+  },
+  {
+    "name": "reference-definition-collision",
+    "doc": "[foo]: /url\n\n[[foo]]\n",
+    "links": [
+      {
+        "kind": "mdlink",
+        "target": "/url"
+      }
+    ]
+  },
+  {
+    "name": "code-span-no-link",
+    "doc": "`[[nolink]]` and [[yes]]\n",
+    "links": [
+      {
+        "kind": "wikilink",
+        "target": "yes"
+      }
+    ]
+  },
+  {
+    "name": "code-block-no-link",
+    "doc": "```\n[[nolink]] #notag\n```\n",
+    "links": [],
+    "tags": []
+  },
+  {
+    "name": "table-cell-pipe-broken",
+    "doc": "| a | b |\n|---|---|\n| [[x|y]] | z |\n",
+    "links": []
+  },
+  {
+    "name": "table-cell-pipe-escaped",
+    "doc": "| a | b |\n|---|---|\n| [[x\\|y]] | z |\n",
+    "links": [
+      {
+        "kind": "wikilink",
+        "target": "x",
+        "alias": "y"
+      }
+    ]
+  },
+  {
+    "name": "transclusion",
+    "doc": "![[embed#Part]]\n",
+    "links": [
+      {
+        "kind": "transclusion",
+        "target": "embed",
+        "anchor": "Part"
+      }
+    ]
+  },
+  {
+    "name": "mdlink-internal-external",
+    "doc": "[t](notes/x.md) and [e](https://example.com/page)\n",
+    "links": [
+      {
+        "kind": "mdlink",
+        "target": "notes/x"
+      }
+    ]
+  },
+  {
+    "name": "tags-basic",
+    "doc": "hello #tag and #123 stay plain\n",
+    "tags": [
+      "tag"
+    ]
+  },
+  {
+    "name": "tag-needs-whitespace-before",
+    "doc": "**bold**#tag\n",
+    "tags": []
+  },
+  {
+    "name": "tag-line-start-not-heading",
+    "doc": "#start of line\n",
+    "tags": [
+      "start"
+    ],
+    "kinds": [
+      "paragraph"
+    ]
+  },
+  {
+    "name": "tag-adjacent-hash",
+    "doc": "#a#b\n",
+    "tags": [
+      "a"
+    ]
+  },
+  {
+    "name": "tag-nested-path",
+    "doc": "see #proj/auth-v2 here\n",
+    "tags": [
+      "proj/auth-v2"
+    ]
+  },
+  {
+    "name": "frontmatter-valid",
+    "doc": "---\ntitle: X\ntags: [a, b]\npgmind-pin: true\n---\nbody\n",
+    "properties": {
+      "title": "X",
+      "tags": [
+        "a",
+        "b"
+      ],
+      "pgmind-pin": true
+    },
+    "tags": [
+      "a",
+      "b"
+    ]
+  },
+  {
+    "name": "frontmatter-invalid-as-content",
+    "doc": "---\n: : :\n---\nbody\n",
+    "properties": {}
+  },
+  {
+    "name": "block-ref-ids",
+    "doc": "para one ^p1\n\n# Head ^h1\n\n- item ^i1\n",
+    "block_ref_ids": [
+      "p1",
+      "h1",
+      "i1"
+    ]
+  },
+  {
+    "name": "ref-marker-not-in-code",
+    "doc": "```\ncode ^notid\n```\n",
+    "block_ref_ids": []
+  },
+  {
+    "name": "kinds-and-heading-paths",
+    "doc": "# A\n\npara\n\n## B\n\npara2\n",
+    "kinds": [
+      "heading",
+      "paragraph",
+      "heading",
+      "paragraph"
+    ],
+    "heading_paths": [
+      [],
+      [
+        "A"
+      ],
+      [
+        "A"
+      ],
+      [
+        "A",
+        "B"
+      ]
+    ]
+  },
+  {
+    "name": "formatted-heading-text",
+    "doc": "# *Important* [[d|Decisions]]\n\npara\n",
+    "heading_paths": [
+      [],
+      [
+        "Important Decisions"
+      ]
+    ]
+  },
+  {
+    "name": "heading-with-code-span-text",
+    "doc": "# Use `make eval` now\n\npara\n",
+    "heading_paths": [
+      [],
+      [
+        "Use make eval now"
+      ]
+    ]
+  },
+  {
+    "name": "quote-children-are-blocks",
+    "doc": "> quoted para\n",
+    "kinds": [
+      "paragraph"
+    ]
+  },
+  {
+    "name": "tasklist-items",
+    "doc": "- [x] done thing\n- [ ] todo thing\n",
+    "kinds": [
+      "list_item",
+      "paragraph",
+      "list_item",
+      "paragraph"
+    ]
+  },
+  {
+    "name": "quote-caret-not-marker",
+    "doc": "> ^abc\n",
+    "block_ref_ids": []
+  },
+  {
+    "name": "item-caret-not-marker",
+    "doc": "- ^abc\n",
+    "block_ref_ids": []
+  },
+  {
+    "name": "setext-heading-marker",
+    "doc": "Title ^h1\n=====\n\npara\n",
+    "block_ref_ids": [
+      "h1"
+    ],
+    "heading_paths": [
+      [],
+      [
+        "Title"
+      ]
+    ]
+  },
+  {
+    "name": "mdlink-fragment-split",
+    "doc": "[t](note.md#sec)\n",
+    "links": [
+      {
+        "kind": "mdlink",
+        "target": "note",
+        "anchor": "sec"
+      }
+    ]
+  },
+  {
+    "name": "mdlink-pure-fragment-dropped",
+    "doc": "[t](#sec)\n",
+    "links": []
+  },
+  {
+    "name": "empty-wikilink-not-a-link",
+    "doc": "[[]] then [[x]]\n",
+    "links": [
+      {
+        "kind": "wikilink",
+        "target": "x"
+      }
+    ]
+  },
+  {
+    "name": "task-item-attrs-ordered",
+    "doc": "1. [x] a\n",
+    "kinds": [
+      "list_item",
+      "paragraph"
+    ]
+  }
+]

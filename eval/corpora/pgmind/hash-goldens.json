@@ -1,0 +1,218 @@
+[
+  {
+    "name": "crlf-normalization",
+    "doc_a": "foo\r\nbar\r\n",
+    "block_a": 0,
+    "doc_b": "foo\nbar\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "nfc-normalization",
+    "doc_a": "café\n",
+    "block_a": 0,
+    "doc_b": "café\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "nfc-inside-code-block",
+    "doc_a": "```\ncafé\n```\n",
+    "block_a": 0,
+    "doc_b": "```\ncafé\n```\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "trailing-newline-runs",
+    "doc_a": "foo\n\n\n",
+    "block_a": 0,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "ref-marker-stripped",
+    "doc_a": "foo ^abc\n",
+    "block_a": 0,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "hard-break-preserved",
+    "doc_a": "foo  \nbar\n",
+    "block_a": 0,
+    "doc_b": "foo\nbar\n",
+    "block_b": 0,
+    "expect": "different"
+  },
+  {
+    "name": "quote-context-invariance",
+    "doc_a": "> foo\n",
+    "block_a": 0,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "quote-no-space-variant",
+    "doc_a": ">foo\n",
+    "block_a": 0,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "lazy-continuation",
+    "doc_a": "> foo\nbar\n",
+    "block_a": 0,
+    "doc_b": "foo\nbar\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "nesting-depth-invariance",
+    "doc_a": "- x\n  - foo\n",
+    "block_a": 3,
+    "doc_b": "- foo\n",
+    "block_b": 1,
+    "expect": "equal"
+  },
+  {
+    "name": "list-item-descendant-exclusion",
+    "doc_a": "- x\n  - foo\n",
+    "block_a": 0,
+    "doc_b": "- x\n  - DIFFERENT\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "bullet-marker-style-invariance",
+    "doc_a": "- foo\n",
+    "block_a": 1,
+    "doc_b": "* foo\n",
+    "block_b": 1,
+    "expect": "equal"
+  },
+  {
+    "name": "ordered-marker-width-invariance",
+    "doc_a": "1. foo\n",
+    "block_a": 1,
+    "doc_b": "999. foo\n",
+    "block_b": 1,
+    "expect": "equal"
+  },
+  {
+    "name": "kind-distinguishes",
+    "doc_a": "foo\n",
+    "block_a": 0,
+    "doc_b": "```\nfoo\n```\n",
+    "block_b": 0,
+    "expect": "different"
+  },
+  {
+    "name": "content-difference-detected",
+    "doc_a": "foo\n",
+    "block_a": 0,
+    "doc_b": "bar\n",
+    "block_b": 0,
+    "expect": "different"
+  },
+  {
+    "name": "nested-quote-depth",
+    "doc_a": "> > foo\n",
+    "block_a": 0,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "quote-in-list-invariance",
+    "doc_a": "- item\n  > foo\n",
+    "block_a": 2,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "item-marker-style-invariance",
+    "doc_a": "- foo\n",
+    "block_a": 0,
+    "doc_b": "* foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "item-ordered-width-invariance",
+    "doc_a": "1. foo\n",
+    "block_a": 0,
+    "doc_b": "999. foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "item-indent-invariance",
+    "doc_a": "  - foo\n",
+    "block_a": 0,
+    "doc_b": "- foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "lone-cr-line-endings",
+    "doc_a": "foo\rbar\r",
+    "block_a": 0,
+    "doc_b": "foo\nbar\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "marker-trailing-space",
+    "doc_a": "foo ^abc \n",
+    "block_a": 0,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "item-shared-marker-line",
+    "doc_a": "- foo ^x\n",
+    "block_a": 0,
+    "doc_b": "- foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "task-checkbox-is-decoration",
+    "doc_a": "- [x] foo\n",
+    "block_a": 1,
+    "doc_b": "foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "task-ordered-width-invariance",
+    "doc_a": "1. [x] foo\n",
+    "block_a": 0,
+    "doc_b": "999. [x] foo\n",
+    "block_b": 0,
+    "expect": "equal"
+  },
+  {
+    "name": "task-indent-invariance",
+    "doc_a": " - [x] foo\n",
+    "block_a": 1,
+    "doc_b": "- [x] foo\n",
+    "block_b": 1,
+    "expect": "equal"
+  },
+  {
+    "name": "setext-marker-stripped",
+    "doc_a": "Title ^h1\n=====\n",
+    "block_a": 0,
+    "doc_b": "Title\n=====\n",
+    "block_b": 0,
+    "expect": "equal"
+  }
+]

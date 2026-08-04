@@ -5,7 +5,7 @@ Cargo.lock
 !extension/Cargo.lock
 !core/Cargo.lock
 eval/results/
-eval/corpora/
+eval/corpora/*
 !eval/corpora/pgmind/
 core/target/
 __pycache__/
