@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  PGRX_VERSION: "0.19.2"
+
+jobs:
+  extension:
+    name: extension (pg${{ matrix.pg }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        pg: [16, 17, 18]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install PostgreSQL ${{ matrix.pg }} (PGDG)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update -qq
+          # server package too: -server-dev alone has pg_config/headers but no initdb/postgres,
+          # which `cargo pgrx test` needs to boot its test cluster
+          sudo apt-get install -y -qq postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
+
+      # rustup on the runner respects rust-toolchain.toml automatically.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: extension
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version "$PGRX_VERSION" --locked
+
+      - name: pgrx init
+        run: cargo pgrx init --pg${{ matrix.pg }} /usr/lib/postgresql/${{ matrix.pg }}/bin/pg_config
+
+      - name: Test (runs inside a real Postgres)
+        working-directory: extension
+        run: cargo pgrx test pg${{ matrix.pg }}
+
+      - name: Lint
+        if: matrix.pg == 18
+        run: make lint PG=${{ matrix.pg }}
+
+  eval:
+    name: eval harness
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: make eval
+      - uses: actions/upload-artifact@v4
+        if: always()   # the failure report is the one you need most
+        with:
+          name: eval-report
+          path: eval/results/latest.json

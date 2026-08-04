@@ -1,0 +1,11 @@
+/target
+extension/target
+tools/target
+Cargo.lock
+!extension/Cargo.lock
+eval/results/
+eval/corpora/
+__pycache__/
+*.pyc
+.DS_Store
+*.log

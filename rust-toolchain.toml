@@ -1,0 +1,5 @@
+[toolchain]
+# Pinned so local and CI builds agree (RFC-001 D2). Kept in lockstep with the
+# pgrx pin: pgrx/cargo-pgrx 0.19.x requires rustc >= 1.96. Bump both together.
+channel = "1.97.1"
+components = ["rustfmt", "clippy"]
