@@ -40,12 +40,12 @@
     }
   },
   "latency_p95_ms": {
-    "backlinks": 0.98505,
-    "read": 0.34369999999999995,
-    "tagged": 4.5924499999999995
+    "backlinks": 0.8811499999999999,
+    "read": 0.4996499999999999,
+    "tagged": 3.85215
   },
   "verify_violations": 0,
-  "write_throughput_notes_per_s": 174.3,
+  "write_throughput_notes_per_s": 204.1,
   "bytes_per_block_all_in": 657.9,
   "extrapolation_100k_notes_10m_blocks": {
     "assumption": "linear in blocks; revision-load behavior modeled only until Phase 3 measures it",

@@ -282,6 +282,15 @@ The model is arithmetic plus measurement, published as `eval/published/capacity-
   - **"Publish, don't flatter" is not "never fail."** The suite's status MUST be derived from the measurement actually happening — the expected note count stored, a non-zero block count, a clean `verify_note` sweep — not hard-coded to `ok`. A degenerate corpus is a failure, not an honest number.
   - **The timed region is `knowledge.write()` alone.** Staging the synthetic corpus is test scaffolding and MUST be loaded before the timer starts; charging it to the write path understates the published throughput.
   - **The measured artifact MUST be the release build.** `cargo pgrx test` installs its own debug, `pg_test`-enabled build over whatever the harness installed, so a harness that runs the pg_test suites before the measurement suites publishes debug numbers. Whichever step runs last must leave the release artifact in place.
+- **Where the per-note cost actually goes** (measured 2026-08-05 on the reference corpus, release build, median of 3, ablating one dimension at a time — recorded here so the number stops being re-guessed):
+
+  | | ms/note | share |
+  |---|---|---|
+  | extraction (4 links + 4 tags, incl. the D5 creation-repair pass) | 1.79 | 36% |
+  | 22 further blocks + 7 further tiles | 1.70 | 35% |
+  | per-note fixed cost (a one-block note) | 1.43 | 29% |
+
+  The fixed cost dominates at small note sizes and is ~15 SPI statements — the lock, the four loads, the two lane writes, the two extraction diffs, the revision insert, the head swap, and the creation repair — at roughly 95 µs each. **Batching the lanes cannot close the gap to the 2 k notes/s design target**: reaching 0.5 ms/note would require ≤ 5 statements per note, which a per-call function cannot reach when four of them are unavoidable reads. Batching the block, tile, edge and tag lanes into one statement each (from one per row) moved the corpus from 179.5 ± 1.5 to 202.8 ± 1.2 notes/s — a real 13%, and the end of what statement count can buy. The 2 k target describes the **Phase 4 bulk CLI import path**, which amortizes the fixed cost across many notes per call; comparing per-call `knowledge.write()` against it is a category error, which is exactly why this number is reported and not gated.
 
 ## 3. Alternatives considered
 

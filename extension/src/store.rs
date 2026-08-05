@@ -2,6 +2,8 @@
 //! and the D8 link-target resolver (RFC-003 D5). All queries are scoped to a
 //! vault; nothing here parses markdown or decides identity.
 
+use std::collections::HashMap;
+
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 use pgrx::{JsonB, Uuid};
@@ -339,6 +341,90 @@ pub fn resolve_target(vault: Uuid, target: &str) -> Resolution {
     }
 }
 
+/// [`resolve_target`] for a whole set at once — same D8 rules, two queries
+/// total instead of one or two per target. The write path resolves every new
+/// edge on every write, so the per-target form made link-heavy notes pay a
+/// round trip per link.
+pub fn resolve_targets(vault: Uuid, targets: &[String]) -> HashMap<String, Resolution> {
+    let mut out: HashMap<String, Resolution> = HashMap::new();
+    let mut valid: Vec<String> = Vec::new();
+    for t in targets {
+        if pgmind_core::path::path_is_valid(t) {
+            valid.push(t.clone());
+        } else {
+            out.insert(t.clone(), Resolution::Invalid);
+        }
+    }
+    if valid.is_empty() {
+        return out;
+    }
+
+    // Exact path match wins categorically (RFC-002 D8).
+    let exact: Vec<(String, Uuid)> = Spi::connect(|client| {
+        client
+            .select(
+                "SELECT path, id FROM pgmind.note
+                 WHERE vault_id = $1 AND path = ANY($2) AND tombstoned_at IS NULL",
+                None,
+                &[arg(vault), valid.clone().into()],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in resolve_targets: {e}"))
+            .map(|row| {
+                (
+                    row.get::<String>(1).unwrap().unwrap(),
+                    row.get::<Uuid>(2).unwrap().unwrap(),
+                )
+            })
+            .collect()
+    });
+    for (path, id) in exact {
+        out.insert(path, Resolution::Exact(id));
+    }
+
+    // Then unique live basename, for slash-free targets with no exact match.
+    let bases: Vec<String> = valid
+        .iter()
+        .filter(|t| !out.contains_key(*t) && !t.contains('/'))
+        .cloned()
+        .collect();
+    if !bases.is_empty() {
+        let rows: Vec<(String, Uuid, i64)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT basename, min(id::text)::uuid, count(*)::int8
+                     FROM pgmind.note
+                     WHERE vault_id = $1 AND basename = ANY($2) AND tombstoned_at IS NULL
+                     GROUP BY basename",
+                    None,
+                    &[arg(vault), bases.into()],
+                )
+                .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in resolve_targets: {e}"))
+                .map(|row| {
+                    (
+                        row.get::<String>(1).unwrap().unwrap(),
+                        row.get::<Uuid>(2).unwrap().unwrap(),
+                        row.get::<i64>(3).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        for (base, id, n) in rows {
+            // count == 1 makes min(id) the only candidate; 2+ is ambiguous.
+            let r = if n == 1 {
+                Resolution::Basename(id)
+            } else {
+                Resolution::Ambiguous
+            };
+            out.insert(base, r);
+        }
+    }
+
+    for t in valid {
+        out.entry(t).or_insert(Resolution::Missing);
+    }
+    out
+}
+
 /// RFC-003 D5 creation repair: re-run D8 resolution for every edge the new
 /// note could affect (dst_path = new path, or slash-free dst_path = new
 /// basename). Definitionally equal to full recomputation.
@@ -348,12 +434,13 @@ pub fn repair_edges_on_creation(vault: Uuid, new_path: &str) {
     // rather than re-resolving per edge (fan-in used to cost 3 statements per
     // linking note).
     let base = pgmind_core::path::basename(new_path);
-    let mut targets: Vec<&str> = vec![new_path];
+    let mut targets: Vec<String> = vec![new_path.to_string()];
     if base != new_path {
-        targets.push(base);
+        targets.push(base.to_string());
     }
-    for target in targets {
-        let r = resolve_target(vault, target);
+    let resolved = resolve_targets(vault, &targets);
+    for target in &targets {
+        let r = resolved.get(target).copied().unwrap_or(Resolution::Missing);
         update_edge_resolution_by_path(vault, target, r);
     }
 }
