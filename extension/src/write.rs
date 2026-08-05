@@ -318,10 +318,25 @@ pub fn new_revision(
     rev
 }
 
+/// Rows per statement in the batched lanes.
+///
+/// `jsonb` caps a single string — and the sum of an array's elements — at
+/// `JENTRY_OFFLENMASK` (256 MB − 1), where the `text` datum the per-row code
+/// bound caps at 1 GB. An unbounded batch would therefore reject documents the
+/// pre-batching write path stored, and `pgmind.max_document_bytes` is USERSET
+/// (RFC-002 D9), so that is reachable, not theoretical. Two rules keep the
+/// batching from narrowing what pgmind accepts: the unbounded columns (tile
+/// `raw`, block `content`) travel as `text[]`, which has no per-element
+/// ceiling, and every lane flushes in chunks of this many rows — which also
+/// bounds how much of a note one statement holds in backend memory.
+const LANE_CHUNK_ROWS: usize = 2048;
+
 /// The `jsonb_to_recordset` column list shared by the batched block INSERT and
-/// UPDATE, so the two can never disagree about the row shape.
-const BLOCK_ROW_COLUMNS: &str = "id uuid, ord int4, parent_block uuid, kind text, \
-     heading_path text[], content text, content_hash text, block_ref_id text, \
+/// UPDATE, so the two can never disagree about the row shape. `content` is not
+/// here: it is the one unbounded column, so it rides the parallel `text[]`
+/// (joined on `i`, which [`block_rows_indexed`] stamps per chunk).
+const BLOCK_ROW_COLUMNS: &str = "i int8, id uuid, ord int4, parent_block uuid, kind text, \
+     heading_path text[], content_hash text, block_ref_id text, \
      tile_ord int4, start_in_tile int4, end_in_tile int4, attrs jsonb";
 
 /// One block row as JSON, matching [`BLOCK_ROW_COLUMNS`]. `content_hash`
@@ -346,7 +361,6 @@ fn block_row_json(
         "parent_block": parent_id.map(|u| u.to_string()),
         "kind": nb.kind.tag(),
         "heading_path": nb.heading_path,
-        "content": nb.normalized_content,
         "content_hash": hex,
         "block_ref_id": nb.block_ref_id,
         "tile_ord": tile_ord,
@@ -354,6 +368,22 @@ fn block_row_json(
         "end_in_tile": end_in_tile,
         "attrs": nb.attrs,
     })
+}
+
+/// Stamp one chunk's rows with the 1-based ordinal that pairs each with its
+/// `content` in the parallel `text[]`. Done per chunk, not per note, so the key
+/// matches `unnest(...) WITH ORDINALITY`, which restarts at 1 every statement.
+fn block_rows_indexed(rows: &[serde_json::Value]) -> serde_json::Value {
+    serde_json::Value::Array(
+        rows.iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let mut v = v.clone();
+                v["i"] = json!(i as i64 + 1);
+                v
+            })
+            .collect(),
+    )
 }
 
 /// Reconcile both lanes and extraction from a full parse (RFC-003 D6 steps
@@ -387,34 +417,53 @@ pub fn reconcile(
 
     // --- byte lane: tiles by set-diff on (ord, raw) ---
     //
-    // Changed and new tiles each go out as ONE statement, fed through
-    // jsonb_to_recordset. Unchanged tiles still produce no SQL at all, which is
-    // the property Law 7 and the churn gate depend on.
+    // Changed and new tiles each go out in ONE statement per LANE_CHUNK_ROWS,
+    // as parallel int4[]/text[] arrays. Unchanged tiles still produce no SQL at
+    // all, which is the property Law 7 and the churn gate depend on.
     let new_tiles = &parsed.tiles;
-    let mut tile_updates: Vec<serde_json::Value> = Vec::new();
-    let mut tile_inserts: Vec<serde_json::Value> = Vec::new();
+    let mut upd_ords: Vec<i32> = Vec::new();
+    let mut upd_raw: Vec<&str> = Vec::new();
+    let mut ins_ords: Vec<i32> = Vec::new();
+    let mut ins_raw: Vec<&str> = Vec::new();
     for (ord, raw) in new_tiles.iter().enumerate() {
         match old_tiles.get(ord) {
             Some(old_raw) if old_raw == raw => {}
-            Some(_) => tile_updates.push(json!({ "ord": ord as i32, "raw": raw })),
-            None => tile_inserts.push(json!({ "ord": ord as i32, "raw": raw })),
+            Some(_) => {
+                upd_ords.push(ord as i32);
+                upd_raw.push(raw);
+            }
+            None => {
+                ins_ords.push(ord as i32);
+                ins_raw.push(raw);
+            }
         }
     }
-    if !tile_updates.is_empty() {
+    for (ords, raws) in upd_ords
+        .chunks(LANE_CHUNK_ROWS)
+        .zip(upd_raw.chunks(LANE_CHUNK_ROWS))
+    {
         Spi::run_with_args(
             "UPDATE pgmind.tile t SET raw = r.raw
-               FROM jsonb_to_recordset($2::jsonb) AS r(ord int4, raw text)
+               FROM unnest($2::int4[], $3::text[]) AS r(ord, raw)
               WHERE t.note_id = $1 AND t.ord = r.ord",
-            &[arg(note_id), JsonB(json!(tile_updates)).into()],
+            &[arg(note_id), ords.to_vec().into(), raws.to_vec().into()],
         )
         .unwrap_or_else(|e| pgrx::error!("pgmind: SPI tile update: {e}"));
     }
-    if !tile_inserts.is_empty() {
+    for (ords, raws) in ins_ords
+        .chunks(LANE_CHUNK_ROWS)
+        .zip(ins_raw.chunks(LANE_CHUNK_ROWS))
+    {
         Spi::run_with_args(
             "INSERT INTO pgmind.tile (note_id, vault_id, ord, raw)
              SELECT $1, $2, r.ord, r.raw
-               FROM jsonb_to_recordset($3::jsonb) AS r(ord int4, raw text)",
-            &[arg(note_id), arg(vault), JsonB(json!(tile_inserts)).into()],
+               FROM unnest($3::int4[], $4::text[]) AS r(ord, raw)",
+            &[
+                arg(note_id),
+                arg(vault),
+                ords.to_vec().into(),
+                raws.to_vec().into(),
+            ],
         )
         .unwrap_or_else(|e| pgrx::error!("pgmind: SPI tile insert: {e}"));
     }
@@ -433,7 +482,8 @@ pub fn reconcile(
         c.removed.iter().map(|u| *u.as_bytes()).collect();
 
     // (a) INSERT minted blocks. (b) UPDATE carried blocks whose stored columns
-    // changed. Each is ONE statement, fed through jsonb_to_recordset.
+    // changed. Each is one statement per LANE_CHUNK_ROWS rows, fed through
+    // jsonb_to_recordset joined to the parallel content text[].
     //
     // A per-row loop cost one parsed-and-planned SPI execution per block: ~23
     // per note at the capacity gate's shape, and 500 per edit on a 500-block
@@ -449,9 +499,15 @@ pub fn reconcile(
     //
     // The normative D6 ordering is unchanged and still load-bearing: INSERT and
     // UPDATE both complete before the removal DELETE below, so carried children
-    // are re-parented before any parent row disappears.
+    // are re-parented before any parent row disappears. Chunking adds one more
+    // dependency on parse order: the FK is checked at the end of each STATEMENT,
+    // so a minted child may not land in an earlier chunk than its minted parent.
+    // `doc.blocks` is pre-order (RFC-002 D6), so a parent's index is always
+    // lower than its children's and this holds by construction.
     let mut to_insert: Vec<serde_json::Value> = Vec::new();
+    let mut insert_content: Vec<&str> = Vec::new();
     let mut to_update: Vec<serde_json::Value> = Vec::new();
+    let mut update_content: Vec<&str> = Vec::new();
     for (ord, nb) in parsed.doc.blocks.iter().enumerate() {
         let id = c.ids[ord];
         let parent_id = nb.parent.map(|p| c.ids[p as usize]);
@@ -472,39 +528,57 @@ pub fn reconcile(
                 continue;
             }
             to_update.push(block_row_json(id, parent_id, nb, ord, tile_ord, s, e));
+            update_content.push(&nb.normalized_content);
         } else {
             to_insert.push(block_row_json(id, parent_id, nb, ord, tile_ord, s, e));
+            insert_content.push(&nb.normalized_content);
         }
     }
-    if !to_insert.is_empty() {
+    for (rows, content) in to_insert
+        .chunks(LANE_CHUNK_ROWS)
+        .zip(insert_content.chunks(LANE_CHUNK_ROWS))
+    {
         Spi::run_with_args(
             &format!(
                 "INSERT INTO pgmind.block
                    (id, note_id, vault_id, ord, parent_block, kind, heading_path, content,
                     content_hash, block_ref_id, tile_ord, start_in_tile, end_in_tile, attrs)
                  SELECT r.id, $1, $2, r.ord, r.parent_block, r.kind::pgmind.block_kind,
-                        r.heading_path, r.content, decode(r.content_hash, 'hex'),
+                        r.heading_path, c.content, decode(r.content_hash, 'hex'),
                         r.block_ref_id, r.tile_ord, r.start_in_tile, r.end_in_tile, r.attrs
-                   FROM jsonb_to_recordset($3::jsonb) AS r({BLOCK_ROW_COLUMNS})"
+                   FROM jsonb_to_recordset($3::jsonb) AS r({BLOCK_ROW_COLUMNS})
+                   JOIN unnest($4::text[]) WITH ORDINALITY AS c(content, i) ON c.i = r.i"
             ),
-            &[arg(note_id), arg(vault), JsonB(json!(to_insert)).into()],
+            &[
+                arg(note_id),
+                arg(vault),
+                JsonB(block_rows_indexed(rows)).into(),
+                content.to_vec().into(),
+            ],
         )
         .unwrap_or_else(|e| pgrx::error!("pgmind: SPI block insert: {e}"));
     }
-    if !to_update.is_empty() {
+    for (rows, content) in to_update
+        .chunks(LANE_CHUNK_ROWS)
+        .zip(update_content.chunks(LANE_CHUNK_ROWS))
+    {
         Spi::run_with_args(
             &format!(
                 "UPDATE pgmind.block b SET
                         ord = r.ord, parent_block = r.parent_block,
                         kind = r.kind::pgmind.block_kind, heading_path = r.heading_path,
-                        content = r.content, content_hash = decode(r.content_hash, 'hex'),
+                        content = c.content, content_hash = decode(r.content_hash, 'hex'),
                         block_ref_id = r.block_ref_id, tile_ord = r.tile_ord,
                         start_in_tile = r.start_in_tile, end_in_tile = r.end_in_tile,
                         attrs = r.attrs
                    FROM jsonb_to_recordset($1::jsonb) AS r({BLOCK_ROW_COLUMNS})
+                   JOIN unnest($2::text[]) WITH ORDINALITY AS c(content, i) ON c.i = r.i
                   WHERE b.id = r.id"
             ),
-            &[JsonB(json!(to_update)).into()],
+            &[
+                JsonB(block_rows_indexed(rows)).into(),
+                content.to_vec().into(),
+            ],
         )
         .unwrap_or_else(|e| pgrx::error!("pgmind: SPI block update: {e}"));
     }
@@ -583,9 +657,10 @@ fn reconcile_extraction(vault: Uuid, note_id: Uuid, parsed: &ParsedNote, c: &Car
         )
         .unwrap_or_else(|e| pgrx::error!("pgmind: SPI edge delete: {e}"));
     }
-    // New edges: resolve every distinct target in one pass, then insert them
-    // all in one statement. Per-edge resolution plus a per-edge INSERT meant
-    // ~3 round trips per link on the write path the capacity gate measures.
+    // New edges: resolve every distinct target in one pass, then insert them in
+    // one statement per LANE_CHUNK_ROWS. Per-edge resolution plus a per-edge
+    // INSERT meant ~3 round trips per link on the write path the capacity gate
+    // measures.
     let new_edges: Vec<&EdgeKey> = desired_edges
         .iter()
         .filter(|k| !existing_keys.contains(*k))
@@ -618,20 +693,22 @@ fn reconcile_extraction(vault: Uuid, note_id: Uuid, parsed: &ParsedNote, c: &Car
                 })
             })
             .collect();
-        Spi::run_with_args(
-            "INSERT INTO pgmind.edge
-               (vault_id, src_note, src_block, kind, dst_path, dst_heading, dst_block_ref,
-                alias, dst_note, resolved_via, dangling_reason)
-             SELECT $1, $2, r.src_block, r.kind::pgmind.edge_kind, r.dst_path,
-                    nullif(r.dst_heading, ''), nullif(r.dst_block_ref, ''),
-                    nullif(r.alias, ''), r.dst_note, r.resolved_via, r.dangling_reason
-               FROM jsonb_to_recordset($3::jsonb) AS r(
-                      src_block uuid, kind text, dst_path text, dst_heading text,
-                      dst_block_ref text, alias text, dst_note uuid,
-                      resolved_via text, dangling_reason text)",
-            &[arg(vault), arg(note_id), JsonB(json!(rows)).into()],
-        )
-        .unwrap_or_else(|e| pgrx::error!("pgmind: SPI edge insert: {e}"));
+        for chunk in rows.chunks(LANE_CHUNK_ROWS) {
+            Spi::run_with_args(
+                "INSERT INTO pgmind.edge
+                   (vault_id, src_note, src_block, kind, dst_path, dst_heading, dst_block_ref,
+                    alias, dst_note, resolved_via, dangling_reason)
+                 SELECT $1, $2, r.src_block, r.kind::pgmind.edge_kind, r.dst_path,
+                        nullif(r.dst_heading, ''), nullif(r.dst_block_ref, ''),
+                        nullif(r.alias, ''), r.dst_note, r.resolved_via, r.dangling_reason
+                   FROM jsonb_to_recordset($3::jsonb) AS r(
+                          src_block uuid, kind text, dst_path text, dst_heading text,
+                          dst_block_ref text, alias text, dst_note uuid,
+                          resolved_via text, dangling_reason text)",
+                &[arg(vault), arg(note_id), JsonB(json!(chunk)).into()],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI edge insert: {e}"));
+        }
     }
 
     // Tags: (block_id, tag) — note-level rows have block_id NULL.
@@ -683,12 +760,12 @@ fn reconcile_extraction(vault: Uuid, note_id: Uuid, parsed: &ParsedNote, c: &Car
             })
         })
         .collect();
-    if !new_tags.is_empty() {
+    for chunk in new_tags.chunks(LANE_CHUNK_ROWS) {
         Spi::run_with_args(
             "INSERT INTO pgmind.tag (vault_id, note_id, block_id, tag)
              SELECT $1, $2, r.block_id, r.tag
                FROM jsonb_to_recordset($3::jsonb) AS r(block_id uuid, tag text)",
-            &[arg(vault), arg(note_id), JsonB(json!(new_tags)).into()],
+            &[arg(vault), arg(note_id), JsonB(json!(chunk)).into()],
         )
         .unwrap_or_else(|e| pgrx::error!("pgmind: SPI tag insert: {e}"));
     }

@@ -265,10 +265,18 @@ fn splice_replace(
     } else {
         &deco.cont_prefix
     };
-    let mut replacement = decorate(frag_text.trim_end_matches('\n'), cont);
-    replacement.push('\n');
-
     let src = ctx.src();
+    let mut replacement = decorate(frag_text.trim_end_matches('\n'), cont);
+    // Re-emit the region's own terminator, don't invent one. A note whose last
+    // block has no trailing newline (`alpha\n\nbeta`) is byte-faithful storage,
+    // and RFC-003 D6 says the final tile keeps exactly the trailing trivia it
+    // had — `insert_blocks` and `move_block` already preserve it. Anywhere but
+    // the very end of the source the newline is mandatory: without it the
+    // replacement would merge into whatever follows.
+    if region_end < src.len() || src[..region_end].ends_with('\n') {
+        replacement.push('\n');
+    }
+
     let line_start = line_start_of(src, region_start);
     // Nested spans start at their LINE start (decoration included), so the
     // preserved decoration is the first `keep` bytes of that line.

@@ -40,12 +40,87 @@
     }
   },
   "latency_p95_ms": {
-    "backlinks": 0.8811499999999999,
-    "read": 0.4996499999999999,
-    "tagged": 3.85215
+    "backlinks": 2.2693999999999996,
+    "read": 0.4536499999999999,
+    "tagged": 3.9867
   },
   "verify_violations": 0,
-  "write_throughput_notes_per_s": 204.1,
+  "bulk_pass_notes_per_s_one_sample": 200.2,
+  "write_cost": {
+    "procedure": "5 rounds x 3 shapes, each pass writing a 500-note corpus into an EMPTY database (every write a create, release build, single connection, staging loaded untimed); then 8 successive passes into one database for the growth curve",
+    "notes_per_pass": 500,
+    "ms_per_note_by_pass_empty_vault": {
+      "full": [
+        3.902,
+        3.882,
+        3.998,
+        4.029,
+        3.856
+      ],
+      "no_extraction": [
+        2.692,
+        2.775,
+        2.714,
+        2.679,
+        2.87
+      ],
+      "single_block": [
+        1.072,
+        1.057,
+        1.077,
+        1.053,
+        1.074
+      ]
+    },
+    "ms_per_note_median": 3.902,
+    "ms_per_note_range": [
+      3.856,
+      4.029
+    ],
+    "notes_per_s_median": 256.3,
+    "measured_at_vault_size": 0,
+    "attribution_ms_per_note": {
+      "extraction": 1.188,
+      "blocks_and_tiles_beyond_the_first": 1.642,
+      "per_note_fixed": 1.072,
+      "run_to_run_spread_of_full": 0.173
+    },
+    "growth_ms_per_note_by_vault_size": [
+      {
+        "notes_already_in_vault": 0,
+        "ms_per_note": 3.966
+      },
+      {
+        "notes_already_in_vault": 500,
+        "ms_per_note": 4.633
+      },
+      {
+        "notes_already_in_vault": 1000,
+        "ms_per_note": 4.363
+      },
+      {
+        "notes_already_in_vault": 1500,
+        "ms_per_note": 4.479
+      },
+      {
+        "notes_already_in_vault": 2000,
+        "ms_per_note": 4.918
+      },
+      {
+        "notes_already_in_vault": 2500,
+        "ms_per_note": 5.024
+      },
+      {
+        "notes_already_in_vault": 3000,
+        "ms_per_note": 4.12
+      },
+      {
+        "notes_already_in_vault": 3500,
+        "ms_per_note": 3.87
+      }
+    ]
+  },
+  "write_throughput_notes_per_s": 256.3,
   "bytes_per_block_all_in": 657.9,
   "extrapolation_100k_notes_10m_blocks": {
     "assumption": "linear in blocks; revision-load behavior modeled only until Phase 3 measures it",

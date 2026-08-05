@@ -1,9 +1,9 @@
 # RFC-004: Block Identity & Rebinding Semantics
 
-- **Status:** Living — **Part A (write-path identity) accepted 2026-08-05 for Phase 2; Part B (heuristic rebinding) remains draft until Phase 3 acceptance** (per plan §16: "accepted (living)" split). Amended same day after adversarial review: fragment arity (parentless counting), subtree carry, op return contract, container-children constraints, PM008, marker/ID divergence. Amended again after Phase-2 code review: A3 pass 2 is section-first (two tiers), A4 `marker_to` is a uuid inside the split/merge object and `carried` is emitted for every carrying op.
+- **Status:** Living — **Part A (write-path identity) accepted 2026-08-05 for Phase 2; Part B (heuristic rebinding) remains draft until Phase 3 acceptance** (per plan §16: "accepted (living)" split). Amended same day after adversarial review: fragment arity (parentless counting), subtree carry, op return contract, container-children constraints, PM008, marker/ID divergence. Amended again after Phase-2 code review: A3 pass 2 is section-first (two tiers), A4 `marker_to` is a uuid inside the split/merge object and `carried` is emitted for every carrying op. **Those post-review amendments were accepted by the owner 2026-08-05** — Part A stands re-accepted as amended; Part B is untouched by the review and stays draft until its Phase-3 gate (adversarial edit corpus) has results.
 - **Phase:** 2-3
 - **Owner:** project author
-- **Created:** 2026-08-05 · **Accepted:** 2026-08-05 (Part A) · **Frozen:** —
+- **Created:** 2026-08-05 · **Accepted:** 2026-08-05 (Part A; amendments re-accepted the same day) · **Frozen:** —
 
 ## 1. Context
 

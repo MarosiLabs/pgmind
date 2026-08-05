@@ -482,6 +482,108 @@ mod tests {
         verify_clean("ops/merge");
     }
 
+    /// RFC-003 D6: the final tile keeps exactly the trailing trivia it had.
+    /// A note whose last block has no trailing newline is legal, byte-faithful
+    /// storage — `update_block`, `split_block` and `merge_blocks` used to
+    /// invent one, and `verify_note` cannot see it (the recomputed parse agrees
+    /// with the rewritten bytes; only the caller's original bytes disagree).
+    #[pg_test]
+    fn final_block_ops_keep_trailing_trivia() {
+        let upd = |path: &str, id: Uuid, frag: &str| {
+            Spi::run_with_args(
+                "SELECT knowledge.update_block($1, $2::markdown)",
+                &[id.into(), frag.into()],
+            )
+            .unwrap_or_else(|e| panic!("update_block on {path} failed: {e}"));
+        };
+
+        write("ops/eof", "alpha\n\nbeta");
+        assert_eq!(read("ops/eof"), "alpha\n\nbeta", "write is byte-faithful");
+        upd("ops/eof", block_ids("ops/eof")[1].1, "BETA");
+        assert_eq!(read("ops/eof"), "alpha\n\nBETA", "update invented no byte");
+        verify_clean("ops/eof");
+
+        write("ops/eofsplit", "alpha\n\nbeta");
+        Spi::run_with_args(
+            "SELECT knowledge.split_block($1, 'b1\n\nb2'::markdown)",
+            &[block_ids("ops/eofsplit")[1].1.into()],
+        )
+        .expect("split failed");
+        assert_eq!(read("ops/eofsplit"), "alpha\n\nb1\n\nb2");
+        verify_clean("ops/eofsplit");
+
+        write("ops/eofmerge", "alpha\n\nbeta");
+        let m = block_ids("ops/eofmerge");
+        Spi::run_with_args(
+            "SELECT knowledge.merge_blocks(ARRAY[$1, $2], 'MERGED'::markdown)",
+            &[m[0].1.into(), m[1].1.into()],
+        )
+        .expect("merge failed");
+        assert_eq!(read("ops/eofmerge"), "MERGED");
+        verify_clean("ops/eofmerge");
+
+        // The other direction of the same rule: a note that DOES end in a
+        // newline still ends in exactly one afterwards.
+        write("ops/eofkeep", "alpha\n\nbeta\n");
+        upd("ops/eofkeep", block_ids("ops/eofkeep")[1].1, "BETA");
+        assert_eq!(read("ops/eofkeep"), "alpha\n\nBETA\n");
+        verify_clean("ops/eofkeep");
+
+        // ...and a mid-note target still gets its mandatory terminator, or the
+        // replacement would merge into the block after it.
+        write("ops/eofmid", "alpha\n\nbeta\n\ngamma");
+        upd("ops/eofmid", block_ids("ops/eofmid")[0].1, "ALPHA");
+        assert_eq!(read("ops/eofmid"), "ALPHA\n\nbeta\n\ngamma");
+        verify_clean("ops/eofmid");
+    }
+
+    /// The batched lanes flush every `LANE_CHUNK_ROWS` (2048) rows and pair
+    /// each block with its content by ordinality within the chunk, so both the
+    /// chunk boundary and the pairing need a note bigger than one chunk to be
+    /// exercised at all. The leading paragraph makes the item/paragraph pairs
+    /// start at an odd index, which puts a parent and its child on opposite
+    /// sides of the boundary — the case that relies on the FK being checked at
+    /// end-of-statement and on `doc.blocks` being pre-order.
+    #[pg_test]
+    fn lane_batching_survives_chunk_boundaries() {
+        let mut md = String::from("lead\n\n");
+        for i in 0..3000 {
+            md.push_str(&format!("- item {i}\n"));
+        }
+        write("bulk/items", &md);
+        assert_eq!(read("bulk/items"), md, "byte-faithful across chunks");
+        let ids = block_ids("bulk/items");
+        assert_eq!(ids.len(), 1 + 3000 * 2, "item + inner paragraph per line");
+        assert!(
+            ids.iter()
+                .map(|(_, id)| id)
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == ids.len(),
+            "no id collisions across chunks"
+        );
+        verify_clean("bulk/items");
+
+        // Rewrite: exercises the batched UPDATE lane (ords shift by one for
+        // every block after the edit, across all three chunks) and the carry.
+        let edited = md.replace("- item 2999\n", "- item 2999 edited\n");
+        write("bulk/items", &edited);
+        assert_eq!(read("bulk/items"), edited);
+        let after = block_ids("bulk/items");
+        assert_eq!(after.len(), ids.len());
+        assert_eq!(after[0].1, ids[0].1, "untouched lead paragraph carried");
+        assert_eq!(after[4000].1, ids[4000].1, "untouched middle block carried");
+        verify_clean("bulk/items");
+
+        // A block whose content is far larger than any jsonb row travels as
+        // text[], which has no per-element ceiling (the 256 MB jsonb string
+        // limit itself is out of reach of a test that has to run in CI).
+        let big = format!("intro\n\n```\n{}```\n", "x".repeat(2 * 1024 * 1024));
+        write("bulk/big", &big);
+        assert_eq!(read("bulk/big"), big, "multi-MB block round-trips");
+        verify_clean("bulk/big");
+    }
+
     #[pg_test]
     fn child_carried_while_parent_removed() {
         write("ops/delist", "- hello\n");

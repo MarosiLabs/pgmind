@@ -318,6 +318,7 @@ PGRX_TEST_SUITES = {
         "move_across_sections_keeps_id_changes_heading_path",
         # RFC-003 D6 splice discipline.
         "insert_preserves_unseparated_neighbouring_tiles",
+        "final_block_ops_keep_trailing_trivia",
         "insert_item_level_into_a_quoted_list",
         "block_ops_keep_the_note_row_consistent",
     ],
@@ -331,6 +332,7 @@ PGRX_TEST_SUITES = {
         "paths_round_trip_through_normalization",
         "notes_glob_matches_literal_stars_and_prefixes",
         "extraction_dedups_and_covers_all_link_kinds",
+        "lane_batching_survives_chunk_boundaries",
         "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [
@@ -447,23 +449,135 @@ def suite_storage_round_trip():
             "read_mismatches": mismatches, "verify_violations": violations}
 
 
-def synthetic_note(rng: random.Random, i: int) -> str:
-    """~23 blocks calibrated to the Walkthrough-A shape (RFC-003 D8)."""
+def synthetic_note(rng: random.Random, i: int, prefix: str = "cap",
+                   n: int = CAPACITY_NOTES, extraction: bool = True) -> str:
+    """23 blocks, 4 links and 4 tags per note (RFC-003 D8 records this shape).
+
+    `extraction=False` keeps the block and byte shape and removes only the
+    links and tags, which is what makes the D8 ablation an ablation: the
+    difference between the two passes is extraction and nothing else.
+    """
     tag = f"t{i % 20}"
-    other = rng.randrange(CAPACITY_NOTES)
+    other = rng.randrange(n)
     parts = [f"# Note {i}\n\n"]
     for p in range(4):
-        parts.append(f"Paragraph {p} of note {i} links [[cap/{(other + p) % CAPACITY_NOTES}]] and mentions #{tag}.\n\n")
+        if extraction:
+            parts.append(f"Paragraph {p} of note {i} links [[{prefix}/{(other + p) % n}]] and mentions #{tag}.\n\n")
+        else:
+            parts.append(f"Paragraph {p} of note {i} links to note {(other + p) % n} and mentions t{i % 20}.\n\n")
     parts.append("## Details\n\n")
     parts.append("".join(f"- point {j} of note {i}\n" for j in range(8)))
     parts.append("\n```\ncode sample\n```\n")
     return "".join(parts)
 
 
+THROUGHPUT_NOTES = 500
+THROUGHPUT_RUNS = 5
+GROWTH_STEPS = 8
+
+
+def timed_create_pass(c: PgCluster, db: str, docs: list[tuple[str, str]]) -> float:
+    """Seconds for exactly one knowledge.write() pass over `docs`. Staging is
+    loaded first, untimed, so the number describes write() and nothing else."""
+    run_sql_file(c, db, "_bench_stage.sql", stage_vault_sql(docs))
+    t0 = time.monotonic()
+    c.psql(db, WRITE_PASS_SQL)
+    return time.monotonic() - t0
+
+
+def fresh_db(c: PgCluster, name: str):
+    c.psql("postgres", f"DROP DATABASE IF EXISTS {name};")
+    c.createdb(name)
+
+
+def write_cost_measurements(c: PgCluster) -> dict:
+    """RFC-003 D8's published write cost. Two measurements, deliberately split.
+
+    **Repeatability + attribution.** Every pass writes one corpus into a *fresh
+    database*, so the only thing that differs between passes is the note shape:
+    a full note, the same note with links and tags removed, and a one-block
+    note. That gives a median with a spread (not one sample), and an
+    attribution that is a real ablation rather than a difference between two
+    differently-loaded databases. Every pass is a create — a rewrite takes the
+    other `write_note` branch, so mixing them would measure neither.
+
+    **Growth.** Successive passes into *one* database, recording the vault size
+    each pass started from. This exists because the first version of this bench
+    ran every pass into one growing database and reported the median: the
+    passes were monotonically slowing (3.9 → 9.5 ms/note as the vault filled),
+    so the "median" was really the cost at the median vault size, and the
+    ablation was charging vault growth to whichever shape ran last. Write cost
+    is a function of vault size; D8 publishes the curve instead of one number
+    that silently depends on where on it the corpus happened to sit.
+
+    Both run in throwaway databases, dropped afterwards, so the capacity corpus
+    whose table sizes are the rest of this gate's deliverable is never polluted.
+    """
+    shapes = {
+        "full": lambda rng, i, pre: synthetic_note(rng, i, prefix=pre, n=THROUGHPUT_NOTES),
+        "no_extraction": lambda rng, i, pre: synthetic_note(
+            rng, i, prefix=pre, n=THROUGHPUT_NOTES, extraction=False),
+        "single_block": lambda rng, i, pre: f"Paragraph of note {i}.\n",
+    }
+
+    def corpus(shape, make, run):
+        rng = random.Random(0xB0BB1E + run)
+        pre = f"bench/{shape}/{run}"
+        return [(f"{pre}/{i}", make(rng, i, pre)) for i in range(THROUGHPUT_NOTES)]
+
+    passes: dict = {k: [] for k in shapes}
+    for run in range(THROUGHPUT_RUNS):
+        for shape, make in shapes.items():
+            fresh_db(c, "pgmind_bench")
+            elapsed = timed_create_pass(c, "pgmind_bench", corpus(shape, make, run))
+            passes[shape].append(round(elapsed * 1000 / THROUGHPUT_NOTES, 3))
+
+    fresh_db(c, "pgmind_bench")
+    growth = []
+    for step in range(GROWTH_STEPS):
+        elapsed = timed_create_pass(c, "pgmind_bench", corpus("full", shapes["full"], 100 + step))
+        growth.append({"notes_already_in_vault": step * THROUGHPUT_NOTES,
+                       "ms_per_note": round(elapsed * 1000 / THROUGHPUT_NOTES, 3)})
+    c.psql("postgres", "DROP DATABASE pgmind_bench;")
+
+    def med(xs):
+        return sorted(xs)[len(xs) // 2]  # odd run counts only
+
+    full, no_ext, single = (med(passes[k]) for k in shapes)
+    spread = round(max(passes["full"]) - min(passes["full"]), 3)
+    return {
+        "procedure": (
+            f"{THROUGHPUT_RUNS} rounds x 3 shapes, each pass writing a "
+            f"{THROUGHPUT_NOTES}-note corpus into an EMPTY database (every write a create, "
+            "release build, single connection, staging loaded untimed); then "
+            f"{GROWTH_STEPS} successive passes into one database for the growth curve"
+        ),
+        "notes_per_pass": THROUGHPUT_NOTES,
+        "ms_per_note_by_pass_empty_vault": passes,
+        "ms_per_note_median": full,
+        "ms_per_note_range": [min(passes["full"]), max(passes["full"])],
+        "notes_per_s_median": round(1000 / full, 1),
+        "measured_at_vault_size": 0,
+        "attribution_ms_per_note": {
+            "extraction": round(full - no_ext, 3),
+            "blocks_and_tiles_beyond_the_first": round(no_ext - single, 3),
+            "per_note_fixed": round(single, 3),
+            # An attribution term smaller than the run-to-run spread of the
+            # full shape is not resolvable by this bench, and D8 may not quote
+            # it as if it were. Recorded rather than hidden.
+            "run_to_run_spread_of_full": spread,
+        },
+        "growth_ms_per_note_by_vault_size": growth,
+    }
+
+
 def suite_capacity_model():
     """RFC-003 §5 gate 5 / D8: measured bytes + throughput + latency, published
     honestly with extrapolation to the plan-§14 design target."""
     c = cluster()
+    # Write cost first, in its own database: it is the number D8 quotes, and it
+    # must not be measured against a cluster already holding the 10k corpus.
+    write_cost = write_cost_measurements(c)
     c.createdb("pgmind_cap")
     rng = random.Random(0xC0FFEE)
     docs = [(f"cap/{i}", synthetic_note(rng, i)) for i in range(CAPACITY_NOTES)]
@@ -535,11 +649,15 @@ def suite_capacity_model():
         "bytes": sizes,
         "latency_p95_ms": latencies,
         "verify_violations": violations,
+        # The single 10k-note pass this database was built by. Kept for
+        # transparency; it is one sample, and `write_cost` is what D8 quotes.
+        "bulk_pass_notes_per_s_one_sample": round(counts["notes"] / elapsed, 1),
+        "write_cost": write_cost,
     }
     if problems:
         report["reason"] = "; ".join(problems)
     else:
-        report["write_throughput_notes_per_s"] = round(counts["notes"] / elapsed, 1)
+        report["write_throughput_notes_per_s"] = write_cost["notes_per_s_median"]
         report["bytes_per_block_all_in"] = round(total_bytes / blocks, 1)
         report["extrapolation_100k_notes_10m_blocks"] = {
             "assumption": "linear in blocks; revision-load behavior modeled only until Phase 3 measures it",
