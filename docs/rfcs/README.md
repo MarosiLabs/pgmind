@@ -7,7 +7,7 @@ Canonical index — mirrors [handbook §12](../../PGMIND.md) and the [product pl
 | [000](RFC-000-vision-and-scope.md) | Vision & Scope | 0 | **Frozen 2026-08-05** (Phase 0 exited) |
 | [001](RFC-001-implementation-platform.md) | Implementation Platform | 0 | **Frozen 2026-08-05** (Phase 0 exited) |
 | [002](RFC-002-markdown-type-ast-vault-syntax.md) | Markdown Type, AST & Vault Syntax | 1 | **Frozen 2026-08-05** (Phase 1 exited) |
-| [003](RFC-003-vault-and-block-storage-layout.md) | Vault & Block Storage Layout | 2 | **Accepted 2026-08-05** (living; Phase 2 active) |
+| [003](RFC-003-vault-and-block-storage-layout.md) | Vault & Block Storage Layout | 2 | **Frozen 2026-08-05** (Phase 2 exited) |
 | [004](RFC-004-block-identity-and-rebinding.md) | Block Identity & Rebinding Semantics | 2-3 | **Part A accepted 2026-08-05, post-review amendments accepted the same day** (living); Part B draft until Phase 3 |
 | 005 | Version Engine, Concurrency Semantics & Excision | 3 | not started |
 | 006 | Sync Bridge & Import/Export | 4 | not started |

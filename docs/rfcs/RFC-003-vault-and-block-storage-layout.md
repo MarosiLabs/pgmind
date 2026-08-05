@@ -1,9 +1,9 @@
 # RFC-003: Vault & Block Storage Layout — Law 8 deferred in Phase 2 (current-state storage until RFC-005)
 
-- **Status:** Living (accepted 2026-08-05; Phase 2 active — amendments during phase land in place per §12 lifecycle; amended same day after adversarial review: dump/restore contract, RLS trust model, FK topology, splice semantics, resolution repair; amended again after Phase-2 code review: GUC parse agreement + shipped RLS helper (D1), normalization symmetry (D5), seam-scoped separator synthesis + PM008 with no outside set (D6), published capacity path (D8))
+- **Status:** **Frozen 2026-08-05** — Phase 2 exited with all six §5 gates green in CI (results: [`eval/published/phase-2-gates.json`](../../eval/published/phase-2-gates.json)); changes now require a new RFC. Amendments that landed in place during the phase, per §12 lifecycle: after the adversarial RFC review — dump/restore contract, RLS trust model, FK topology, splice semantics, resolution repair; after the Phase-2 code review — GUC parse agreement + shipped RLS helper (D1), normalization symmetry (D5), seam-scoped separator synthesis + PM008 with no outside set (D6), published capacity path (D8); after the batching review — final-tile trivia binds the fragment-taking ops and batching may not narrow the accepted document size (D6), corpus shape and a write-cost measurement the harness can regenerate (D8).
 - **Phase:** 2
 - **Owner:** project author
-- **Created:** 2026-08-05 · **Accepted:** 2026-08-05 · **Frozen:** —
+- **Created:** 2026-08-05 · **Accepted:** 2026-08-05 · **Frozen:** 2026-08-05
 
 ## 1. Context
 

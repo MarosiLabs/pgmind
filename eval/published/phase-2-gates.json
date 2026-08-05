@@ -1,0 +1,77 @@
+{
+  "generated_at": "2026-08-05T11:08:50Z",
+  "suites": {
+    "identity-semantics": {
+      "status": "ok",
+      "total": 26,
+      "passed": 26,
+      "missing": [],
+      "failed": [],
+      "pgrx_test_exit_ok": true
+    },
+    "extraction-correctness": {
+      "status": "ok",
+      "total": 11,
+      "passed": 11,
+      "missing": [],
+      "failed": [],
+      "pgrx_test_exit_ok": true
+    },
+    "storage-round-trip": {
+      "status": "ok",
+      "documents": 9939,
+      "read_mismatches": 0,
+      "verify_violations": 0
+    },
+    "tenant-isolation": {
+      "status": "ok",
+      "total": 2,
+      "passed": 2,
+      "missing": [],
+      "failed": [],
+      "pgrx_test_exit_ok": true
+    },
+    "capacity-model": {
+      "status": "ok",
+      "deliverable": "eval/published/capacity-model-v1.json",
+      "scale": {
+        "notes": 10000,
+        "blocks": 230000,
+        "edges": 40000,
+        "tags": 40000
+      },
+      "write_throughput_notes_per_s": 256.3,
+      "write_throughput_measured_at_vault_size": 0,
+      "bulk_pass_notes_per_s_one_sample": 200.2,
+      "design_target_notes_per_s": 2000,
+      "bytes_per_block_all_in": 657.9,
+      "latency_p95_ms": {
+        "backlinks": 2.2693999999999996,
+        "read": 0.4536499999999999,
+        "tagged": 3.9867
+      },
+      "verify_violations": 0
+    },
+    "dump-restore": {
+      "status": "ok",
+      "counts_before": {
+        "note": 13,
+        "revision": 13,
+        "tile": 788,
+        "block": 1416,
+        "edge": 38,
+        "tag": 0
+      },
+      "counts_after": {
+        "note": 13,
+        "revision": 13,
+        "tile": 788,
+        "block": 1416,
+        "edge": 38,
+        "tag": 0
+      },
+      "verify_violations": 0,
+      "post_restore_write": true
+    }
+  }
+}
