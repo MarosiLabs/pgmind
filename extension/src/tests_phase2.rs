@@ -1,0 +1,625 @@
+//! Phase 2 gate tests: identity-semantics (RFC-004 §5), extraction lifecycle
+//! (RFC-003 §5 suite 2), storage round-trip, and op error contracts. These run
+//! inside a real Postgres via `cargo pgrx test` and are executed by the eval
+//! harness as the `identity-semantics` / `extraction-correctness` suites.
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod tests {
+    use pgrx::prelude::*;
+    use pgrx::Uuid;
+
+    fn write(path: &str, md: &str) -> Uuid {
+        Spi::get_one_with_args(
+            "SELECT knowledge.write($1, $2::markdown)",
+            &[path.into(), md.into()],
+        )
+        .expect("write failed")
+        .expect("write returned NULL")
+    }
+
+    fn read(path: &str) -> String {
+        Spi::get_one_with_args("SELECT knowledge.read($1)::text", &[path.into()])
+            .expect("read failed")
+            .expect("read returned NULL")
+    }
+
+    fn block_ids(path: &str) -> Vec<(String, Uuid)> {
+        Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT content, block_id FROM knowledge.blocks($1) ORDER BY ord",
+                    None,
+                    &[path.into()],
+                )
+                .expect("blocks failed")
+                .map(|row| {
+                    (
+                        row.get::<String>(1).unwrap().unwrap(),
+                        row.get::<Uuid>(2).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        })
+    }
+
+    fn verify_clean(path: &str) {
+        let violations: Option<i64> = Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.verify_note(
+               (SELECT id FROM pgmind.note WHERE path = $1 AND tombstoned_at IS NULL))",
+            &[path.into()],
+        )
+        .expect("verify failed");
+        assert_eq!(
+            violations,
+            Some(0),
+            "verify_note found violations for {path}"
+        );
+    }
+
+    /// Run SQL, returning the SQLSTATE it fails with ('00000' if it succeeds).
+    fn sqlstate_of(sql: &str) -> String {
+        Spi::run(
+            "CREATE OR REPLACE FUNCTION pg_temp.pgmind_catch(sql text) RETURNS text
+             LANGUAGE plpgsql AS $f$
+             DECLARE state text := '00000';
+             BEGIN
+               BEGIN
+                 EXECUTE sql;
+               EXCEPTION WHEN OTHERS THEN
+                 GET STACKED DIAGNOSTICS state = RETURNED_SQLSTATE;
+               END;
+               RETURN state;
+             END $f$;",
+        )
+        .expect("helper failed");
+        Spi::get_one_with_args("SELECT pg_temp.pgmind_catch($1)", &[sql.into()])
+            .expect("catch failed")
+            .expect("catch NULL")
+    }
+
+    // ---------- storage round-trip & idempotence ----------
+
+    #[pg_test]
+    fn write_read_byte_faithful() {
+        let md = "---\ntitle: X\n---\n\n# A\n\npara with [[link]] and #tag\n\n- item one\n- item two ^anchor\n\n> quoted\n";
+        write("notes/roundtrip", md);
+        assert_eq!(read("notes/roundtrip"), md);
+        verify_clean("notes/roundtrip");
+    }
+
+    #[pg_test]
+    fn idempotent_write_returns_head_no_new_revision() {
+        let r1 = write("idem", "# T\n\nbody\n");
+        let revs_before: i64 = Spi::get_one("SELECT count(*) FROM pgmind.revision")
+            .unwrap()
+            .unwrap();
+        let r2 = write("idem", "# T\n\nbody\n");
+        let revs_after: i64 = Spi::get_one("SELECT count(*) FROM pgmind.revision")
+            .unwrap()
+            .unwrap();
+        assert_eq!(r1, r2, "idempotent write must return the same head");
+        assert_eq!(revs_before, revs_after, "no new revision row");
+        let ids1 = block_ids("idem");
+        write("idem", "# T\n\nbody\n");
+        assert_eq!(ids1, block_ids("idem"), "IDs stable across no-op writes");
+    }
+
+    // ---------- A3 carry ----------
+
+    #[pg_test]
+    fn edited_paragraph_mints_untouched_carry() {
+        write("carry", "# H\n\nalpha\n\nbeta\n");
+        let before = block_ids("carry");
+        write("carry", "# H\n\nalpha CHANGED\n\nbeta\n");
+        let after = block_ids("carry");
+        // heading + beta carried, alpha minted
+        assert_eq!(before[0].1, after[0].1, "heading carried");
+        assert_eq!(before[2].1, after[2].1, "beta carried");
+        assert_ne!(
+            before[1].1, after[1].1,
+            "edited paragraph mints (Phase 2 pinned behavior)"
+        );
+        verify_clean("carry");
+    }
+
+    #[pg_test]
+    fn pure_reorder_carries_all() {
+        write("reorder", "alpha\n\nbeta\n\ngamma\n");
+        let before = block_ids("reorder");
+        write("reorder", "gamma\n\nalpha\n\nbeta\n");
+        let after = block_ids("reorder");
+        for (content, id) in &before {
+            let found = after.iter().find(|(c, _)| c == content).unwrap();
+            assert_eq!(*id, found.1, "reordered block {content} keeps its ID");
+        }
+        verify_clean("reorder");
+    }
+
+    #[pg_test]
+    fn duplicate_content_pairs_kth_to_kth() {
+        write("dups", "same\n\nsame\n\nother\n");
+        let before = block_ids("dups");
+        assert_eq!(before[0].0, before[1].0);
+        assert_ne!(
+            before[0].1, before[1].1,
+            "copies get distinct IDs, one hash"
+        );
+        // rewrite with one duplicate removed: first occurrence pairs first
+        write("dups", "same\n\nother\n");
+        let after = block_ids("dups");
+        assert_eq!(
+            before[0].1, after[0].1,
+            "k-th ↔ k-th pairing keeps the first"
+        );
+        verify_clean("dups");
+    }
+
+    #[pg_test]
+    fn ref_claim_beats_hash_and_collisions_resolve() {
+        write("claims", "one ^a\n\ntwo\n");
+        let before = block_ids("claims");
+        // Move the ^a marker onto different content: the claim carries the ID
+        // even though the hash changed.
+        write("claims", "totally new ^a\n\ntwo\n");
+        let after = block_ids("claims");
+        assert_eq!(
+            before[0].1, after[0].1,
+            "^id claim carries across content change"
+        );
+        assert_eq!(before[1].1, after[1].1, "hash carries the rest");
+        verify_clean("claims");
+    }
+
+    #[pg_test]
+    fn kind_change_via_claim() {
+        write("kindclaim", "plain para ^k\n");
+        let before = block_ids("kindclaim");
+        write("kindclaim", "# now a heading ^k\n");
+        let after = block_ids("kindclaim");
+        assert_eq!(before[0].1, after[0].1, "claim carries across kind change");
+        verify_clean("kindclaim");
+    }
+
+    // ---------- extraction & resolution lifecycle ----------
+
+    #[pg_test]
+    fn resolution_lifecycle_missing_then_resolved() {
+        write("src/a", "see [[target-note]]\n");
+        let reason: Option<String> = Spi::get_one_with_args(
+            "SELECT dangling_reason FROM knowledge.links($1)",
+            &["src/a".into()],
+        )
+        .unwrap();
+        assert_eq!(reason.as_deref(), Some("missing"));
+        write("dir/target-note", "content\n");
+        let resolved: Option<String> = Spi::get_one_with_args(
+            "SELECT resolved_path FROM knowledge.links($1)",
+            &["src/a".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.as_deref(),
+            Some("dir/target-note"),
+            "basename resolution"
+        );
+        // A second note with the same basename demotes to ambiguous.
+        write("other/target-note", "x\n");
+        let reason: Option<String> = Spi::get_one_with_args(
+            "SELECT dangling_reason FROM knowledge.links($1)",
+            &["src/a".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            reason.as_deref(),
+            Some("ambiguous"),
+            "demotion on collision"
+        );
+        // An exact-path note wins over both (promotion, frozen D8).
+        write("target-note", "root\n");
+        let resolved: Option<String> = Spi::get_one_with_args(
+            "SELECT resolved_path FROM knowledge.links($1)",
+            &["src/a".into()],
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.as_deref(),
+            Some("target-note"),
+            "exact beats basename"
+        );
+        verify_clean("src/a");
+    }
+
+    #[pg_test]
+    fn backlinks_tags_orphans() {
+        write("hub", "# Hub\n\ncontent #core\n");
+        write("spoke", "see [[hub]] #core ok\n");
+        let bl: Option<String> = Spi::get_one_with_args(
+            "SELECT src_path FROM knowledge.backlinks($1)",
+            &["hub".into()],
+        )
+        .unwrap();
+        assert_eq!(bl.as_deref(), Some("spoke"));
+        let tagged: Option<i64> =
+            Spi::get_one("SELECT count(*) FROM knowledge.tagged('CORE')").unwrap();
+        assert_eq!(tagged, Some(2), "case-insensitive tag match");
+        let orphans: Vec<String> = Spi::connect(|client| {
+            client
+                .select("SELECT path FROM knowledge.orphans()", None, &[])
+                .unwrap()
+                .map(|r| r.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert!(
+            orphans.contains(&"spoke".to_string()),
+            "spoke has no incoming links"
+        );
+        assert!(!orphans.contains(&"hub".to_string()), "hub is linked");
+    }
+
+    #[pg_test]
+    fn churn_discipline_one_paragraph_edit() {
+        write("churn", "# H\n\nalpha\n\nbeta\n\ngamma\n");
+        let xmins_before: Vec<(i32, String)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT b.ord, b.ctid::text FROM pgmind.block b
+                     JOIN pgmind.note n ON n.id = b.note_id
+                     WHERE n.path = 'churn' ORDER BY b.ord",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| (r.get(1).unwrap().unwrap(), r.get(2).unwrap().unwrap()))
+                .collect()
+        });
+        write("churn", "# H\n\nalpha\n\nbeta EDITED\n\ngamma\n");
+        let xmins_after: Vec<(i32, String)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT b.ord, b.ctid::text FROM pgmind.block b
+                     JOIN pgmind.note n ON n.id = b.note_id
+                     WHERE n.path = 'churn' ORDER BY b.ord",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| (r.get(1).unwrap().unwrap(), r.get(2).unwrap().unwrap()))
+                .collect()
+        });
+        // ords 0 (heading), 1 (alpha), 3 (gamma) untouched; ord 2 replaced
+        for ord in [0usize, 1, 3] {
+            assert_eq!(
+                xmins_before[ord].1, xmins_after[ord].1,
+                "row at ord {ord} must be physically untouched (ctid stable)"
+            );
+        }
+        assert_ne!(xmins_before[2].1, xmins_after[2].1);
+    }
+
+    // ---------- read_section ----------
+
+    #[pg_test]
+    fn read_section_first_match() {
+        write(
+            "sections",
+            "# Top\n\nintro\n\n## Sub\n\nsub content\n\n## Sub2\n\nother\n",
+        );
+        let sec: String = Spi::get_one_with_args(
+            "SELECT knowledge.read_section($1, ARRAY['Top','Sub'])::text",
+            &["sections".into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(sec, "## Sub\n\nsub content\n\n");
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read_section('sections', ARRAY['Nope'])"),
+            "PM007"
+        );
+    }
+
+    // ---------- block ops ----------
+
+    #[pg_test]
+    fn update_block_keeps_id_changes_hash() {
+        write("ops/upd", "alpha\n\nbeta\n");
+        let before = block_ids("ops/upd");
+        let target = before[0].1;
+        let (rev, ids): (Option<Uuid>, Option<Vec<Uuid>>) = Spi::get_two_with_args(
+            "SELECT (r).revision, (r).block_ids
+             FROM (SELECT knowledge.update_block($1, 'alpha NEW'::markdown) AS r) s",
+            &[target.into()],
+        )
+        .unwrap();
+        assert!(rev.is_some());
+        assert_eq!(ids.unwrap(), vec![target], "op returns the targeted block");
+        let after = block_ids("ops/upd");
+        assert_eq!(after[0].1, target, "ID kept");
+        assert_eq!(after[0].0, "alpha NEW");
+        assert_eq!(after[1].1, before[1].1, "sibling untouched");
+        assert_eq!(read("ops/upd"), "alpha NEW\n\nbeta\n");
+        verify_clean("ops/upd");
+    }
+
+    #[pg_test]
+    fn update_item_checkbox_toggle() {
+        write("ops/task", "- [ ] todo one\n- [ ] todo two\n");
+        let before = block_ids("ops/task");
+        // items are blocks 0 and 2 (each item has an inner paragraph)
+        let item = before[0].1;
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, '- [x] todo one'::markdown)",
+            &[item.into()],
+        )
+        .unwrap();
+        assert_eq!(read("ops/task"), "- [x] todo one\n- [ ] todo two\n");
+        let after = block_ids("ops/task");
+        assert_eq!(after[0].1, item, "item ID kept across checkbox toggle");
+        verify_clean("ops/task");
+    }
+
+    #[pg_test]
+    fn update_inner_paragraph_directly() {
+        write("ops/inner", "- hello world\n");
+        let before = block_ids("ops/inner");
+        let (item_id, para_id) = (before[0].1, before[1].1);
+        let item_hash_before: Vec<u8> = Spi::get_one_with_args(
+            "SELECT content_hash FROM knowledge.blocks($1) WHERE ord = 0",
+            &["ops/inner".into()],
+        )
+        .unwrap()
+        .unwrap();
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, 'goodbye world'::markdown)",
+            &[para_id.into()],
+        )
+        .unwrap();
+        let after = block_ids("ops/inner");
+        assert_eq!(after[0].1, item_id, "enclosing item ID kept");
+        assert_eq!(after[1].1, para_id, "paragraph ID kept");
+        let item_hash_after: Vec<u8> = Spi::get_one_with_args(
+            "SELECT content_hash FROM knowledge.blocks($1) WHERE ord = 0",
+            &["ops/inner".into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_ne!(item_hash_before, item_hash_after, "item hash recomputed");
+        assert_eq!(read("ops/inner"), "- goodbye world\n");
+        verify_clean("ops/inner");
+    }
+
+    #[pg_test]
+    fn move_block_separator_synthesis() {
+        write("ops/move", "alpha\n\nbeta\n\ngamma\n");
+        let before = block_ids("ops/move");
+        let gamma = before[2].1;
+        let alpha = before[0].1;
+        Spi::run_with_args(
+            "SELECT knowledge.move_block($1, before => $2)",
+            &[gamma.into(), alpha.into()],
+        )
+        .unwrap();
+        assert_eq!(
+            read("ops/move"),
+            "gamma\n\nalpha\n\nbeta\n",
+            "no paragraph merging"
+        );
+        let after = block_ids("ops/move");
+        assert_eq!(after[0].1, gamma);
+        assert_eq!(after[1].1, alpha);
+        verify_clean("ops/move");
+    }
+
+    #[pg_test]
+    fn move_last_block_earlier_and_back() {
+        write("ops/move2", "alpha\n\nbeta\n");
+        let before = block_ids("ops/move2");
+        let beta = before[1].1;
+        Spi::run_with_args(
+            "SELECT knowledge.move_block($1, after => $2)",
+            &[before[0].1.into(), beta.into()],
+        )
+        .unwrap();
+        assert_eq!(read("ops/move2"), "beta\n\nalpha\n");
+        verify_clean("ops/move2");
+    }
+
+    #[pg_test]
+    fn insert_blocks_at_end_and_anchored() {
+        write("ops/ins", "alpha\n");
+        let rev_ids: Option<Vec<Uuid>> = Spi::get_one_with_args(
+            "SELECT (knowledge.insert_blocks($1, 'beta\n\ngamma'::markdown)).block_ids",
+            &["ops/ins".into()],
+        )
+        .unwrap();
+        assert_eq!(rev_ids.map(|v| v.len()), Some(2), "two blocks minted");
+        assert_eq!(read("ops/ins"), "alpha\n\nbeta\n\ngamma\n");
+        let ids = block_ids("ops/ins");
+        Spi::run_with_args(
+            "SELECT knowledge.insert_blocks($1, 'zeta'::markdown, before => $2)",
+            &["ops/ins".into(), ids[0].1.into()],
+        )
+        .unwrap();
+        assert_eq!(read("ops/ins"), "zeta\n\nalpha\n\nbeta\n\ngamma\n");
+        verify_clean("ops/ins");
+    }
+
+    #[pg_test]
+    fn split_first_keeps_id() {
+        write("ops/split", "one two\n\ntail\n");
+        let before = block_ids("ops/split");
+        let target = before[0].1;
+        let ids: Option<Vec<Uuid>> = Spi::get_one_with_args(
+            "SELECT (knowledge.split_block($1, 'one\n\ntwo'::markdown)).block_ids",
+            &[target.into()],
+        )
+        .unwrap();
+        let ids = ids.unwrap();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids[0], target, "first fragment keeps the ID");
+        assert_ne!(ids[1], target);
+        assert_eq!(read("ops/split"), "one\n\ntwo\n\ntail\n");
+        let after = block_ids("ops/split");
+        assert_eq!(after[2].1, before[1].1, "tail carried");
+        verify_clean("ops/split");
+    }
+
+    #[pg_test]
+    fn merge_keeps_chosen_id() {
+        write("ops/merge", "one\n\ntwo\n\ntail\n");
+        let before = block_ids("ops/merge");
+        let (a, b) = (before[0].1, before[1].1);
+        let ids: Option<Vec<Uuid>> = Spi::get_one_with_args(
+            "SELECT (knowledge.merge_blocks(ARRAY[$1, $2], 'one two'::markdown, keep => $2)).block_ids",
+            &[a.into(), b.into()],
+        )
+        .unwrap();
+        assert_eq!(ids.unwrap(), vec![b], "keep survives");
+        assert_eq!(read("ops/merge"), "one two\n\ntail\n");
+        let after = block_ids("ops/merge");
+        assert_eq!(after[0].1, b);
+        assert!(!after.iter().any(|(_, id)| *id == a), "retiree removed");
+        verify_clean("ops/merge");
+    }
+
+    #[pg_test]
+    fn child_carried_while_parent_removed() {
+        write("ops/delist", "- hello\n");
+        let before = block_ids("ops/delist");
+        let para = before[1].1;
+        write("ops/delist", "hello\n");
+        let after = block_ids("ops/delist");
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].1, para, "paragraph carried by hash, item removed");
+        verify_clean("ops/delist");
+    }
+
+    // ---------- tenant isolation (RFC-003 D1 / §5 gate 4) ----------
+
+    #[pg_test]
+    fn tenant_scoping_and_grant_boundary() {
+        let vault_b = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        write("public-note", "default vault\n");
+        Spi::run(&format!("SET pgmind.vault_id = '{vault_b}'")).unwrap();
+        write("secret/tenant-b", "tenant b secret\n");
+        Spi::run("RESET pgmind.vault_id").unwrap();
+
+        // Scoping: functions see only the current vault.
+        let n: i64 = Spi::get_one("SELECT count(*) FROM knowledge.notes()")
+            .unwrap()
+            .unwrap();
+        assert_eq!(n, 1, "default vault sees only its note");
+
+        // RLS pattern (D1) + a non-superuser role.
+        for t in ["note", "revision", "tile", "block", "edge", "tag"] {
+            Spi::run(&format!("ALTER TABLE pgmind.{t} ENABLE ROW LEVEL SECURITY")).unwrap();
+            Spi::run(&format!(
+                "CREATE POLICY vault_isolation ON pgmind.{t}
+                 USING (vault_id = current_setting('pgmind.vault_id')::uuid)"
+            ))
+            .unwrap();
+        }
+        Spi::run("CREATE ROLE pgmind_tenant_test").unwrap();
+        Spi::run("GRANT USAGE ON SCHEMA pgmind, knowledge TO pgmind_tenant_test").unwrap();
+        Spi::run("GRANT SELECT ON ALL TABLES IN SCHEMA pgmind TO pgmind_tenant_test").unwrap();
+        Spi::run("SET ROLE pgmind_tenant_test").unwrap();
+
+        let visible: i64 = Spi::get_one("SELECT count(*) FROM pgmind.note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(visible, 1, "RLS: direct reads scoped to current vault");
+        // The GUC pattern is scoping, not a boundary: hostile SET switches vaults.
+        Spi::run(&format!("SET pgmind.vault_id = '{vault_b}'")).unwrap();
+        let hostile: i64 = Spi::get_one("SELECT count(*) FROM pgmind.note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            hostile, 1,
+            "GUC pattern alone: SET reaches the other vault (documented)"
+        );
+        Spi::run("RESET pgmind.vault_id").unwrap();
+        Spi::run("RESET ROLE").unwrap();
+
+        // Grant-anchored boundary variant (D1): the grant bounds the GUC.
+        Spi::run(
+            "CREATE SCHEMA IF NOT EXISTS pgmind_app;
+             CREATE TABLE pgmind_app.vault_grant (
+               grantee name NOT NULL, vault_id uuid NOT NULL,
+               PRIMARY KEY (grantee, vault_id));
+             GRANT USAGE ON SCHEMA pgmind_app TO pgmind_tenant_test;
+             GRANT SELECT ON pgmind_app.vault_grant TO pgmind_tenant_test;
+             INSERT INTO pgmind_app.vault_grant
+               VALUES ('pgmind_tenant_test', '00000000-0000-0000-0000-000000000000');",
+        )
+        .unwrap();
+        for t in ["note", "revision", "tile", "block", "edge", "tag"] {
+            Spi::run(&format!("DROP POLICY vault_isolation ON pgmind.{t}")).unwrap();
+            Spi::run(&format!(
+                "CREATE POLICY vault_isolation ON pgmind.{t}
+                 USING (vault_id = current_setting('pgmind.vault_id')::uuid
+                        AND vault_id IN (SELECT vault_id FROM pgmind_app.vault_grant
+                                         WHERE grantee = current_user))"
+            ))
+            .unwrap();
+        }
+        Spi::run("SET ROLE pgmind_tenant_test").unwrap();
+        let granted: i64 = Spi::get_one("SELECT count(*) FROM pgmind.note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(granted, 1, "granted vault visible");
+        Spi::run(&format!("SET pgmind.vault_id = '{vault_b}'")).unwrap();
+        let blocked: i64 = Spi::get_one("SELECT count(*) FROM pgmind.note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(blocked, 0, "hostile SET blocked by the grant boundary");
+        Spi::run("RESET pgmind.vault_id").unwrap();
+        Spi::run("RESET ROLE").unwrap();
+    }
+
+    // ---------- typed errors ----------
+
+    #[pg_test]
+    fn typed_error_sqlstates() {
+        write("errs", "alpha\n\n- a\n- b\n");
+        let ids = block_ids("errs");
+        let (alpha, item_a) = (ids[0].1, ids[1].1);
+        assert_eq!(sqlstate_of("SELECT knowledge.read('errs/nope')"), "PM002");
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.write('bad//path', 'x'::markdown)"),
+            "PM001"
+        );
+        assert_eq!(
+            sqlstate_of(
+                "SELECT knowledge.update_block('00000000-0000-0000-0000-000000000001'::uuid, 'x'::markdown)"
+            ),
+            "PM003"
+        );
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.update_block('{alpha}'::uuid, 'one\n\ntwo'::markdown)"
+            )),
+            "PM004"
+        );
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.split_block('{alpha}'::uuid, 'only-one'::markdown)"
+            )),
+            "PM004"
+        );
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.move_block('{alpha}'::uuid, before => '{item_a}'::uuid)"
+            )),
+            "PM006",
+            "cross-container move"
+        );
+        // Unclosed fence swallows the rest of the note → PM008.
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.update_block('{alpha}'::uuid, e'```\nnope'::markdown)"
+            )),
+            "PM008",
+            "unclosed fence must be rejected"
+        );
+    }
+}

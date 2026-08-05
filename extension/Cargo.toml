@@ -20,6 +20,7 @@ pg_test = []
 pgrx = "=0.19.2"
 pgmind-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 [dev-dependencies.pgrx-tests]

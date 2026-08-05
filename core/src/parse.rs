@@ -58,6 +58,23 @@ pub struct Block {
     /// Opt-in `^id` marker (D3), stripped from content.
     pub block_ref_id: Option<String>,
     pub attrs: Value,
+    /// Canonical decoration for a NEW first line at this block's container
+    /// nesting (for list items: excluding the item's own marker strip).
+    /// Splice aid for RFC-003 D6 — not part of the serialized output contract.
+    #[serde(skip)]
+    pub line_prefix: String,
+    /// Canonical decoration for continuation lines of this block (full
+    /// container stack: quote prefixes + item continuation indents).
+    #[serde(skip)]
+    pub cont_prefix: String,
+    /// Bytes of decoration on the block's first source line, including the
+    /// block's own item marker when it has one. Splice aid (RFC-003 D6).
+    #[serde(skip)]
+    pub first_line_strip_full: usize,
+    /// Same, but excluding the block's own item strip (for list items: the
+    /// outer quote/item decoration only, marker not counted).
+    #[serde(skip)]
+    pub first_line_strip_outer: usize,
 }
 
 fn hex_hash<S: serde::Serializer>(h: &[u8; 32], s: S) -> Result<S::Ok, S::Error> {
@@ -157,6 +174,8 @@ struct Ctx<'a> {
     own_lines: Vec<Vec<(usize, usize)>>,
     /// Per block: container stripping stack (outermost first).
     strips: Vec<Vec<Strip>>,
+    /// Per block: first source line (md coords, 1-based) — splice-aid input.
+    first_lines: Vec<usize>,
     heading_stack: Vec<(u8, String)>,
     /// Attrs of enclosing List containers (ordered/start/tight) for items.
     list_stack: Vec<Value>,
@@ -193,6 +212,7 @@ pub fn parse(source: &str) -> Document {
         text_ranges: vec![],
         own_lines: vec![],
         strips: vec![],
+        first_lines: vec![],
         heading_stack: vec![],
         list_stack: vec![],
         links: vec![],
@@ -340,6 +360,23 @@ pub fn parse(source: &str) -> Document {
         );
         ctx.blocks[i].content_hash = crate::content_hash(ctx.blocks[i].kind, &normalized);
         ctx.blocks[i].normalized_content = normalized;
+
+        // Splice aids (RFC-003 D6): decoration byte widths on the first line.
+        let fl = ctx.first_lines[i];
+        let lsp = ctx.lo.line_span(fl, fl);
+        if lsp.start < ctx.md().len() {
+            let raw = &ctx.md()[lsp.start..lsp.end.min(ctx.md().len())];
+            let line = raw.trim_end_matches(['\n', '\r']);
+            let full_rem = crate::content::strip_containers(line, fl, &ctx.strips[i]);
+            let outer_strips: &[Strip] = if ctx.blocks[i].kind == BlockKind::ListItem {
+                &ctx.strips[i][..ctx.strips[i].len().saturating_sub(1)]
+            } else {
+                &ctx.strips[i]
+            };
+            let outer_rem = crate::content::strip_containers(line, fl, outer_strips);
+            ctx.blocks[i].first_line_strip_full = line.len() - full_rem.len();
+            ctx.blocks[i].first_line_strip_outer = line.len() - outer_rem.len();
+        }
     }
 
     let mut tags = ctx.tags;
@@ -458,6 +495,11 @@ fn walk_block<'a>(
             ctx.own_lines[ord as usize] = vec![(sp.start.line, sp.end.line)];
             collect_text_ranges(node, ctx, ord);
             let text = heading_text(node, ctx);
+            // The heading's own text (D2's single definition) rides in attrs so
+            // consumers (read_section, Phase 5 append_to_section) never re-derive it.
+            if let Value::Object(map) = &mut ctx.blocks[ord as usize].attrs {
+                map.insert("text".into(), Value::String(text.clone()));
+            }
             ctx.heading_stack.push((level, text));
         }
         Disc::Paragraph => {
@@ -629,6 +671,20 @@ fn push_block(
 ) -> u32 {
     let ord = ctx.blocks.len() as u32;
     let span = ctx.to_original(ctx.lo.line_span(sp.start.line, sp.end.line));
+    let render = |ss: &[Strip]| -> String {
+        ss.iter()
+            .map(|s| match s {
+                Strip::Quote => "> ".to_string(),
+                Strip::Item { cont_width, .. } => " ".repeat(*cont_width),
+            })
+            .collect()
+    };
+    let cont_prefix = render(strips);
+    let line_prefix = if kind == BlockKind::ListItem {
+        render(&strips[..strips.len().saturating_sub(1)])
+    } else {
+        cont_prefix.clone()
+    };
     ctx.blocks.push(Block {
         ord,
         kind,
@@ -639,10 +695,15 @@ fn push_block(
         normalized_content: String::new(),
         block_ref_id: None,
         attrs,
+        line_prefix,
+        cont_prefix,
+        first_line_strip_full: 0,
+        first_line_strip_outer: 0,
     });
     ctx.text_ranges.push(vec![]);
     ctx.own_lines.push(vec![]);
     ctx.strips.push(strips.to_vec());
+    ctx.first_lines.push(sp.start.line);
     ord
 }
 

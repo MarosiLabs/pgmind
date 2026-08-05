@@ -6,6 +6,7 @@
 mod content;
 mod frontmatter;
 mod parse;
+pub mod path;
 mod span;
 mod vault;
 

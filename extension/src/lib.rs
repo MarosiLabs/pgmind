@@ -3,16 +3,32 @@
 //! pure `pgmind-core` crate (Laws 1-4).
 
 use core::ffi::CStr;
+use std::ffi::CString;
 
 use pgrx::guc::{GucContext, GucFlags, GucRegistry, GucSetting};
 use pgrx::prelude::*;
 use pgrx::{InOutFuncs, StringInfo};
 use serde::{Deserialize, Serialize};
 
+pub mod errors;
+pub mod ids;
+pub mod ops;
+pub mod read;
+pub mod schema;
+pub mod store;
+mod tests_phase2;
+pub mod verify;
+pub mod write;
+
 ::pgrx::pg_module_magic!(name, version);
 
 /// RFC-002 D9: default 8 MiB per document.
 static MAX_DOCUMENT_BYTES: GucSetting<i32> = GucSetting::<i32>::new(8 * 1024 * 1024);
+
+/// RFC-003 D1: the current vault. Userset by design — vault *scoping*; the
+/// tenant *boundary* story is the documented RLS patterns, not this GUC.
+pub static VAULT_ID_GUC: GucSetting<Option<CString>> =
+    GucSetting::<Option<CString>>::new(Some(c"00000000-0000-0000-0000-000000000000"));
 
 #[pg_guard]
 pub extern "C-unwind" fn _PG_init() {
@@ -23,6 +39,14 @@ pub extern "C-unwind" fn _PG_init() {
         &MAX_DOCUMENT_BYTES,
         1024,
         i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_string_guc(
+        c"pgmind.vault_id",
+        c"The current vault (RFC-003 D1).",
+        c"UUID of the vault all knowledge.* functions operate in. Default: the default vault.",
+        &VAULT_ID_GUC,
         GucContext::Userset,
         GucFlags::default(),
     );
