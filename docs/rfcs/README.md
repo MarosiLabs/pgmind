@@ -9,7 +9,7 @@ Canonical index — mirrors [handbook §12](../../PGMIND.md) and the [product pl
 | [002](RFC-002-markdown-type-ast-vault-syntax.md) | Markdown Type, AST & Vault Syntax | 1 | **Frozen 2026-08-05** (Phase 1 exited) |
 | [003](RFC-003-vault-and-block-storage-layout.md) | Vault & Block Storage Layout | 2 | **Frozen 2026-08-05** (Phase 2 exited) |
 | [004](RFC-004-block-identity-and-rebinding.md) | Block Identity & Rebinding Semantics | 2-3 | **Part A accepted 2026-08-05, post-review amendments accepted the same day** (living); Part B draft until Phase 3 |
-| [005](RFC-005-version-engine-concurrency-and-excision.md) | Version Engine, Concurrency Semantics & Excision | 3 | **Draft** — proposed for acceptance |
+| [005](RFC-005-version-engine-concurrency-and-excision.md) | Version Engine, Concurrency Semantics & Excision | 3 | **Accepted 2026-08-06** (living; Phase 3 active) |
 | 006 | Sync Bridge & Import/Export | 4 | not started |
 | 007 | Query API & MCP Surface | 5 | not started |
 | 008 | Deterministic Context Assembly & Token Budgeting | 5, matured 7 | not started |
