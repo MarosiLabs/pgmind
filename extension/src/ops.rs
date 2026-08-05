@@ -533,7 +533,18 @@ fn commit_op(
             }
         }
     }
-    let revision = write::new_revision(ctx.vault, ctx.note_id, Some(ctx.head), "api", &meta);
+    // RFC-005 D4: revision.verb makes history() readable without reconstructing
+    // anything. A4's provenance key stays short ("split"); the verb is the
+    // public operation name.
+    let verb = match op {
+        "insert" => "insert_blocks",
+        "update" => "update_block",
+        "move" => "move_block",
+        "split" => "split_block",
+        "merge" => "merge_blocks",
+        other => pgrx::error!("pgmind: unknown op {other}"),
+    };
+    let revision = write::new_revision(ctx.vault, ctx.note_id, Some(ctx.head), "api", verb, &meta);
     op_result(revision, block_ids)
 }
 

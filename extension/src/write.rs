@@ -286,18 +286,30 @@ pub fn write_meta(op: &str, c: &Carry) -> serde_json::Value {
     })
 }
 
+/// Next `seq` for a note (RFC-005 D3): per-note, dense, ascending. Callers
+/// hold the note's write lock, so the read-then-insert cannot interleave.
+pub fn next_seq(note: Uuid) -> i64 {
+    Spi::get_one_with_args(
+        "SELECT coalesce(max(seq) + 1, 0) FROM pgmind.revision WHERE note_id = $1",
+        &[arg(note)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure computing seq: {e}"))
+    .unwrap_or(0)
+}
+
 /// Insert the revision row and swap the note head. Returns the revision id.
 pub fn new_revision(
     vault: Uuid,
     note: Uuid,
     parent: Option<Uuid>,
     source: &str,
+    verb: &str,
     meta: &serde_json::Value,
 ) -> Uuid {
     let rev = ids::mint();
     Spi::run_with_args(
-        "INSERT INTO pgmind.revision (id, vault_id, note_id, parent, source, meta)
-         VALUES ($1, $2, $3, $4, $5, $6)",
+        "INSERT INTO pgmind.revision (id, vault_id, note_id, parent, source, verb, seq, meta)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         &[
             arg(rev),
             arg(vault),
@@ -306,6 +318,8 @@ pub fn new_revision(
                 .map(DatumWithOid::from)
                 .unwrap_or_else(DatumWithOid::null::<Uuid>),
             source.into(),
+            verb.into(),
+            next_seq(note).into(),
             JsonB(meta.clone()).into(),
         ],
     )
@@ -838,6 +852,7 @@ pub fn write_note(path_raw: &str, source: &str) -> Uuid {
                 note.id,
                 Some(note.head_revision),
                 "api",
+                "write",
                 &write_meta("write", &c),
             )
         }
@@ -860,8 +875,8 @@ pub fn write_note(path_raw: &str, source: &str) -> Uuid {
             let c = carry(&[], &parsed.doc.blocks);
             reconcile(vault, note_id, &parsed, &[], &[], &c);
             Spi::run_with_args(
-                "INSERT INTO pgmind.revision (id, vault_id, note_id, parent, source, meta)
-                 VALUES ($1, $2, $3, NULL, 'api', $4)",
+                "INSERT INTO pgmind.revision (id, vault_id, note_id, parent, source, verb, seq, meta)
+                 VALUES ($1, $2, $3, NULL, 'api', 'write', 0, $4)",
                 &[
                     arg(rev_id),
                     arg(vault),

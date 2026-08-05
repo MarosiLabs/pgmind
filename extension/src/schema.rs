@@ -59,7 +59,13 @@ CREATE TABLE pgmind.note (
   -- deliberately no FK on head_revision: a note<->revision circular FK makes pg_dump
   -- warn and plain-psql restore impossible (RFC-003 D3); verify_note polices it
   created_at    timestamptz NOT NULL DEFAULT now(),
-  tombstoned_at timestamptz
+  tombstoned_at timestamptz,
+  -- RFC-005 D3: the oldest seq whose state can still be reconstructed. A read
+  -- below it raises PM011 rather than returning a partially-reconstructed
+  -- document. Fresh notes start at 0 (everything they have is reconstructable);
+  -- an upgraded Phase-2 vault backfills this to each note's HEAD seq, since
+  -- Phase 2 revisions carry no recoverable content (RFC-005 D11).
+  history_floor bigint NOT NULL DEFAULT 0
 );
 
 CREATE TABLE pgmind.revision (
@@ -71,7 +77,16 @@ CREATE TABLE pgmind.revision (
   source     text NOT NULL DEFAULT 'api' CHECK (source IN ('api','sync','rebind')),
   message    text,
   meta       jsonb NOT NULL DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
+  created_at timestamptz NOT NULL DEFAULT now(),
+  -- RFC-005 D3: per-note, dense, ascending, assigned under the note row lock.
+  -- It is what makes "before" a total order without trusting clocks -- two
+  -- revisions written in one transaction share created_at.
+  seq        bigint NOT NULL,
+  verb       text NOT NULL CHECK (verb IN
+               ('write','insert_blocks','update_block','move_block','split_block',
+                'merge_blocks','append_to_section','delete_note','undelete_note',
+                'move_note','excise','retain')),
+  UNIQUE (note_id, seq)
 );
 
 CREATE TABLE pgmind.tile (
@@ -128,6 +143,107 @@ CREATE TABLE pgmind.tag (
   tag      text NOT NULL
 );
 
+-- ===================================================================
+-- Phase 3 history lanes (RFC-005 D2). History stores PRE-IMAGES: what the
+-- two lanes held BEFORE a revision. Reconstruction starts at an anchor at or
+-- above the target (current state, or a frame) and applies pre-images
+-- backwards. Two invariants govern every row here:
+--   X1  no history row defines its bytes by reference to another history
+--       row's bytes -- every payload is literal, which is what makes erasure
+--       a bounded local rewrite instead of a chain re-base;
+--   X2  reconstruction never invokes the parser -- structure comes from the
+--       stored vectors, so history survives an RFC-002 amendment.
+-- ===================================================================
+
+-- H1: per-revision note-level pre-image. One row per revision, always.
+-- Vector lengths are read with cardinality(); array_length(x,1) returns NULL
+-- on the empty array, which is the footgun this schema hands an implementer.
+CREATE TABLE pgmind.note_revision (
+  revision_id   uuid PRIMARY KEY REFERENCES pgmind.revision(id),
+  note_id       uuid NOT NULL REFERENCES pgmind.note(id) ON DELETE CASCADE,
+  vault_id      uuid NOT NULL,
+  seq           bigint NOT NULL,
+  prev_path     text,                      -- NULL => unchanged (move_note's pre-image)
+  prev_preamble text,
+  prev_props    jsonb,
+  -- KEEP/INS scripts: ops is packed int4, payload holds only what INS adds.
+  tile_ops      int4[] NOT NULL DEFAULT '{}',  tile_payload text[] NOT NULL DEFAULT '{}',
+  id_ops        int4[] NOT NULL DEFAULT '{}',  id_payload   uuid[] NOT NULL DEFAULT '{}',
+  -- Positional facts, changed slots only: block index -> (tile_ord, start, end).
+  place_idx     int4[] NOT NULL DEFAULT '{}', place_prev   int4[] NOT NULL DEFAULT '{}',
+  -- heading_path is positional too (RFC-002 D6 derives it from preceding
+  -- headings), so it rides here rather than producing one effect row per block
+  -- in a renamed section. jsonb because SQL has no ragged text[][].
+  head_idx      int4[] NOT NULL DEFAULT '{}', head_prev    jsonb NOT NULL DEFAULT '[]'::jsonb,
+  UNIQUE (note_id, seq)
+);
+
+-- H2: per-block pre-image. Written ONLY when a content-visible column changed;
+-- ord/tile_ord/spans/heading_path never produce a row here (they are in H1).
+CREATE TABLE pgmind.block_revision (
+  note_id           uuid NOT NULL REFERENCES pgmind.note(id) ON DELETE CASCADE,
+  block_id          uuid NOT NULL,          -- no FK: the block may already be gone
+  seq               bigint NOT NULL,
+  vault_id          uuid NOT NULL,
+  existed           boolean NOT NULL,       -- false => minted here, no pre-image
+  redacted          boolean NOT NULL DEFAULT false,  -- true => NULLs are erasure, not absence
+  prev_kind         pgmind.block_kind,
+  prev_content      text,
+  prev_content_hash bytea CHECK (prev_content_hash IS NULL OR octet_length(prev_content_hash) = 32),
+  prev_block_ref_id text,
+  prev_attrs        jsonb,
+  prev_parent_block uuid,
+  confidence        real,                   -- RFC-004 Part B; NULL => deterministic
+  bind              text CHECK (bind IN ('mint','ref','hash','carry','rebind','remove')),
+  PRIMARY KEY (note_id, block_id, seq)
+);
+
+-- H3: periodic absolute snapshot of BOTH lanes, so deep as_of is bounded. A
+-- frame that carried only bytes would anchor read_as_of and not blocks_as_of,
+-- and X2 forbids recovering the difference by parsing.
+CREATE TABLE pgmind.note_frame (
+  note_id    uuid NOT NULL REFERENCES pgmind.note(id) ON DELETE CASCADE,
+  seq        bigint NOT NULL,
+  vault_id   uuid NOT NULL,
+  path       text NOT NULL,
+  preamble   text NOT NULL,
+  props      jsonb NOT NULL,
+  tiles      text[] NOT NULL,
+  block_ids  uuid[] NOT NULL,
+  kinds      text[] NOT NULL,
+  contents   text[] NOT NULL,
+  head_paths jsonb NOT NULL,
+  parents    uuid[] NOT NULL,
+  block_refs text[] NOT NULL,
+  attrs      jsonb NOT NULL,
+  placement  int4[] NOT NULL,
+  PRIMARY KEY (note_id, seq)
+);
+
+-- H4a: the audit trail Law 8 owes. Content-free by construction, dumped, and
+-- swept by the excision gate like any other table.
+CREATE TABLE pgmind.excision_log (
+  id           uuid PRIMARY KEY,
+  vault_id     uuid NOT NULL,
+  requested_at timestamptz NOT NULL DEFAULT now(),
+  requested_by text NOT NULL DEFAULT current_user,
+  reason       text NOT NULL,
+  target_kind  text NOT NULL CHECK (target_kind IN ('note','block','revision','before','literal')),
+  scope        jsonb NOT NULL DEFAULT '{}'::jsonb,
+  escalations  jsonb NOT NULL DEFAULT '[]'::jsonb,
+  verified_at  timestamptz,
+  survivors    int4
+);
+
+-- H4b: the replay input. For the 'literal' and 'note' forms the target IS
+-- identifying data, so this table is deliberately NOT registered for dump: it
+-- must not travel in backups. enforce_excisions() reads it; the excision gate
+-- names it as its one expected hit.
+CREATE TABLE pgmind.excision_replay (
+  excision_id uuid PRIMARY KEY REFERENCES pgmind.excision_log(id) ON DELETE CASCADE,
+  target      jsonb NOT NULL
+);
+
 -- Indexes (RFC-003 D4)
 CREATE UNIQUE INDEX note_live_path ON pgmind.note (vault_id, path) WHERE tombstoned_at IS NULL;
 CREATE INDEX note_basename    ON pgmind.note (vault_id, basename) WHERE tombstoned_at IS NULL;
@@ -143,6 +259,15 @@ CREATE INDEX tag_lookup       ON pgmind.tag (vault_id, lower(tag));
 CREATE INDEX tag_note         ON pgmind.tag (note_id);
 CREATE INDEX tag_block        ON pgmind.tag (block_id) WHERE block_id IS NOT NULL;
 CREATE INDEX revision_note    ON pgmind.revision (note_id, created_at);
+-- RFC-003 D4 left revision.parent unindexed and flagged it for RFC-005 by
+-- name, because Phase 2 had no deletion path. Phase 3 has several.
+CREATE INDEX revision_parent  ON pgmind.revision (parent) WHERE parent IS NOT NULL;
+CREATE INDEX note_revision_note  ON pgmind.note_revision (note_id, seq DESC);
+CREATE INDEX block_revision_block ON pgmind.block_revision (block_id, seq DESC);
+CREATE INDEX note_frame_note     ON pgmind.note_frame (note_id, seq DESC);
+CREATE INDEX note_revision_vault ON pgmind.note_revision (vault_id);
+CREATE INDEX block_revision_vault ON pgmind.block_revision (vault_id);
+CREATE INDEX note_frame_vault    ON pgmind.note_frame (vault_id);
 -- vault_id is the predicate on every knowledge.stats() count and on the RLS
 -- policy D1 documents, so it must be indexed on the tables that carry it —
 -- without these, stats() sequentially scans the block, revision and tile heaps.
@@ -160,6 +285,10 @@ BEGIN
     ALTER TABLE pgmind.note  ALTER COLUMN properties SET COMPRESSION lz4;
     ALTER TABLE pgmind.block ALTER COLUMN attrs      SET COMPRESSION lz4;
     ALTER TABLE pgmind.revision ALTER COLUMN meta    SET COMPRESSION lz4;
+    ALTER TABLE pgmind.note_revision  ALTER COLUMN tile_payload SET COMPRESSION lz4;
+    ALTER TABLE pgmind.block_revision ALTER COLUMN prev_content SET COMPRESSION lz4;
+    ALTER TABLE pgmind.note_frame     ALTER COLUMN tiles        SET COMPRESSION lz4;
+    ALTER TABLE pgmind.note_frame     ALTER COLUMN contents     SET COMPRESSION lz4;
   EXCEPTION WHEN feature_not_supported OR invalid_parameter_value OR undefined_object THEN
     RAISE WARNING 'pgmind: lz4 toast compression unavailable on this server; using default';
   END;
@@ -181,9 +310,29 @@ CREATE FUNCTION pgmind.enable_vault_rls(force boolean DEFAULT false)
 RETURNS void LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $fn$
+-- The table list is ENUMERATED FROM pg_catalog, never written out. RFC-005's
+-- review found the literal list already stale the moment Phase 3 added its
+-- history tables: a tenant could read another vault's block_revision.prev_content
+-- and note_frame.tiles -- literal copies of note bytes, including bytes already
+-- deleted from the live lanes -- while the tenant-isolation gate stayed green
+-- because it enumerated the same six names. Any future table that carries a
+-- vault_id is now inside the boundary by construction.
 DECLARE t text;
 BEGIN
-  FOREACH t IN ARRAY ARRAY['note','revision','tile','block','edge','tag'] LOOP
+  FOR t IN
+    SELECT c.relname
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+      JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+     WHERE n.nspname = 'pgmind' AND c.relkind = 'r'
+       AND a.attname = 'vault_id' AND a.attnum > 0 AND NOT a.attisdropped
+     -- Creation order, not alphabetical. Each ALTER takes ACCESS EXCLUSIVE and
+     -- holds it to commit, so the order here is a lock order: creation order is
+     -- FK-topological (note, revision, tile, block, ...), which is the order
+     -- every writer touches these tables in. Alphabetical takes `block` before
+     -- `note` and deadlocks against any concurrent write (observed).
+     ORDER BY c.oid
+  LOOP
     EXECUTE format('ALTER TABLE pgmind.%I ENABLE ROW LEVEL SECURITY', t);
     -- FORCE also subjects the table owner, which is what a deployment where
     -- the extension owner is also an application role actually needs.
@@ -210,6 +359,17 @@ SELECT pg_catalog.pg_extension_config_dump('pgmind.edge',     '');
 SELECT pg_catalog.pg_extension_config_dump('pgmind.tag',      '');
 SELECT pg_catalog.pg_extension_config_dump('pgmind.edge_id_seq', '');
 SELECT pg_catalog.pg_extension_config_dump('pgmind.tag_id_seq',  '');
+-- Phase 3 history lanes. Missing ONE of these loses 100% of that lane from
+-- every backup while the Phase 2 dump-restore gate stays green, which is why
+-- the history-durability gate asserts this registration set against pg_catalog
+-- rather than against a list someone has to remember to update.
+SELECT pg_catalog.pg_extension_config_dump('pgmind.note_revision',  '');
+SELECT pg_catalog.pg_extension_config_dump('pgmind.block_revision', '');
+SELECT pg_catalog.pg_extension_config_dump('pgmind.note_frame',     '');
+SELECT pg_catalog.pg_extension_config_dump('pgmind.excision_log',   '');
+-- pgmind.excision_replay is deliberately absent: it holds the executable
+-- excision target, which for the 'literal' and 'note' forms IS the identifying
+-- data the excision erased. It must not travel in a dump (RFC-005 D2 H4b).
 "#,
     name = "pgmind_storage",
     requires = [pgmind::path_is_valid, pgmind::path_normalize]

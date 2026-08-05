@@ -596,6 +596,137 @@ mod tests {
         verify_clean("ops/delist");
     }
 
+    // ---------- Phase 3 foundations (RFC-005 D2) ----------
+
+    /// RFC-005 D2: every pgmind table must be registered for dump, and every
+    /// table carrying `vault_id` must be inside the tenant boundary — both
+    /// checked against `pg_catalog`, never against a list someone maintains.
+    ///
+    /// This is the shape of the review's fifth critical finding: with
+    /// `pg_extension_config_dump` missing for `block_revision` alone, every
+    /// assertion the Phase 2 dump-restore suite makes stays green while 100% of
+    /// per-block history vanishes from the backup. A literal table list in a
+    /// test cannot catch that, because the list and the omission are the same
+    /// mistake.
+    #[pg_test]
+    fn every_pgmind_table_is_dumped_and_tenant_scoped() {
+        let unregistered: Vec<String> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT c.relname::text
+                       FROM pg_class c
+                       JOIN pg_namespace n ON n.oid = c.relnamespace
+                      WHERE n.nspname = 'pgmind' AND c.relkind = 'r'
+                        AND c.oid <> 'pgmind.excision_replay'::regclass
+                        AND NOT EXISTS (
+                          SELECT 1 FROM pg_extension e
+                           WHERE e.extname = 'pgmind' AND c.oid = ANY(e.extconfig))
+                      ORDER BY 1",
+                    None,
+                    &[],
+                )
+                .expect("catalog query failed")
+                .map(|row| row.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert!(
+            unregistered.is_empty(),
+            "tables missing pg_extension_config_dump (their rows would not survive pg_dump): {unregistered:?}"
+        );
+
+        // excision_replay must be the one deliberate exception: it holds the
+        // executable excision target, which for the literal and note forms IS
+        // the identifying data the excision erased (D2 H4b).
+        let replay_registered: Option<bool> = Spi::get_one(
+            "SELECT EXISTS (SELECT 1 FROM pg_extension e
+                             WHERE e.extname = 'pgmind'
+                               AND 'pgmind.excision_replay'::regclass = ANY(e.extconfig))",
+        )
+        .unwrap();
+        assert_eq!(
+            replay_registered,
+            Some(false),
+            "excision_replay must NOT be dump-registered"
+        );
+
+        // Policy coverage is asserted in `tenant_scoping_and_grant_boundary`,
+        // which is the one test that enables RLS: ALTER TABLE takes ACCESS
+        // EXCLUSIVE, and two tests doing that concurrently in different table
+        // orders deadlock (observed, not theorised).
+    }
+
+    /// Every `vault_id`-carrying table is inside the boundary the shipped
+    /// helper establishes. Enumerated from `pg_catalog` on both sides.
+    fn assert_every_vault_table_has_a_policy() {
+        let unprotected: Vec<String> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT c.relname::text
+                       FROM pg_class c
+                       JOIN pg_namespace n ON n.oid = c.relnamespace
+                      WHERE n.nspname = 'pgmind' AND c.relkind = 'r'
+                        AND EXISTS (SELECT 1 FROM pg_attribute a
+                                     WHERE a.attrelid = c.oid AND a.attname = 'vault_id'
+                                       AND a.attnum > 0 AND NOT a.attisdropped)
+                        AND NOT EXISTS (SELECT 1 FROM pg_policies p
+                                         WHERE p.schemaname = 'pgmind'
+                                           AND p.tablename = c.relname
+                                           AND p.policyname = 'vault_isolation')
+                      ORDER BY 1",
+                    None,
+                    &[],
+                )
+                .expect("policy query failed")
+                .map(|row| row.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert!(
+            unprotected.is_empty(),
+            "tables with vault_id but no vault_isolation policy (cross-tenant reads): {unprotected:?}"
+        );
+    }
+
+    /// RFC-005 D3/D4: every revision carries a dense per-note seq and a verb.
+    #[pg_test]
+    fn revisions_carry_dense_seq_and_verb() {
+        write("hist/seq", "alpha\n\nbeta\n");
+        write("hist/seq", "alpha\n\nBETA\n");
+        let id = block_ids("hist/seq")[0].1;
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, 'ALPHA'::markdown)",
+            &[id.into()],
+        )
+        .expect("update failed");
+
+        let rows: Vec<(i64, String)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT r.seq, r.verb FROM pgmind.revision r
+                       JOIN pgmind.note n ON n.id = r.note_id
+                      WHERE n.path = 'hist/seq' ORDER BY r.seq",
+                    None,
+                    &[],
+                )
+                .expect("revision query failed")
+                .map(|row| {
+                    (
+                        row.get::<i64>(1).unwrap().unwrap(),
+                        row.get::<String>(2).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(
+            rows,
+            vec![
+                (0, "write".to_string()),
+                (1, "write".to_string()),
+                (2, "update_block".to_string()),
+            ],
+            "seq must be dense from 0 and verb must name the operation"
+        );
+    }
+
     // ---------- tenant isolation (RFC-003 D1 / §5 gate 4) ----------
 
     #[pg_test]
@@ -612,15 +743,13 @@ mod tests {
             .unwrap();
         assert_eq!(n, 1, "default vault sees only its note");
 
-        // RLS pattern (D1) + a non-superuser role.
-        for t in ["note", "revision", "tile", "block", "edge", "tag"] {
-            Spi::run(&format!("ALTER TABLE pgmind.{t} ENABLE ROW LEVEL SECURITY")).unwrap();
-            Spi::run(&format!(
-                "CREATE POLICY vault_isolation ON pgmind.{t}
-                 USING (vault_id = current_setting('pgmind.vault_id')::uuid)"
-            ))
-            .unwrap();
-        }
+        // RLS pattern (D1) + a non-superuser role. This calls the SHIPPED
+        // helper rather than re-implementing its loop: the test used to
+        // enumerate the same six table names the function did, so when Phase 3
+        // added four more tables carrying vault_id, the test would have gone on
+        // passing while history leaked across tenants.
+        Spi::run("SELECT pgmind.enable_vault_rls()").unwrap();
+        assert_every_vault_table_has_a_policy();
         Spi::run("CREATE ROLE pgmind_tenant_test").unwrap();
         Spi::run("GRANT USAGE ON SCHEMA pgmind, knowledge TO pgmind_tenant_test").unwrap();
         Spi::run("GRANT SELECT ON ALL TABLES IN SCHEMA pgmind TO pgmind_tenant_test").unwrap();

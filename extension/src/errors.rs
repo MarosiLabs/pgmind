@@ -29,6 +29,23 @@ pub enum Pm {
     SectionNotFound,
     /// PM008 pgmind_splice_restructures
     SpliceRestructures,
+    // RFC-005 D10. PM010 and PM011 mean opposite things to whoever debugs
+    // them: "no such revision" is a client bug, "no longer reconstructable"
+    // is data the operator retained away.
+    /// PM009 pgmind_stale_head
+    StaleHead,
+    /// PM010 pgmind_unknown_revision
+    UnknownRevision,
+    /// PM011 pgmind_history_unavailable
+    HistoryUnavailable,
+    /// PM012 pgmind_excision_refused
+    ExcisionRefused,
+    /// PM013 pgmind_excision_incomplete
+    ExcisionIncomplete,
+    /// PM014 pgmind_note_tombstoned
+    NoteTombstoned,
+    /// PM015 pgmind_path_taken
+    PathTaken,
 }
 
 impl Pm {
@@ -42,6 +59,13 @@ impl Pm {
             Pm::ContainerConstraint => "PM006",
             Pm::SectionNotFound => "PM007",
             Pm::SpliceRestructures => "PM008",
+            Pm::StaleHead => "PM009",
+            Pm::UnknownRevision => "PM010",
+            Pm::HistoryUnavailable => "PM011",
+            Pm::ExcisionRefused => "PM012",
+            Pm::ExcisionIncomplete => "PM013",
+            Pm::NoteTombstoned => "PM014",
+            Pm::PathTaken => "PM015",
         }
     }
 
@@ -55,6 +79,13 @@ impl Pm {
             Pm::ContainerConstraint => "pgmind_container_constraint",
             Pm::SectionNotFound => "pgmind_section_not_found",
             Pm::SpliceRestructures => "pgmind_splice_restructures",
+            Pm::StaleHead => "pgmind_stale_head",
+            Pm::UnknownRevision => "pgmind_unknown_revision",
+            Pm::HistoryUnavailable => "pgmind_history_unavailable",
+            Pm::ExcisionRefused => "pgmind_excision_refused",
+            Pm::ExcisionIncomplete => "pgmind_excision_incomplete",
+            Pm::NoteTombstoned => "pgmind_note_tombstoned",
+            Pm::PathTaken => "pgmind_path_taken",
         }
     }
 }

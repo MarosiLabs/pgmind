@@ -333,11 +333,15 @@ PGRX_TEST_SUITES = {
         "notes_glob_matches_literal_stars_and_prefixes",
         "extraction_dedups_and_covers_all_link_kinds",
         "lane_batching_survives_chunk_boundaries",
+        "revisions_carry_dense_seq_and_verb",
         "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [
         "tenant_scoping_and_grant_boundary",
         "malformed_vault_guc_raises_pm001",
+        # RFC-005 D2: dump registration and policy coverage, both enumerated
+        # from pg_catalog so a table added later is covered by construction.
+        "every_pgmind_table_is_dumped_and_tenant_scoped",
     ],
 }
 
