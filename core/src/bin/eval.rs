@@ -19,6 +19,18 @@ fn main() {
                 .map(|s| s.parse().expect("seed"))
                 .unwrap_or(0xC0FFEE),
         ),
+        Some("emit-fuzz") => {
+            // Print the fuzz corpus as a JSON array (consumed by the Phase 2
+            // storage-round-trip suite, which pushes it through the tables).
+            let count: u64 = args[1].parse().expect("count");
+            let seed: u64 = args
+                .get(2)
+                .map(|s| s.parse().expect("seed"))
+                .unwrap_or(0xC0FFEE);
+            let docs: Vec<String> = fuzz_docs(count, seed);
+            println!("{}", serde_json::to_string(&docs).unwrap());
+            return;
+        }
         Some("hash-goldens") => hash_goldens(&args[1]),
         Some("perf") => perf(),
         Some("extraction-goldens") => extraction_goldens(&args[1]),
@@ -89,8 +101,8 @@ fn collect_md(path: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Gate 2 (fuzz part): deterministic pseudo-random documents; tiling must hold.
-fn fuzz_roundtrip(count: u64, seed: u64) -> Value {
+/// The deterministic fuzz corpus shared by fuzz-roundtrip and emit-fuzz.
+fn fuzz_docs(count: u64, seed: u64) -> Vec<String> {
     let mut rng = seed | 1;
     let mut next = move || {
         // xorshift64* — deterministic, no external randomness (workflow rules).
@@ -121,8 +133,7 @@ fn fuzz_roundtrip(count: u64, seed: u64) -> Value {
         "\n",
         "\n\n",
     ];
-    let mut failures = 0u64;
-    let mut first_failure: Option<String> = None;
+    let mut docs = Vec::with_capacity(count as usize);
     for i in 0..count {
         let mut doc = String::new();
         if next() % 4 == 0 {
@@ -133,6 +144,16 @@ fn fuzz_roundtrip(count: u64, seed: u64) -> Value {
             let frag = fragments[(next() % fragments.len() as u64) as usize];
             doc.push_str(&frag.replace("{n}", &i.to_string()));
         }
+        docs.push(doc);
+    }
+    docs
+}
+
+/// Gate 2 (fuzz part): deterministic pseudo-random documents; tiling must hold.
+fn fuzz_roundtrip(count: u64, seed: u64) -> Value {
+    let mut failures = 0u64;
+    let mut first_failure: Option<String> = None;
+    for doc in fuzz_docs(count, seed) {
         let parsed = parse(&doc);
         if !parsed.tiles_exactly(&doc) {
             failures += 1;

@@ -60,9 +60,39 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      # Phase 2 suites run against real storage: the harness installs the
+      # extension and boots a scratch cluster (PG18 leg).
+      - name: Install PostgreSQL 18 (PGDG)
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc --fail \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-18 postgresql-server-dev-18
+          sudo chmod a+rwx /usr/lib/postgresql/18/lib /usr/share/postgresql/18/extension
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            extension
+            core
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version "$PGRX_VERSION" --locked
+
+      - name: pgrx init
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+
       - run: make eval
+        env:
+          PGMIND_PG_CONFIG: /usr/lib/postgresql/18/bin/pg_config
+
       - uses: actions/upload-artifact@v4
         if: always()   # the failure report is the one you need most
         with:
           name: eval-report
-          path: eval/results/latest.json
+          path: |
+            eval/results/latest.json
+            eval/results/capacity-model.json
