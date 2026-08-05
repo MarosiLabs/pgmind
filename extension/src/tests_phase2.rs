@@ -622,4 +622,452 @@ mod tests {
             "unclosed fence must be rejected"
         );
     }
+
+    // ---------- A3 carry: identity must not migrate between sections ----------
+
+    fn meta_of(revision: Uuid) -> serde_json::Value {
+        let raw: String = Spi::get_one_with_args(
+            "SELECT meta::text FROM pgmind.revision WHERE id = $1",
+            &[revision.into()],
+        )
+        .expect("meta failed")
+        .expect("meta NULL");
+        serde_json::from_str(&raw).expect("meta is not json")
+    }
+
+    /// RFC-004 A1: "an ID is never reused". `content_hash` covers only (kind,
+    /// normalized content), so an untiered pass 2 handed a deleted section's
+    /// paragraph ID to an identical paragraph in a surviving section — and
+    /// deleted the survivor's own ID.
+    #[pg_test]
+    fn section_delete_does_not_recycle_ids_across_sections() {
+        let path = "carry/sections";
+        write(path, "# Chapter A\n\nTODO\n\n# Chapter B\n\nTODO\n");
+        let before = block_ids(path);
+        let todo_b = before
+            .iter()
+            .filter(|(c, _)| c == "TODO")
+            .nth(1)
+            .expect("two TODO blocks")
+            .1;
+
+        write(path, "# Chapter B\n\nTODO\n");
+        let after = block_ids(path);
+        let surviving_todo = after
+            .iter()
+            .find(|(c, _)| c == "TODO")
+            .expect("TODO survives")
+            .1;
+        assert_eq!(
+            surviving_todo, todo_b,
+            "Chapter B's paragraph must keep its OWN id, not inherit Chapter A's"
+        );
+        verify_clean(path);
+    }
+
+    /// The tier-1 fallback: renaming a heading changes its section's
+    /// `heading_path`, and the section's blocks must still carry.
+    #[pg_test]
+    fn heading_rename_carries_section_blocks() {
+        let path = "carry/rename";
+        write(path, "# Old Name\n\nbody text\n");
+        let before = block_ids(path);
+        let body = before.iter().find(|(c, _)| c == "body text").unwrap().1;
+
+        write(path, "# New Name\n\nbody text\n");
+        let after = block_ids(path);
+        assert_eq!(
+            after.iter().find(|(c, _)| c == "body text").unwrap().1,
+            body,
+            "a heading rename must not mint its section's blocks"
+        );
+        verify_clean(path);
+    }
+
+    // ---------- A4 provenance ----------
+
+    /// RFC-004 A4: `split` records `from`, `into` (the resulting block uuids)
+    /// and `marker_to` (the surviving holder's uuid), all INSIDE the `split`
+    /// object. `marker_to` used to be the marker's text label, hoisted to the
+    /// top level, and `into` was absent entirely.
+    #[pg_test]
+    fn split_provenance_matches_a4_schema() {
+        let path = "prov/split";
+        write(path, "one two ^x\n\ntail\n");
+        let target = block_ids(path)[0].1;
+        let rev: Uuid = Spi::get_one_with_args(
+            "SELECT (knowledge.split_block($1::uuid, e'one\n\ntwo ^x'::markdown)).revision",
+            &[target.into()],
+        )
+        .expect("split failed")
+        .expect("split NULL");
+
+        let meta = meta_of(rev);
+        let split = meta.get("split").expect("meta.split present");
+        assert_eq!(
+            split.get("from").unwrap().as_str().unwrap(),
+            target.to_string()
+        );
+        let into = split
+            .get("into")
+            .expect("A4 requires split.into")
+            .as_array()
+            .unwrap();
+        assert_eq!(into.len(), 2, "both split fragments recorded");
+        assert_eq!(
+            into[0].as_str().unwrap(),
+            target.to_string(),
+            "A2: the first fragment keeps the id"
+        );
+        // A5: the marker rode to the SECOND fragment, so marker_to must be that
+        // block's uuid — not the label "x", and not null.
+        let marker_to = split.get("marker_to").expect("A4 requires split.marker_to");
+        assert_eq!(
+            marker_to.as_str().unwrap(),
+            into[1].as_str().unwrap(),
+            "marker_to must name the surviving holder by uuid"
+        );
+        assert!(
+            meta.get("marker_to").is_none(),
+            "marker_to belongs inside the split object, not at the top level"
+        );
+        verify_clean(path);
+    }
+
+    /// RFC-004 §5: merge without `keep`, and the marker-holder record.
+    #[pg_test]
+    fn merge_without_keep_records_provenance() {
+        let path = "prov/merge";
+        write(path, "alpha ^m\n\nbeta\n\ngamma\n");
+        let ids = block_ids(path);
+        let (a, b) = (ids[0].1, ids[1].1);
+        let rev: Uuid = Spi::get_one_with_args(
+            "SELECT (knowledge.merge_blocks(ARRAY[$1,$2]::uuid[], 'alpha beta ^m'::markdown)).revision",
+            &[a.into(), b.into()],
+        )
+        .expect("merge failed")
+        .expect("merge NULL");
+
+        let meta = meta_of(rev);
+        let merge = meta.get("merge").expect("meta.merge present");
+        assert_eq!(
+            merge.get("into").unwrap().as_str().unwrap(),
+            a.to_string(),
+            "default keep is the first member"
+        );
+        assert_eq!(merge.get("from").unwrap().as_array().unwrap().len(), 2);
+        assert_eq!(
+            merge.get("marker_to").unwrap().as_str().unwrap(),
+            a.to_string(),
+            "the surviving holder, by uuid"
+        );
+        assert!(meta["removed"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::Value::String(b.to_string())));
+        verify_clean(path);
+    }
+
+    /// RFC-004 §5 / PM006: a non-surviving merge member owning container
+    /// children is rejected. The guard only inspected `idxs[1..]`, so an
+    /// explicit `keep` that was not the first member let member 0's nested
+    /// content be deleted silently.
+    #[pg_test]
+    fn merge_retiree_with_descendants_is_pm006_even_when_keep_is_not_first() {
+        let path = "prov/merge-keep";
+        write(path, "- a\n  - a1\n- b\n");
+        let ids = block_ids(path);
+        // Items only: a (with nested a1) and b.
+        let item_a = ids[0].1;
+        let item_b = ids
+            .iter()
+            .find(|(c, _)| c.starts_with('b'))
+            .expect("item b")
+            .1;
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.merge_blocks(ARRAY['{item_a}','{item_b}']::uuid[], \
+                 '- ab'::markdown, keep => '{item_b}'::uuid)"
+            )),
+            "PM006",
+            "member 0 is non-surviving here and owns container children"
+        );
+        // Nothing was destroyed.
+        assert_eq!(read(path), "- a\n  - a1\n- b\n");
+        verify_clean(path);
+    }
+
+    // ---------- splice discipline ----------
+
+    /// RFC-003 D6: "bytes outside the spliced span are never reformatted."
+    /// Separator synthesis used to blank-terminate EVERY tile, so an insert
+    /// rewrote untouched neighbours — invisible to PM008 because D7 strips
+    /// trailing newline runs before hashing.
+    #[pg_test]
+    fn insert_preserves_unseparated_neighbouring_tiles() {
+        let path = "splice/tiles";
+        // A paragraph interrupted by an ATX heading: two tiles, no blank line.
+        write(path, "para\n# Heading\n");
+        assert_eq!(read(path), "para\n# Heading\n");
+        Spi::run_with_args(
+            "SELECT knowledge.insert_blocks($1, 'x'::markdown)",
+            &[path.into()],
+        )
+        .expect("insert failed");
+        assert_eq!(
+            read(path),
+            "para\n# Heading\n\nx\n",
+            "only the seam before the inserted tile may gain a blank line"
+        );
+        verify_clean(path);
+    }
+
+    /// RFC-003 D6 splice: an item's own marker lives between the enclosing
+    /// container's decoration and the end of its own, so slicing
+    /// (full - outer) bytes from the LINE start returned the container's
+    /// prefix — `> - a` yielded "> " and the insert became a nested quote.
+    #[pg_test]
+    fn insert_item_level_into_a_quoted_list() {
+        let path = "splice/quoted-list";
+        write(path, "> - alpha\n> - beta\n");
+        let ids = block_ids(path);
+        let alpha = ids
+            .iter()
+            .find(|(c, _)| c.starts_with("alpha"))
+            .expect("alpha item")
+            .1;
+        Spi::run_with_args(
+            "SELECT knowledge.insert_blocks($1, '- gamma'::markdown, after => $2::uuid)",
+            &[path.into(), alpha.into()],
+        )
+        .expect("item-level insert failed");
+        let out = read(path);
+        assert!(
+            out.contains("> - gamma"),
+            "inserted item must stay a quoted list item, got {out:?}"
+        );
+        assert!(
+            !out.contains("> > "),
+            "must not become a nested blockquote, got {out:?}"
+        );
+        verify_clean(path);
+    }
+
+    /// A block op must maintain lane 0. `reconcile` wrote tiles, blocks, edges
+    /// and tags but never the note row, so a splice that moved the
+    /// preamble/tile boundary left `knowledge.read()` returning bytes that
+    /// were never written.
+    #[pg_test]
+    fn block_ops_keep_the_note_row_consistent() {
+        let path = "splice/preamble";
+        write(path, "---\ntitle: T\n---\n\nalpha\n");
+        Spi::run_with_args(
+            "SELECT knowledge.insert_blocks($1, 'beta'::markdown)",
+            &[path.into()],
+        )
+        .expect("insert failed");
+        assert_eq!(read(path), "---\ntitle: T\n---\n\nalpha\n\nbeta\n");
+        // properties must still be derived from the frontmatter after the op.
+        let title: Option<String> = Spi::get_one_with_args(
+            "SELECT properties->>'title' FROM pgmind.note WHERE path = $1",
+            &[path.into()],
+        )
+        .expect("properties failed");
+        assert_eq!(title.as_deref(), Some("T"));
+        verify_clean(path);
+    }
+
+    // ---------- read surface ----------
+
+    /// RFC-002 D2: a section is delimited by a DOCUMENT heading. A heading
+    /// inside a blockquote has no parent either, and matching it returned
+    /// quoted text plus the unquoted paragraph that followed the quote.
+    #[pg_test]
+    fn read_section_ignores_headings_inside_blockquotes() {
+        let path = "read/quoted-heading";
+        write(path, "> # Q\n\npara\n\n# Real\n\nbody\n");
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.read_section('{path}', ARRAY['Q'])"
+            )),
+            "PM007",
+            "a quoted heading is not a document section"
+        );
+        let real: String = Spi::get_one_with_args(
+            "SELECT knowledge.read_section($1, ARRAY['Real'])::text",
+            &[path.into()],
+        )
+        .expect("read_section failed")
+        .expect("NULL");
+        assert_eq!(real, "# Real\n\nbody\n");
+    }
+
+    /// RFC-003 D5: `write()` stores the NFC-trimmed path, so every reader must
+    /// look the note up the same way — otherwise a caller cannot read back the
+    /// note it just wrote with the identical string (macOS emits NFD).
+    #[pg_test]
+    fn paths_round_trip_through_normalization() {
+        let nfd = "notes/cafe\u{0301}";
+        let nfc = "notes/caf\u{00e9}";
+        write(nfd, "body\n");
+        assert_eq!(read(nfd), "body\n", "readable by the spelling write() took");
+        assert_eq!(read(nfc), "body\n", "and by the normalized spelling");
+        // Trailing whitespace is trimmed on write; reads must agree.
+        write("notes/trimmed  ", "x\n");
+        assert_eq!(read("notes/trimmed"), "x\n");
+    }
+
+    /// RFC-002 D8: `*` is a legal path character, and the matcher must not
+    /// consume a pattern `*` against a literal one without leaving a backtrack
+    /// point. Also pins that the literal-prefix pushdown does not drop matches.
+    #[pg_test]
+    fn notes_glob_matches_literal_stars_and_prefixes() {
+        write("glob/a*bc", "x\n");
+        write("glob/plain", "x\n");
+        write("globber/other", "x\n");
+        let hit: i64 = Spi::get_one("SELECT count(*) FROM knowledge.notes('glob/a*c')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            hit, 1,
+            "'glob/a*c' must match the note literally named a*bc"
+        );
+        let prefixed: i64 = Spi::get_one("SELECT count(*) FROM knowledge.notes('glob/**')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(prefixed, 2, "prefix pushdown must not leak into 'globber/'");
+        // A pathological pattern must return, not wedge the backend.
+        let deep: i64 =
+            Spi::get_one("SELECT count(*) FROM knowledge.notes(repeat('**/', 40) || 'zzz')")
+                .unwrap()
+                .unwrap();
+        assert_eq!(deep, 0);
+    }
+
+    /// RFC-003 D1 / RFC-004 A6: a malformed `pgmind.vault_id` errors at first
+    /// use. `+`-prefixed byte pairs used to parse as the all-zeros DEFAULT
+    /// vault — silently writing a tenant's notes into someone else's vault.
+    #[pg_test]
+    fn malformed_vault_guc_raises_pm001() {
+        for bad in [
+            "+0+0+0+0+0+0+0+0+0+0+0+0+0+0+0+0",
+            "0-0000000-00000000000000000000000-0",
+            "not-a-uuid",
+        ] {
+            assert_eq!(
+                sqlstate_of(&format!(
+                    "SET pgmind.vault_id = '{bad}'; SELECT count(*) FROM knowledge.orphans()"
+                )),
+                "PM001",
+                "GUC {bad:?} must raise PM001, not resolve to a vault"
+            );
+        }
+        Spi::run("RESET pgmind.vault_id").unwrap();
+    }
+
+    /// RFC-003 §5 gate 2: extraction dedup and the full link-kind set through
+    /// storage.
+    #[pg_test]
+    fn extraction_dedups_and_covers_all_link_kinds() {
+        let path = "extract/kinds";
+        write("extract/target", "t\n");
+        write(
+            path,
+            "See [[extract/target]] and [[extract/target]] again.\n\n\
+             Embed ![[extract/target]] plus [md](extract/target) and [[extract/target#^b1]].\n",
+        );
+        let kinds: Vec<(String, i64)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT kind::text, count(*)::int8 FROM pgmind.edge
+                     WHERE src_note = (SELECT id FROM pgmind.note WHERE path = $1)
+                     GROUP BY kind::text ORDER BY 1",
+                    None,
+                    &[path.into()],
+                )
+                .expect("edge query failed")
+                .map(|r| {
+                    (
+                        r.get::<String>(1).unwrap().unwrap(),
+                        r.get::<i64>(2).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        let by_kind: std::collections::HashMap<_, _> = kinds.into_iter().collect();
+        assert_eq!(
+            by_kind.get("wikilink").copied(),
+            Some(1),
+            "the duplicate [[extract/target]] in one block dedups to one edge"
+        );
+        assert_eq!(by_kind.get("transclusion").copied(), Some(1));
+        assert_eq!(by_kind.get("mdlink").copied(), Some(1));
+        assert_eq!(by_kind.get("blockref").copied(), Some(1));
+        verify_clean(path);
+    }
+
+    /// RFC-003 D5: an unparseable target is `dangling_reason = 'invalid'`,
+    /// distinct from 'missing'.
+    #[pg_test]
+    fn invalid_link_targets_are_reported_as_invalid() {
+        let path = "extract/invalid";
+        write(path, "bad [[a//b]] and missing [[nowhere]]\n");
+        let reasons: Vec<(String, String)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT dst_path, dangling_reason FROM pgmind.edge
+                     WHERE src_note = (SELECT id FROM pgmind.note WHERE path = $1)
+                     ORDER BY dst_path",
+                    None,
+                    &[path.into()],
+                )
+                .expect("edge query failed")
+                .map(|r| {
+                    (
+                        r.get::<String>(1).unwrap().unwrap(),
+                        r.get::<String>(2).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(
+            reasons,
+            vec![
+                ("a//b".to_string(), "invalid".to_string()),
+                ("nowhere".to_string(), "missing".to_string()),
+            ]
+        );
+        verify_clean(path);
+    }
+
+    /// RFC-004 A2: move across a section boundary keeps the ID and recomputes
+    /// `heading_path` (position is never identity — Law 4).
+    #[pg_test]
+    fn move_across_sections_keeps_id_changes_heading_path() {
+        let path = "move/sections";
+        write(path, "# A\n\nalpha\n\n# B\n\nbeta\n");
+        let before = block_ids(path);
+        let alpha = before.iter().find(|(c, _)| c == "alpha").unwrap().1;
+        let beta = before.iter().find(|(c, _)| c == "beta").unwrap().1;
+        Spi::run_with_args(
+            "SELECT knowledge.move_block($1::uuid, after => $2::uuid)",
+            &[alpha.into(), beta.into()],
+        )
+        .expect("move failed");
+
+        let hp: Vec<String> = Spi::get_one_with_args(
+            "SELECT heading_path FROM pgmind.block WHERE id = $1",
+            &[alpha.into()],
+        )
+        .expect("heading_path failed")
+        .expect("NULL");
+        assert_eq!(hp, vec!["B".to_string()], "heading_path is recomputed");
+        assert!(
+            block_ids(path)
+                .iter()
+                .any(|(c, id)| c == "alpha" && *id == alpha),
+            "the moved block keeps its id"
+        );
+        verify_clean(path);
+    }
 }

@@ -34,6 +34,20 @@ STORAGE_FUZZ_COUNT = "10000"
 CAPACITY_NOTES = 10_000
 
 
+def results_dir() -> Path:
+    """eval/results/ is gitignored, so no suite may assume it exists."""
+    d = ROOT / "results"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def published_dir() -> Path:
+    """eval/published/ holds the committed, RFC-mandated gate deliverables."""
+    d = ROOT / "published"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
 def eval_bin():
     """Build (once) and return the pgmind-eval binary path."""
     subprocess.run(
@@ -208,32 +222,65 @@ def cluster() -> PgCluster:
     return _CLUSTER
 
 
-def dollar_quote(text: str) -> str:
-    n = 0
-    while f"$pgdq{n}$" in text:
-        n += 1
-    return f"$pgdq{n}${text}$pgdq{n}$"
+def copy_literal(field: str) -> str:
+    """Escape one field for COPY ... FROM STDIN in text format."""
+    return (
+        field.replace("\\", "\\\\")
+        .replace("\t", "\\t")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+    )
+
+
+# The timed write pass, kept separate from staging so the throughput number
+# measures knowledge.write and not the test scaffolding that fed it.
+WRITE_PASS_SQL = "SELECT count(knowledge.write(path, src::markdown)) FROM public.rt_staging;"
+
+
+def stage_vault_sql(docs: list[tuple[str, str]]) -> str:
+    """SQL that stages (path, source) pairs via a single COPY. Scaffolding
+    only — one statement, one transaction, no knowledge.write involved."""
+    lines = [
+        "DROP TABLE IF EXISTS public.rt_staging;",
+        "CREATE TABLE public.rt_staging (path text PRIMARY KEY, src text);",
+        "COPY public.rt_staging (path, src) FROM STDIN;",
+    ]
+    lines += [f"{copy_literal(p)}\t{copy_literal(s)}" for p, s in docs]
+    lines.append("\\.")
+    return "\n".join(lines) + "\n"
 
 
 def load_vault_sql(docs: list[tuple[str, str]]) -> str:
-    """SQL that stages (path, source) pairs and writes them all through
-    knowledge.write — the real Phase 2 write path, one server-side pass."""
-    lines = ["CREATE TABLE IF NOT EXISTS public.rt_staging (path text PRIMARY KEY, src text);"]
-    for path, src in docs:
-        lines.append(f"INSERT INTO public.rt_staging VALUES ({dollar_quote(path)}, {dollar_quote(src)});")
-    lines.append("SELECT count(knowledge.write(path, src::markdown)) FROM public.rt_staging;")
-    return "\n".join(lines)
+    """Stage + write in one script, for suites that do not time the write."""
+    return stage_vault_sql(docs) + WRITE_PASS_SQL + "\n"
+
+
+def run_sql_file(c: PgCluster, db: str, name: str, sql_text: str):
+    """Write a scratch .sql under eval/results/ (gitignored, so it may not
+    exist yet), run it, and remove it even when psql fails."""
+    path = results_dir() / name
+    path.write_text(sql_text)
+    try:
+        c.psql(db, file=path)
+    finally:
+        path.unlink(missing_ok=True)
+
+
+_REPO_DOCS: "list[tuple[str, str]] | None" = None
 
 
 def repo_docs() -> list[tuple[str, str]]:
-    files = [REPO / "PGMIND.md", REPO / "AUDIT.md", REPO / "README.md", REPO / "CONTRIBUTING.md"]
-    files += sorted((REPO / "docs").rglob("*.md"))
-    docs = []
-    for i, f in enumerate(files):
-        text = f.read_text()
-        if len(text.encode()) < 8 * 1024 * 1024:
-            docs.append((f"repo/doc-{i}", text))
-    return docs
+    global _REPO_DOCS
+    if _REPO_DOCS is None:
+        files = [REPO / "PGMIND.md", REPO / "AUDIT.md", REPO / "README.md", REPO / "CONTRIBUTING.md"]
+        files += sorted((REPO / "docs").rglob("*.md"))
+        docs = []
+        for i, f in enumerate(files):
+            text = f.read_text()
+            if len(text.encode()) < 8 * 1024 * 1024:
+                docs.append((f"repo/doc-{i}", text))
+        _REPO_DOCS = docs
+    return _REPO_DOCS
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +307,19 @@ PGRX_TEST_SUITES = {
         "merge_keeps_chosen_id",
         "child_carried_while_parent_removed",
         "typed_error_sqlstates",
+        # A3: identity must not migrate between sections, and a heading rename
+        # must still carry its section (RFC-004 A1/A3 pass 2 tiers).
+        "section_delete_does_not_recycle_ids_across_sections",
+        "heading_rename_carries_section_blocks",
+        # A4 provenance schema, incl. split.into and the marker-holder uuid.
+        "split_provenance_matches_a4_schema",
+        "merge_without_keep_records_provenance",
+        "merge_retiree_with_descendants_is_pm006_even_when_keep_is_not_first",
+        "move_across_sections_keeps_id_changes_heading_path",
+        # RFC-003 D6 splice discipline.
+        "insert_preserves_unseparated_neighbouring_tiles",
+        "insert_item_level_into_a_quoted_list",
+        "block_ops_keep_the_note_row_consistent",
     ],
     "extraction-correctness": [
         "write_read_byte_faithful",
@@ -267,9 +327,15 @@ PGRX_TEST_SUITES = {
         "backlinks_tags_orphans",
         "churn_discipline_one_paragraph_edit",
         "read_section_first_match",
+        "read_section_ignores_headings_inside_blockquotes",
+        "paths_round_trip_through_normalization",
+        "notes_glob_matches_literal_stars_and_prefixes",
+        "extraction_dedups_and_covers_all_link_kinds",
+        "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [
         "tenant_scoping_and_grant_boundary",
+        "malformed_vault_guc_raises_pm001",
     ],
 }
 
@@ -277,12 +343,22 @@ _PGRX_TEST_RESULT: "dict | None" = None
 
 
 def pgrx_test_results() -> dict:
-    """Run `cargo pgrx test` once; return {test_name: passed}."""
+    """Run `cargo pgrx test` once; return {test_name: passed} plus exit status.
+
+    `cargo pgrx test` builds and installs its OWN debug, pg_test-enabled
+    artifact over the --release build install_extension() placed: pgrx's
+    framework::install_extension shells out to `cargo pgrx install --test`
+    against the same pg_config, with PGRX_BUILD_PROFILE defaulting to debug.
+    Every later suite does CREATE EXTENSION afterwards, so without the
+    reinstall below the capacity and round-trip numbers describe a debug
+    build. Restoring the release artifact here keeps that independent of
+    SUITES ordering.
+    """
     global _PGRX_TEST_RESULT
     if _PGRX_TEST_RESULT is None:
-        major = cluster().major
+        c = cluster()
         out = subprocess.run(
-            ["cargo", "pgrx", "test", f"pg{major}"],
+            ["cargo", "pgrx", "test", f"pg{c.major}"],
             cwd=REPO / "extension", capture_output=True, text=True,
         )
         results = {}
@@ -290,8 +366,17 @@ def pgrx_test_results() -> dict:
             m = re.match(r"test \S*tests::pg_(\w+) \.\.\. (ok|FAILED)", line.strip())
             if m:
                 results[m.group(1)] = m.group(2) == "ok"
-        _PGRX_TEST_RESULT = {"tests": results, "raw_ok": out.returncode == 0}
+        c.install_extension()  # undo the debug/pg_test install
+        _PGRX_TEST_RESULT = {
+            "tests": results,
+            "raw_ok": out.returncode == 0,
+            "stderr_tail": "" if out.returncode == 0 else out.stderr[-2000:],
+        }
     return _PGRX_TEST_RESULT
+
+
+def _listed_tests() -> set:
+    return {t for names in PGRX_TEST_SUITES.values() for t in names}
 
 
 def pg_test_suite(name: str):
@@ -299,14 +384,26 @@ def pg_test_suite(name: str):
     wanted = PGRX_TEST_SUITES[name]
     missing = [t for t in wanted if t not in res["tests"]]
     failed = [t for t in wanted if not res["tests"].get(t, False)]
-    ok = not missing and not failed
-    return {
+    # A pg_test outside every curated list is still evidence about this gate:
+    # if the binary as a whole failed, no suite backed by it may report ok.
+    unlisted_failed = sorted(
+        t for t, passed in res["tests"].items() if not passed and t not in _listed_tests()
+    )
+    ok = not missing and not failed and res["raw_ok"]
+    result = {
         "status": "ok" if ok else "fail",
         "total": len(wanted),
         "passed": len(wanted) - len(failed),
         "missing": missing,
         "failed": failed,
+        "pgrx_test_exit_ok": res["raw_ok"],
     }
+    if unlisted_failed:
+        result["unlisted_failed"] = unlisted_failed
+    if not ok and not missing and not failed:
+        result["reason"] = "cargo pgrx test exited non-zero outside this suite's named tests"
+        result["stderr_tail"] = res["stderr_tail"]
+    return result
 
 
 def suite_identity_semantics():
@@ -334,11 +431,7 @@ def suite_storage_round_trip():
                        check=True, capture_output=True, text=True).stdout
     )
     docs = repo_docs() + [(f"fuzz/{i}", d) for i, d in enumerate(fuzz) if d.strip()]
-    sql = ROOT / "results" / "_rt_load.sql"
-    sql.parent.mkdir(parents=True, exist_ok=True)
-    sql.write_text(load_vault_sql(docs))
-    c.psql("pgmind_rt", file=sql)
-    sql.unlink()
+    run_sql_file(c, "pgmind_rt", "_rt_load.sql", load_vault_sql(docs))
     mismatches = int(c.psql(
         "pgmind_rt",
         "SELECT count(*) FROM public.rt_staging s WHERE knowledge.read(s.path)::text <> s.src;",
@@ -374,12 +467,12 @@ def suite_capacity_model():
     c.createdb("pgmind_cap")
     rng = random.Random(0xC0FFEE)
     docs = [(f"cap/{i}", synthetic_note(rng, i)) for i in range(CAPACITY_NOTES)]
-    sql = ROOT / "results" / "_cap_load.sql"
-    sql.write_text(load_vault_sql(docs))
+    # Staging is test scaffolding: load it first, untimed, so the published
+    # throughput describes knowledge.write and nothing else.
+    run_sql_file(c, "pgmind_cap", "_cap_load.sql", stage_vault_sql(docs))
     t0 = time.monotonic()
-    c.psql("pgmind_cap", file=sql)
+    c.psql("pgmind_cap", WRITE_PASS_SQL)
     elapsed = time.monotonic() - t0
-    sql.unlink()
 
     sizes = json.loads(c.psql("pgmind_cap", """
         SELECT json_object_agg(t.relname, json_build_object(
@@ -393,17 +486,17 @@ def suite_capacity_model():
     counts = json.loads(c.psql("pgmind_cap", """
         SELECT row_to_json(s) FROM knowledge.stats() s;
     """, tuples_only=True).strip())
-    latencies = json.loads(c.psql("pgmind_cap", """
+    latencies = json.loads(c.psql("pgmind_cap", f"""
         CREATE TEMP TABLE lat (fn text, ms double precision);
         DO $$
         DECLARE t0 timestamptz; i int;
         BEGIN
           FOR i IN 1..100 LOOP
             t0 := clock_timestamp();
-            PERFORM knowledge.read('cap/' || (i * 97 % 10000));
+            PERFORM knowledge.read('cap/' || (i * 97 % {CAPACITY_NOTES}));
             INSERT INTO lat VALUES ('read', extract(epoch FROM clock_timestamp() - t0) * 1000);
             t0 := clock_timestamp();
-            PERFORM count(*) FROM knowledge.backlinks('cap/' || (i * 89 % 10000));
+            PERFORM count(*) FROM knowledge.backlinks('cap/' || (i * 89 % {CAPACITY_NOTES}));
             INSERT INTO lat VALUES ('backlinks', extract(epoch FROM clock_timestamp() - t0) * 1000);
             t0 := clock_timestamp();
             PERFORM count(*) FROM knowledge.tagged('t' || (i % 20));
@@ -414,26 +507,48 @@ def suite_capacity_model():
           SELECT fn, percentile_cont(0.95) WITHIN GROUP (ORDER BY ms) AS p95
           FROM lat GROUP BY fn) x;
     """, tuples_only=True).strip().splitlines()[-1])
+    violations = int(c.psql(
+        "pgmind_cap",
+        "SELECT count(*) FROM pgmind.note n CROSS JOIN LATERAL pgmind.verify_note(n.id) v;",
+        tuples_only=True,
+    ).strip())
 
     blocks = counts["blocks"]
     total_bytes = sum(v["total_bytes"] for v in sizes.values())
+    # Gate 5 publishes honest numbers rather than asserting a threshold, but a
+    # degenerate corpus is a real failure, not an honest measurement.
+    problems = []
+    if counts["notes"] != CAPACITY_NOTES:
+        problems.append(f"stored {counts['notes']} notes, expected {CAPACITY_NOTES}")
+    if blocks <= 0:
+        problems.append("no blocks stored")
+    if elapsed <= 0:
+        problems.append("write pass took no measurable time")
+    if violations:
+        problems.append(f"{violations} verify_note violations")
     report = {
-        "status": "ok",  # gate 5 publishes honest numbers; no flattery threshold
+        "status": "fail" if problems else "ok",
         "scale": {"notes": counts["notes"], "blocks": blocks,
                   "edges": counts["edges_resolved"] + counts["edges_dangling"],
                   "tags": counts["tags"]},
-        "write_throughput_notes_per_s": round(counts["notes"] / elapsed, 1),
         "design_target_notes_per_s": 2000,
         "bytes": sizes,
-        "bytes_per_block_all_in": round(total_bytes / blocks, 1),
         "latency_p95_ms": latencies,
-        "extrapolation_100k_notes_10m_blocks": {
+        "verify_violations": violations,
+    }
+    if problems:
+        report["reason"] = "; ".join(problems)
+    else:
+        report["write_throughput_notes_per_s"] = round(counts["notes"] / elapsed, 1)
+        report["bytes_per_block_all_in"] = round(total_bytes / blocks, 1)
+        report["extrapolation_100k_notes_10m_blocks"] = {
             "assumption": "linear in blocks; revision-load behavior modeled only until Phase 3 measures it",
             "projected_total_gb": round(total_bytes / blocks * 10_000_000 / 1e9, 2),
-        },
-    }
-    out = ROOT / "results" / "capacity-model.json"
-    out.write_text(json.dumps(report, indent=2) + "\n")
+        }
+    # RFC-003 §5 gate 5 names this file as the published deliverable;
+    # eval/results/ is gitignored and cannot serve that role.
+    (published_dir() / "capacity-model-v1.json").write_text(json.dumps(report, indent=2) + "\n")
+    (results_dir() / "capacity-model.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 
 
@@ -442,10 +557,7 @@ def suite_dump_restore():
     counts, advancing sequences, verify_note clean, post-restore write works."""
     c = cluster()
     c.createdb("pgmind_ref")
-    sql = ROOT / "results" / "_ref_load.sql"
-    sql.write_text(load_vault_sql(repo_docs()))
-    c.psql("pgmind_ref", file=sql)
-    sql.unlink()
+    run_sql_file(c, "pgmind_ref", "_ref_load.sql", load_vault_sql(repo_docs()))
 
     dump_file = c.dir / "ref.dump.sql"
     c.dump("pgmind_ref", dump_file)
@@ -504,21 +616,23 @@ def main() -> int:
         "suites": {},
     }
     failed = False
-    for name, fn in SUITES.items():
-        print(f"suite: {name}")
-        try:
-            result = fn()
-        except Exception as exc:  # a crashed suite is a failed suite
-            result = {"status": "fail", "error": repr(exc)}
-        report["suites"][name] = result
-        print(f"  -> {result['status']}" + (f" ({result.get('reason')})" if result.get("reason") else ""))
-        failed |= result["status"] == "fail"
+    try:
+        for name, fn in SUITES.items():
+            print(f"suite: {name}")
+            try:
+                result = fn()
+            except Exception as exc:  # a crashed suite is a failed suite
+                result = {"status": "fail", "error": repr(exc)}
+            report["suites"][name] = result
+            print(f"  -> {result['status']}" + (f" ({result.get('reason')})" if result.get("reason") else ""))
+            failed |= result["status"] == "fail"
+    finally:
+        # KeyboardInterrupt/SystemExit must not leak a live postmaster and a
+        # multi-GB scratch datadir.
+        if _CLUSTER is not None:
+            _CLUSTER.stop()
 
-    if _CLUSTER is not None:
-        _CLUSTER.stop()
-
-    out = ROOT / "results" / "latest.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
+    out = results_dir() / "latest.json"
     out.write_text(json.dumps(report, indent=2) + "\n")
     print(f"report: {out}")
     return 1 if failed else 0

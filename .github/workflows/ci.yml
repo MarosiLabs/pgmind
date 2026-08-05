@@ -31,7 +31,10 @@ jobs:
           # which `cargo pgrx test` needs to boot its test cluster
           sudo apt-get install -y -qq postgresql-${{ matrix.pg }} postgresql-server-dev-${{ matrix.pg }}
           # cargo pgrx test installs the extension into the system dirs — make them runner-writable
-          sudo chmod a+rwx /usr/lib/postgresql/${{ matrix.pg }}/lib /usr/share/postgresql/${{ matrix.pg }}/extension
+          # Own the install dirs rather than making them world-writable: `cargo
+          # pgrx install` needs to write here, but a+rwx lets any other process
+          # on the runner drop a .so that Postgres then loads as the postgres user.
+          sudo chown "$USER" /usr/lib/postgresql/${{ matrix.pg }}/lib /usr/share/postgresql/${{ matrix.pg }}/extension
 
       # rustup on the runner respects rust-toolchain.toml automatically.
       - uses: Swatinem/rust-cache@v2
@@ -71,7 +74,7 @@ jobs:
           sudo sh -c 'echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-18 postgresql-server-dev-18
-          sudo chmod a+rwx /usr/lib/postgresql/18/lib /usr/share/postgresql/18/extension
+          sudo chown "$USER" /usr/lib/postgresql/18/lib /usr/share/postgresql/18/extension
 
       - uses: Swatinem/rust-cache@v2
         with:

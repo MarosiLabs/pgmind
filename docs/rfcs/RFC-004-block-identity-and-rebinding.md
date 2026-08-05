@@ -1,6 +1,6 @@
 # RFC-004: Block Identity & Rebinding Semantics
 
-- **Status:** Living — **Part A (write-path identity) accepted 2026-08-05 for Phase 2; Part B (heuristic rebinding) remains draft until Phase 3 acceptance** (per plan §16: "accepted (living)" split). Amended same day after adversarial review: fragment arity (parentless counting), subtree carry, op return contract, container-children constraints, PM008, marker/ID divergence.
+- **Status:** Living — **Part A (write-path identity) accepted 2026-08-05 for Phase 2; Part B (heuristic rebinding) remains draft until Phase 3 acceptance** (per plan §16: "accepted (living)" split). Amended same day after adversarial review: fragment arity (parentless counting), subtree carry, op return contract, container-children constraints, PM008, marker/ID divergence. Amended again after Phase-2 code review: A3 pass 2 is section-first (two tiers), A4 `marker_to` is a uuid inside the split/merge object and `carried` is emitted for every carrying op.
 - **Phase:** 2-3
 - **Owner:** project author
 - **Created:** 2026-08-05 · **Accepted:** 2026-08-05 (Part A) · **Frozen:** —
@@ -53,7 +53,14 @@ Mechanics (splicing, decoration, separator synthesis, the PM008 post-splice asse
 When `write()` replaces an existing note, old blocks and newly parsed blocks are matched in three passes. Everything here is exact — no similarity, no thresholds; that is Part B's territory and Phase 3's risk.
 
 - **Pass 1 — `^id` claims.** A new block whose `block_ref_id` equals the `block_ref_id` of a not-yet-matched old block carries that block's ID. This is the serialized-identity escape hatch (plan §11) and is *user assertion carried in the text*, not parser-derived identity: the marker was written by whoever wants the binding, pgmind merely honors it deterministically. Collisions resolve by document order on both sides: among new claimants of one ref, the lowest-`ord` new block wins (the rest fall through to pass 2); among duplicate old holders (dirty imports exist), the lowest-`ord` old block is the claimable one, and remaining duplicates behave as unmarked. A claim carries across a kind change (same assertion strength as `update_block`).
-- **Pass 2 — exact content match.** Remaining new blocks match remaining old blocks with equal `content_hash` (kind is inside the hash, RFC-002 D7). Equal-hash sets pair **by document order**: k-th unmatched new occurrence ↔ k-th unmatched old occurrence. This carries every untouched block and every *moved* block, positionally stably for duplicates.
+- **Pass 2 — exact content match, section-first.** Remaining new blocks match remaining old blocks with equal `content_hash` (kind is inside the hash, RFC-002 D7). Equal-hash sets pair **by document order**: k-th unmatched new occurrence ↔ k-th unmatched old occurrence. This carries every untouched block and every *moved* block, positionally stably for duplicates.
+
+  The pass runs in **two tiers**, each applying the k-th↔k-th rule to what the previous tier left unmatched:
+
+  - **Tier 2a — same section.** Candidates must agree on `content_hash` *and* `heading_path`.
+  - **Tier 2b — any section.** Candidates must agree on `content_hash` alone.
+
+  *Amended 2026-08-05 (post-Phase-2 review).* The single-tier form was unsound because `content_hash` covers only `(kind, normalized_content)` — `heading_path` is deliberately **not** in the hash (it is a positional fact, see below). So two byte-identical paragraphs in different sections hashed equal and were interchangeable. Deleting one section then handed its paragraph's ID to the identical paragraph in a *surviving* section while deleting the survivor's own ID: an ID silently changing which content it denotes, which A1 forbids outright ("an ID is never reused"). Tier 2a makes same-section carry win; tier 2b preserves the behaviour that motivated the untiered rule — renaming a heading changes its descendants' `heading_path`, and those blocks must still carry. Tie-breaking within a tier is unchanged, so every previously-correct outcome is preserved; only cross-section theft is removed. Pinned by `section_delete_does_not_recycle_ids_across_sections` and `heading_rename_carries_section_blocks`.
 - **Pass 3 — remainder.** Unmatched new blocks **mint**; unmatched old blocks are **removed** (rows deleted in Phase 2 — current-state storage per RFC-003 §4; from Phase 3, removal becomes a tombstoning revision op and Part B's stages 1-2 run *between* passes 2 and 3 to catch edited-in-place blocks).
 
 Stated consequence, loudly: **in Phase 2, editing a paragraph and rewriting the whole note gives that paragraph a new ID** (its hash changed; no `^id` claimed it). This is deliberate — a deterministic core must not guess — and it is exactly why the block ops exist (an agent that means "update this block" should say so) and why `^id` markers exist (a human round-tripping through an external editor can pin identity in the text). Phase 3's Part B narrows the gap heuristically, with confidence made visible. The no-op case is stronger than ID preservation: byte-identical input short-circuits before the carry entirely (RFC-003 D6 step 2).
@@ -76,6 +83,12 @@ RFC-011 (Phase 3+) owns the real provenance model. Until it lands, `revision.met
 ```
 
 Lists are capped at 200 entries, then truncated with `"truncated": true` plus counts — bulk imports must not bloat revision rows; the cap is honest about it. This meta is a stopgap contract: RFC-011 supersedes it and MUST define the migration of accumulated meta.
+
+*Amended 2026-08-05 (post-Phase-2 review), clarifying three points the first implementation got wrong:*
+
+- **`marker_to` is a `uuid` and it lives inside the `split`/`merge` object.** It names *which surviving block* carries the `^marker` (A5). The first implementation emitted the marker's **text label** and hoisted the key to the top level of `meta`, so the record could not answer the one question A5 says it exists to answer, and a consumer reading `meta->'split'->>'marker_to'` got NULL. Because identities are assigned by the carry, `marker_to` can only be resolved *after* passes 1-3 run — the op reports a block position and the commit step resolves it.
+- **`marker_to` searches the surviving block's whole subtree.** RFC-002 D3 anchors a marker to a block's final content line, so for a `list_item` the marker rides on the item's *inner paragraph*. Scanning only the fragment roots reported `null` for markers that plainly survived.
+- **`carried` is emitted for every op that runs a carry**, not only `write`. The five block ops run A3 scoped to a subtree (A2 "subtree carry"), and suppressing their counts would hide real identity events. The comment above is narrowed accordingly.
 
 ### A5. `block_ref_id` is a label, not identity
 

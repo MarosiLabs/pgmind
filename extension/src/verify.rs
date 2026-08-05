@@ -23,26 +23,10 @@ mod pgmind {
 fn verify_note_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
     let mut v: Vec<String> = Vec::new();
 
-    let found: Option<(Uuid, String)> = Spi::connect(|client| {
-        let rows = client
-            .select(
-                "SELECT head_revision, preamble FROM pgmind.note WHERE id = $1",
-                Some(1),
-                &[arg(note_id)],
-            )
-            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in verify_note: {e}"));
-        if rows.is_empty() {
-            return None;
-        }
-        let row = rows.first();
-        Some((
-            row.get::<Uuid>(1).unwrap().unwrap(),
-            row.get::<String>(2).unwrap().unwrap(),
-        ))
-    });
-    let Some((head, preamble)) = found else {
+    let Some(note) = store::note_by_id(note_id) else {
         return SetOfIterator::new(vec![format!("note {note_id} does not exist")]);
     };
+    let (head, preamble, vault) = (note.head_revision, note.preamble.clone(), note.vault_id);
 
     // Head revision must exist and belong to this note (no FK by design — D3).
     let head_ok: Option<bool> = Spi::get_one_with_args(
@@ -58,10 +42,7 @@ fn verify_note_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
 
     // Reconstruct and re-parse; the parse is the truth the lanes must mirror.
     let tiles = store::tiles_of(note_id);
-    let mut source = preamble.clone();
-    for t in &tiles {
-        source.push_str(t);
-    }
+    let source = store::source_of(&note, &tiles);
     let parsed = parse_note(&source);
 
     if parsed.doc.preamble.end != preamble.len() {
@@ -78,7 +59,7 @@ fn verify_note_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
             parsed.tiles.len()
         ));
     } else {
-        for (i, ((raw, _), stored)) in parsed.tiles.iter().zip(tiles.iter()).enumerate() {
+        for (i, (raw, stored)) in parsed.tiles.iter().zip(tiles.iter()).enumerate() {
             if raw != stored {
                 v.push(format!("tile {i} bytes disagree with parse"));
             }
@@ -157,28 +138,14 @@ fn verify_note_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
 
     // Extraction indexes must equal a fresh recomputation, resolution included
     // (D5: incremental maintenance ≡ full recomputation).
-    let vault: Option<Uuid> = Spi::get_one_with_args(
-        "SELECT vault_id FROM pgmind.note WHERE id = $1",
-        &[arg(note_id)],
-    )
-    .unwrap_or(None);
-    if let Some(vault) = vault {
+    {
         use std::collections::BTreeSet;
         let ords_ok = rows.len() == parsed.doc.blocks.len();
         if ords_ok {
             let mut want_edges: BTreeSet<String> = BTreeSet::new();
             for l in &parsed.doc.links {
-                let kind = match l.kind {
-                    pgmind_core::LinkKind::Wikilink => "wikilink",
-                    pgmind_core::LinkKind::Transclusion => "transclusion",
-                    pgmind_core::LinkKind::Blockref => "blockref",
-                    pgmind_core::LinkKind::Mdlink => "mdlink",
-                };
-                let (heading, block_ref) = match &l.anchor {
-                    Some(a) if a.starts_with('^') => (String::new(), a[1..].to_string()),
-                    Some(a) => (a.clone(), String::new()),
-                    None => (String::new(), String::new()),
-                };
+                let kind = l.kind.tag();
+                let (heading, block_ref) = store::split_anchor(&l.anchor);
                 let r = store::resolve_target(vault, &l.target);
                 want_edges.insert(format!(
                     "{}|{kind}|{}|{heading}|{block_ref}|{}|{:?}|{:?}|{:?}",
@@ -257,8 +224,6 @@ fn verify_note_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
                 v.push(format!("tag unexpected: {extra}"));
             }
         }
-    } else {
-        v.push("note has no vault_id".into());
     }
 
     SetOfIterator::new(v)

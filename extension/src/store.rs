@@ -28,14 +28,47 @@ pub fn current_vault() -> Uuid {
     })
 }
 
+/// Parse the `pgmind.vault_id` GUC the way PostgreSQL's own `uuid` input does,
+/// so the extension and the RLS predicate RFC-003 D1 documents
+/// (`vault_id = current_setting('pgmind.vault_id')::uuid`) can never disagree
+/// about which vault a session is in.
+///
+/// Accepts the canonical `8-4-4-4-12` dashed form and the bare 32-hex form,
+/// each optionally brace-wrapped; rejects everything else. Two specific
+/// hazards this closes: `u8::from_str_radix` accepts a leading `+`, so
+/// `'+0+0…'` used to parse as the all-zeros DEFAULT vault instead of raising
+/// PM001; and the old length gate counted BYTES while the slice indexed
+/// bytes, so a 32-byte multibyte value panicked mid-character. This walks
+/// `chars`, never byte offsets.
 fn parse_uuid(s: &str) -> Option<Uuid> {
-    let hex: String = s.chars().filter(|c| *c != '-').collect();
-    if hex.len() != 32 || s.chars().filter(|c| *c == '-').count() > 4 {
+    let body = s
+        .strip_prefix('{')
+        .and_then(|b| b.strip_suffix('}'))
+        .unwrap_or(s);
+    let mut nibbles = [0u8; 32];
+    let mut n = 0usize;
+    let mut dashes = 0usize;
+    for (i, c) in body.chars().enumerate() {
+        if c == '-' {
+            // Canonical positions only — the old check merely capped the count.
+            if !matches!(i, 8 | 13 | 18 | 23) {
+                return None;
+            }
+            dashes += 1;
+            continue;
+        }
+        if n == 32 {
+            return None;
+        }
+        nibbles[n] = c.to_digit(16)? as u8;
+        n += 1;
+    }
+    if n != 32 || !(dashes == 0 || dashes == 4) {
         return None;
     }
     let mut bytes = [0u8; 16];
-    for i in 0..16 {
-        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    for (i, b) in bytes.iter_mut().enumerate() {
+        *b = (nibbles[i * 2] << 4) | nibbles[i * 2 + 1];
     }
     Some(Uuid::from_bytes(bytes))
 }
@@ -43,8 +76,31 @@ fn parse_uuid(s: &str) -> Option<Uuid> {
 #[derive(Debug, Clone)]
 pub struct NoteRow {
     pub id: Uuid,
+    pub vault_id: Uuid,
     pub head_revision: Uuid,
     pub preamble: String,
+    pub tombstoned: bool,
+}
+
+/// Split a link anchor into its `(dst_heading, dst_block_ref)` storage
+/// columns; `^x` is a block ref, anything else a heading, empty stands in for
+/// NULL. Paired with [`join_anchor`] so the encoding is stated once — the
+/// write path, `verify_note`, and the read APIs must not each carry their own
+/// copy of this rule or `verify_note` ends up validating the write path with
+/// the write path's own logic.
+pub fn split_anchor(anchor: &Option<String>) -> (String, String) {
+    match anchor {
+        Some(a) => match a.strip_prefix('^') {
+            Some(r) => (String::new(), r.to_string()),
+            None => (a.clone(), String::new()),
+        },
+        None => (String::new(), String::new()),
+    }
+}
+
+/// Inverse of [`split_anchor`], for the read APIs.
+pub fn join_anchor(heading: Option<String>, block_ref: Option<String>) -> Option<String> {
+    block_ref.map(|r| format!("^{r}")).or(heading)
 }
 
 #[derive(Debug, Clone)]
@@ -68,14 +124,20 @@ pub fn arg(u: Uuid) -> DatumWithOid<'static> {
 }
 
 /// Live note at `path` in the current vault.
+///
+/// Normalizes here rather than at each entry point: `write()` stores the
+/// NFC-trimmed spelling (RFC-003 D5), so a reader that passed the caller's raw
+/// text straight into `path = $2` could not find a note it had just written —
+/// macOS hands out NFD, and every path-taking read API goes through here.
 pub fn note_by_path(vault: Uuid, path: &str) -> Option<NoteRow> {
+    let path = pgmind_core::path::path_normalize(path);
     Spi::connect(|client| {
         let rows = client
             .select(
                 "SELECT id, head_revision, preamble FROM pgmind.note
                  WHERE vault_id = $1 AND path = $2 AND tombstoned_at IS NULL",
                 Some(1),
-                &[arg(vault), path.into()],
+                &[arg(vault), path.as_str().into()],
             )
             .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in note_by_path: {e}"));
         if rows.is_empty() {
@@ -84,8 +146,42 @@ pub fn note_by_path(vault: Uuid, path: &str) -> Option<NoteRow> {
         let row = rows.first();
         Some(NoteRow {
             id: row.get(1).unwrap().unwrap(),
+            vault_id: vault,
             head_revision: row.get(2).unwrap().unwrap(),
             preamble: row.get::<String>(3).unwrap().unwrap(),
+            tombstoned: false,
+        })
+    })
+}
+
+/// The same row reached by id. The block ops and `verify_note` address notes
+/// by id; both used to hand-roll this query and the preamble‖tiles
+/// concatenation, which is how they came to disagree with `note_by_path` about
+/// liveness. Tombstone state is reported, not filtered: `verify_note` is a
+/// debug checker and must still be able to inspect a retired note.
+pub fn note_by_id(note_id: Uuid) -> Option<NoteRow> {
+    Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT id, vault_id, head_revision, preamble, tombstoned_at
+                 FROM pgmind.note WHERE id = $1",
+                Some(1),
+                &[arg(note_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in note_by_id: {e}"));
+        if rows.is_empty() {
+            return None;
+        }
+        let row = rows.first();
+        Some(NoteRow {
+            id: row.get(1).unwrap().unwrap(),
+            vault_id: row.get(2).unwrap().unwrap(),
+            head_revision: row.get(3).unwrap().unwrap(),
+            preamble: row.get::<String>(4).unwrap().unwrap(),
+            tombstoned: row
+                .get::<pgrx::datum::TimestampWithTimeZone>(5)
+                .unwrap()
+                .is_some(),
         })
     })
 }
@@ -115,13 +211,23 @@ pub fn tiles_of(note: Uuid) -> Vec<String> {
     })
 }
 
-/// Full source of a note: preamble ‖ tiles (RFC-003 D2 invariant).
-pub fn source_of(note: &NoteRow) -> String {
-    let mut s = note.preamble.clone();
-    for t in tiles_of(note.id) {
-        s.push_str(&t);
+/// Full source of a note: preamble ‖ tiles (RFC-003 D2 invariant). Takes the
+/// tiles the caller already holds — the write path, the block ops and
+/// `verify_note` all need both, and fetching them twice meant a second full
+/// TOAST read and decompression of the whole document per operation.
+pub fn source_of(note: &NoteRow, tiles: &[String]) -> String {
+    let mut s =
+        String::with_capacity(note.preamble.len() + tiles.iter().map(String::len).sum::<usize>());
+    s.push_str(&note.preamble);
+    for t in tiles {
+        s.push_str(t);
     }
     s
+}
+
+/// `source_of` for callers that do not otherwise need the tiles.
+pub fn load_source(note: &NoteRow) -> String {
+    source_of(note, &tiles_of(note.id))
 }
 
 /// All block rows of a note, in ord order.
@@ -237,27 +343,89 @@ pub fn resolve_target(vault: Uuid, target: &str) -> Resolution {
 /// note could affect (dst_path = new path, or slash-free dst_path = new
 /// basename). Definitionally equal to full recomputation.
 pub fn repair_edges_on_creation(vault: Uuid, new_path: &str) {
+    // The affected set is defined by exactly two literal dst_path values, so
+    // resolution is loop-invariant: resolve each once and apply it set-wise
+    // rather than re-resolving per edge (fan-in used to cost 3 statements per
+    // linking note).
     let base = pgmind_core::path::basename(new_path);
-    let affected: Vec<(i64, String)> = Spi::connect(|client| {
-        client
-            .select(
-                "SELECT id, dst_path FROM pgmind.edge
-                 WHERE vault_id = $1 AND (dst_path = $2 OR dst_path = $3)",
-                None,
-                &[arg(vault), new_path.into(), base.into()],
-            )
-            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in repair: {e}"))
-            .map(|row| {
-                (
-                    row.get::<i64>(1).unwrap().unwrap(),
-                    row.get::<String>(2).unwrap().unwrap(),
-                )
-            })
-            .collect()
-    });
-    for (edge_id, dst_path) in affected {
-        let r = resolve_target(vault, &dst_path);
-        update_edge_resolution(edge_id, r);
+    let mut targets: Vec<&str> = vec![new_path];
+    if base != new_path {
+        targets.push(base);
+    }
+    for target in targets {
+        let r = resolve_target(vault, target);
+        update_edge_resolution_by_path(vault, target, r);
+    }
+}
+
+/// Apply one resolution to every edge in the vault pointing at `dst_path`.
+fn update_edge_resolution_by_path(vault: Uuid, dst_path: &str, r: Resolution) {
+    Spi::run_with_args(
+        "UPDATE pgmind.edge
+         SET dst_note = $3, resolved_via = $4, dangling_reason = $5
+         WHERE vault_id = $1 AND dst_path = $2
+           AND (dst_note IS DISTINCT FROM $3
+             OR resolved_via IS DISTINCT FROM $4
+             OR dangling_reason IS DISTINCT FROM $5)",
+        &[
+            arg(vault),
+            dst_path.into(),
+            r.dst_note()
+                .map(DatumWithOid::from)
+                .unwrap_or_else(DatumWithOid::null::<Uuid>),
+            r.via()
+                .map(DatumWithOid::from)
+                .unwrap_or_else(DatumWithOid::null::<String>),
+            r.reason()
+                .map(DatumWithOid::from)
+                .unwrap_or_else(DatumWithOid::null::<String>),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure updating edge resolution: {e}"));
+}
+
+#[cfg(test)]
+mod parse_uuid_tests {
+    use super::parse_uuid;
+
+    const NIL: [u8; 16] = [0u8; 16];
+
+    #[test]
+    fn accepts_what_postgres_accepts() {
+        for s in [
+            "00000000-0000-0000-0000-000000000000",
+            "00000000000000000000000000000000",
+            "{00000000-0000-0000-0000-000000000000}",
+            "{00000000000000000000000000000000}",
+        ] {
+            assert_eq!(parse_uuid(s).map(|u| *u.as_bytes()), Some(NIL), "{s:?}");
+        }
+        assert_eq!(
+            parse_uuid("A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11").map(|u| u.as_bytes()[0]),
+            Some(0xA0)
+        );
+    }
+
+    #[test]
+    fn rejects_what_postgres_rejects() {
+        for s in [
+            // `u8::from_str_radix` accepted the '+', silently yielding the
+            // DEFAULT vault while the RLS `::uuid` cast raised 22P02.
+            "+0+0+0+0+0+0+0+0+0+0+0+0+0+0+0+0",
+            "----00000000000000000000000000000000",
+            "0-0000000-00000000000000000000000-0",
+            // 32 BYTES but 12 chars: the old byte-slicing panicked here.
+            "€€€€€€€€€€ab",
+            "aéaéaéaéaéaéaéaéaéaéaéaéaéaéaé00",
+            "",
+            "0000000000000000000000000000000",   // 31
+            "000000000000000000000000000000000", // 33
+            "0000000g-0000-0000-0000-000000000000",
+            "{00000000-0000-0000-0000-000000000000",
+            " 00000000-0000-0000-0000-000000000000",
+        ] {
+            assert!(parse_uuid(s).is_none(), "should reject {s:?}");
+        }
     }
 }
 

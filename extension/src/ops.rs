@@ -7,19 +7,41 @@ use pgrx::{heap_tuple::PgHeapTuple, Uuid};
 use serde_json::json;
 
 use crate::errors::{pm_error, Pm};
-use crate::ids;
 use crate::store::{self, arg, BlockRow};
-use crate::write::{self, parse_note, Carry, ParsedNote};
+use crate::write::{self, parse_note, CarryInput, CarrySrc, CarryState, ParsedNote};
 use crate::Markdown;
+
+/// Byte offset of the start of the line containing `pos`. Seven copies of this
+/// `rfind` lived inline in this file, where a one-byte error silently rewrites
+/// user content.
+fn line_start_of(src: &str, pos: usize) -> usize {
+    src[..pos].rfind('\n').map(|i| i + 1).unwrap_or(0)
+}
+
+/// Last byte covered by the ord range `[start, end)` — a subtree's extent.
+fn span_end_of(parsed: &ParsedNote, start: usize, end: usize) -> usize {
+    (start..end)
+        .map(|i| parsed.doc.blocks[i].span.end)
+        .max()
+        .unwrap_or_else(|| parsed.doc.blocks[start].span.end)
+}
 
 /// Everything an op needs about its target's note, loaded once.
 struct NoteCtx {
     vault: Uuid,
     note_id: Uuid,
     head: Uuid,
-    source: String,
+    /// Tiles as stored, so `reconcile` need not re-read them.
+    tiles: Vec<String>,
     rows: Vec<BlockRow>,
     parsed: ParsedNote,
+}
+
+impl NoteCtx {
+    /// The note's full source. Held once, in `parsed`.
+    fn src(&self) -> &str {
+        &self.parsed.source
+    }
 }
 
 fn load_ctx_by_block(block_id: Uuid) -> (NoteCtx, usize) {
@@ -54,21 +76,10 @@ fn load_ctx_by_block(block_id: Uuid) -> (NoteCtx, usize) {
             &format!("id {block_id}"),
         );
     }
-    let (head, preamble): (Uuid, String) = Spi::connect(|client| {
-        let rows = client
-            .select(
-                "SELECT head_revision, preamble FROM pgmind.note WHERE id = $1",
-                Some(1),
-                &[arg(note_id)],
-            )
-            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure loading note: {e}"));
-        let row = rows.first();
-        (row.get(1).unwrap().unwrap(), row.get(2).unwrap().unwrap())
-    });
-    let mut source = preamble;
-    for t in store::tiles_of(note_id) {
-        source.push_str(&t);
-    }
+    let note = store::note_by_id(note_id)
+        .unwrap_or_else(|| pgrx::error!("pgmind: note row vanished mid-operation"));
+    let tiles = store::tiles_of(note_id);
+    let source = store::source_of(&note, &tiles);
     let rows = store::blocks_of(note_id);
     let parsed = parse_note(&source);
     if rows.len() != parsed.doc.blocks.len() {
@@ -83,8 +94,8 @@ fn load_ctx_by_block(block_id: Uuid) -> (NoteCtx, usize) {
     let ctx = NoteCtx {
         vault,
         note_id,
-        head,
-        source,
+        head: note.head_revision,
+        tiles,
         rows,
         parsed,
     };
@@ -216,6 +227,65 @@ fn decorate(fragment: &str, prefix: &str) -> String {
     out
 }
 
+/// Result of [`splice_replace`].
+struct Splice {
+    source: String,
+    /// Rewritten byte range in the new source.
+    edit: (usize, usize),
+    /// Line the replacement starts on, for `find_root_at`.
+    line_start: usize,
+}
+
+/// The byte splice shared by `update_block`, `split_block` and `merge_blocks`
+/// (RFC-003 D6): keep the part of the target's first-line decoration the
+/// fragment does not supply, re-prefix the fragment's continuation lines, and
+/// rebuild the source around the replaced region.
+///
+/// This sequence used to be written out verbatim three times, and the copies
+/// had already drifted — `split_block` carried an extra branch the others
+/// lacked. (That branch was a no-op: it took the fragment verbatim when
+/// `line_prefix` was empty, but an empty `line_prefix` means a top-level
+/// target, whose `cont_prefix` is empty too, and `decorate` already returns
+/// the fragment unchanged for an empty prefix.)
+fn splice_replace(
+    ctx: &NoteCtx,
+    deco: &pgmind_core::Block,
+    region_start: usize,
+    region_end: usize,
+    frag_text: &str,
+    frag_root_is_item: bool,
+) -> Splice {
+    let keep = if deco.kind == pgmind_core::BlockKind::ListItem && frag_root_is_item {
+        deco.first_line_strip_outer
+    } else {
+        deco.first_line_strip_full
+    };
+    let cont = if frag_root_is_item {
+        &deco.line_prefix
+    } else {
+        &deco.cont_prefix
+    };
+    let mut replacement = decorate(frag_text.trim_end_matches('\n'), cont);
+    replacement.push('\n');
+
+    let src = ctx.src();
+    let line_start = line_start_of(src, region_start);
+    // Nested spans start at their LINE start (decoration included), so the
+    // preserved decoration is the first `keep` bytes of that line.
+    let preserved = &src[line_start..(line_start + keep).min(region_end)];
+    let mut source = String::with_capacity(src.len() + replacement.len());
+    source.push_str(&src[..line_start]);
+    source.push_str(preserved);
+    source.push_str(&replacement);
+    source.push_str(&src[region_end..]);
+    let edit = (line_start, line_start + preserved.len() + replacement.len());
+    Splice {
+        source,
+        edit,
+        line_start,
+    }
+}
+
 /// Ensure a segment ends with a blank line (separator synthesis, RFC-003 D6).
 fn blank_terminated(mut s: String) -> String {
     if !s.ends_with('\n') {
@@ -244,26 +314,56 @@ fn op_result(revision: Uuid, block_ids: Vec<Uuid>) -> PgHeapTuple<'static, pgrx:
     tuple
 }
 
+/// What an op tells [`commit_op`] about the splice it just performed. Named
+/// fields rather than ten positional arguments, and `Option` rather than
+/// `usize::MAX` sentinels whose meaning depended on arithmetic accidents
+/// downstream.
+#[derive(Default)]
+struct OpCommit {
+    /// Ord range replaced in the OLD parse. `None` = nothing was replaced.
+    old_region: Option<(usize, usize)>,
+    /// Rewritten byte range in the NEW source. `None` = the whole note was
+    /// rewritten (move), so there is no outside set and every block must be
+    /// pinned — which `commit_op` then checks explicitly.
+    edit_range: Option<(usize, usize)>,
+    /// (old idx → new idx) pins inside the region, in addition to outside pairs.
+    region_pins: Vec<(usize, usize)>,
+    /// Pins must keep (kind, hash) — true for move, whose bytes are untouched.
+    pin_hash_strict: bool,
+    /// Scoped subtree carry: (old idxs, new idxs).
+    scoped: Vec<(Vec<usize>, Vec<usize>)>,
+    /// New-parse index of the block carrying the surviving `^marker` (A5).
+    /// Resolved to a UUID here, because identities do not exist until the
+    /// carry has run.
+    marker_to: Option<usize>,
+    meta_extra: serde_json::Value,
+    result_new_idxs: Vec<usize>,
+}
+
 /// Finish an op: outside-region invariance check (PM008), pins + scoped carry,
-/// reconcile, revision. `edit_range` is the rewritten byte range in the NEW
-/// source; `old_region` the ord range replaced in the OLD parse.
-#[allow(clippy::too_many_arguments)]
+/// reconcile, revision.
+///
+/// Takes the caller's re-parse of the spliced source rather than the source
+/// itself: every op already parsed it to locate its pins, and re-parsing here
+/// meant a third full comrak pass and another whole-document copy per
+/// operation (`ctx.parsed`, the probe, and this one) for an identical result.
 fn commit_op(
     ctx: &NoteCtx,
     op: &str,
-    new_source: String,
-    old_region: (usize, usize),
-    edit_range: (usize, usize),
-    // (old idx → new idx) pins inside the region, in addition to outside pairs
-    region_pins: Vec<(usize, usize)>,
-    // pins must keep (kind, hash) — true for move, whose bytes are untouched
-    pin_hash_strict: bool,
-    // scoped subtree carry: (old idxs, new idxs)
-    scoped: Vec<(Vec<usize>, Vec<usize>)>,
-    meta_extra: serde_json::Value,
-    result_new_idxs: Vec<usize>,
+    new_parsed: ParsedNote,
+    spec: OpCommit,
 ) -> PgHeapTuple<'static, pgrx::AllocatedByRust> {
-    let new_parsed = parse_note(&new_source);
+    let OpCommit {
+        old_region,
+        edit_range,
+        region_pins,
+        pin_hash_strict,
+        scoped,
+        marker_to,
+        meta_extra,
+        result_new_idxs,
+    } = spec;
+
     let old_blocks = &ctx.parsed.doc.blocks;
     let new_blocks = &new_parsed.doc.blocks;
 
@@ -292,17 +392,55 @@ fn commit_op(
     let pinned_new: std::collections::HashSet<usize> =
         region_pins.iter().map(|(_, n)| *n).collect();
 
+    // RFC-003 D6's PM008 assertion also covers the case where there IS no
+    // outside set: `move` rewrites the whole note and pins every block, so the
+    // outside comparison below is 0-vs-0 and would let a re-parse that yields
+    // extra blocks mint fresh IDs in silence. Assert the count and the pin
+    // coverage directly.
+    if edit_range.is_none() {
+        if new_blocks.len() != old_blocks.len() {
+            pm_error(
+                Pm::SpliceRestructures,
+                "splice changed the block count",
+                &format!(
+                    "{} blocks before, {} after",
+                    old_blocks.len(),
+                    new_blocks.len()
+                ),
+            );
+        }
+        if pinned_new.len() != new_blocks.len() {
+            pm_error(
+                Pm::SpliceRestructures,
+                "whole-note splice left a block unaccounted for",
+                &format!(
+                    "{} of {} new blocks pinned",
+                    pinned_new.len(),
+                    new_blocks.len()
+                ),
+            );
+        }
+    }
+
     // Outside sets, in document order — pinned blocks (targets, ancestors,
     // move permutations) are handled by their pins, never by outside pairing.
-    let old_outside: Vec<usize> = (0..old_blocks.len())
-        .filter(|i| (*i < old_region.0 || *i >= old_region.1) && !pinned_old.contains(i))
-        .collect();
-    let new_outside: Vec<usize> = (0..new_blocks.len())
-        .filter(|i| {
-            let sp = &new_blocks[*i].span;
-            (sp.end <= edit_range.0 || sp.start >= edit_range.1) && !pinned_new.contains(i)
-        })
-        .collect();
+    let old_outside: Vec<usize> = match old_region {
+        Some((lo, hi)) => (0..old_blocks.len())
+            .filter(|i| (*i < lo || *i >= hi) && !pinned_old.contains(i))
+            .collect(),
+        None => (0..old_blocks.len())
+            .filter(|i| !pinned_old.contains(i))
+            .collect(),
+    };
+    let new_outside: Vec<usize> = match edit_range {
+        Some((lo, hi)) => (0..new_blocks.len())
+            .filter(|i| {
+                let sp = &new_blocks[*i].span;
+                (sp.end <= lo || sp.start >= hi) && !pinned_new.contains(i)
+            })
+            .collect(),
+        None => Vec::new(),
+    };
     if old_outside.len() != new_outside.len() {
         pm_error(
             Pm::SpliceRestructures,
@@ -326,102 +464,68 @@ fn commit_op(
     }
 
     // Assignments: outside pairs, then region pins, then scoped carry.
-    let mut assign: Vec<Option<Uuid>> = vec![None; new_blocks.len()];
-    let mut old_used = vec![false; old_blocks.len()];
+    let old_src: Vec<CarrySrc> = old_blocks.iter().map(CarrySrc::from_block).collect();
+    let new_src: Vec<CarrySrc> = new_blocks.iter().map(CarrySrc::from_block).collect();
+    let old_ids: Vec<Uuid> = ctx.rows.iter().map(|r| r.id).collect();
+    let input = CarryInput {
+        old: &old_src,
+        new: &new_src,
+        old_ids: &old_ids,
+    };
+    let mut state = CarryState::new(old_blocks.len(), new_blocks.len());
     for (&oi, &ni) in old_outside.iter().zip(new_outside.iter()) {
-        assign[ni] = Some(ctx.rows[oi].id);
-        old_used[oi] = true;
+        state.assign[ni] = Some(ctx.rows[oi].id);
+        state.old_used[oi] = true;
     }
     for &(oi, ni) in &region_pins {
-        assign[ni] = Some(ctx.rows[oi].id);
-        old_used[oi] = true;
+        state.assign[ni] = Some(ctx.rows[oi].id);
+        state.old_used[oi] = true;
     }
-    let mut carried_ref = 0usize;
-    let mut carried_hash = 0usize;
+    // RFC-004 A3 passes 1-2, scoped to each subtree. One normative
+    // implementation, shared with knowledge.write via write::carry_scope.
     for (old_set, new_set) in &scoped {
-        // A3 passes scoped to the subtree (RFC-004 A2 "subtree carry").
-        use std::collections::HashMap;
-        let mut claimable: HashMap<&str, usize> = HashMap::new();
-        for &oi in old_set {
-            if old_used[oi] {
-                continue;
-            }
-            if let Some(r) = old_blocks[oi].block_ref_id.as_deref() {
-                claimable.entry(r).or_insert(oi);
-            }
-        }
-        for &ni in new_set {
-            if assign[ni].is_some() {
-                continue;
-            }
-            if let Some(rid) = new_blocks[ni].block_ref_id.as_deref() {
-                if let Some(&oi) = claimable.get(rid) {
-                    if !old_used[oi] {
-                        assign[ni] = Some(ctx.rows[oi].id);
-                        old_used[oi] = true;
-                        carried_ref += 1;
-                    }
-                }
-            }
-        }
-        let mut queues: HashMap<&[u8; 32], std::collections::VecDeque<usize>> = HashMap::new();
-        for &oi in old_set {
-            if !old_used[oi] {
-                queues
-                    .entry(&old_blocks[oi].content_hash)
-                    .or_default()
-                    .push_back(oi);
-            }
-        }
-        for &ni in new_set {
-            if assign[ni].is_some() {
-                continue;
-            }
-            if let Some(q) = queues.get_mut(&new_blocks[ni].content_hash) {
-                if let Some(oi) = q.pop_front() {
-                    assign[ni] = Some(ctx.rows[oi].id);
-                    old_used[oi] = true;
-                    carried_hash += 1;
-                }
-            }
-        }
+        write::carry_scope(&input, old_set, new_set, &mut state);
     }
-
-    let mut minted = Vec::new();
-    let ids: Vec<Uuid> = assign
-        .into_iter()
-        .map(|a| {
-            a.unwrap_or_else(|| {
-                let id = ids::mint();
-                minted.push(id);
-                id
-            })
-        })
-        .collect();
-    let removed: Vec<Uuid> = (0..old_blocks.len())
-        .filter(|&i| !old_used[i])
-        .map(|i| ctx.rows[i].id)
-        .collect();
-
-    let carry = Carry {
-        ids: ids.clone(),
-        minted,
-        removed,
-        carried_ref,
-        carried_hash,
-    };
-    write::reconcile(ctx.vault, ctx.note_id, &new_parsed, &ctx.rows, &carry);
+    let carry = write::finish_carry(&input, state);
+    let ids = &carry.ids;
+    write::reconcile(
+        ctx.vault,
+        ctx.note_id,
+        &new_parsed,
+        &ctx.rows,
+        &ctx.tiles,
+        &carry,
+    );
 
     let mut meta = write::write_meta(op, &carry);
-    if let (serde_json::Value::Object(m), serde_json::Value::Object(extra)) =
-        (&mut meta, meta_extra)
-    {
-        for (k, v) in extra {
-            m.insert(k, v);
+    let block_ids: Vec<Uuid> = result_new_idxs.iter().map(|&i| ids[i]).collect();
+    if let serde_json::Value::Object(m) = &mut meta {
+        if let serde_json::Value::Object(extra) = meta_extra {
+            for (k, v) in extra {
+                m.insert(k, v);
+            }
+        }
+        // RFC-004 A4: `marker_to` names the surviving BLOCK by uuid and lives
+        // INSIDE the split/merge object; `split.into` lists the resulting
+        // blocks. All three are only knowable here, after the carry assigned
+        // identities.
+        if let Some(obj) = m.get_mut(op).and_then(|v| v.as_object_mut()) {
+            obj.insert(
+                "marker_to".into(),
+                match marker_to {
+                    Some(ni) => json!(ids[ni].to_string()),
+                    None => serde_json::Value::Null,
+                },
+            );
+            if op == "split" {
+                obj.insert(
+                    "into".into(),
+                    json!(block_ids.iter().map(|u| u.to_string()).collect::<Vec<_>>()),
+                );
+            }
         }
     }
     let revision = write::new_revision(ctx.vault, ctx.note_id, Some(ctx.head), "api", &meta);
-    let block_ids: Vec<Uuid> = result_new_idxs.iter().map(|&i| ids[i]).collect();
     op_result(revision, block_ids)
 }
 
@@ -479,20 +583,24 @@ fn find_root_at(
         .or(at.first().copied())
 }
 
-/// Which surviving new block carries the `^marker`, for A4/A5 provenance.
-fn marker_holder(
-    parsed_new: &ParsedNote,
-    ids: &[usize],
-    marker: Option<&str>,
-) -> serde_json::Value {
-    match marker {
-        None => serde_json::Value::Null,
-        Some(m) => ids
-            .iter()
-            .find(|&&i| parsed_new.doc.blocks[i].block_ref_id.as_deref() == Some(m))
-            .map(|_| serde_json::Value::String(m.to_string()))
-            .unwrap_or(serde_json::Value::Null),
+/// Which surviving new block carries the `^marker` (RFC-004 A5), as a
+/// new-parse index — `commit_op` resolves it to the uuid A4 asks for, because
+/// identities do not exist until the carry has run.
+///
+/// Scans each candidate's whole subtree: for a list item the marker rides on
+/// the item's INNER paragraph (RFC-002 D3 — the innermost block carries
+/// `block_ref_id`), so scanning only the roots reported "no holder" for
+/// markers that plainly survived.
+fn marker_holder(parsed_new: &ParsedNote, roots: &[usize], marker: Option<&str>) -> Option<usize> {
+    let m = marker?;
+    for &r in roots {
+        for i in r..subtree_end(parsed_new, r) {
+            if parsed_new.doc.blocks[i].block_ref_id.as_deref() == Some(m) {
+                return Some(i);
+            }
+        }
     }
+    None
 }
 
 // ------------------------------------------------------------------
@@ -521,7 +629,8 @@ mod knowledge {
         }
         let vault = store::current_vault();
         let note = store::note_by_path_or_err(vault, path);
-        let source = store::source_of(&note);
+        let tiles = store::tiles_of(note.id);
+        let source = store::source_of(&note, &tiles);
         let parsed = parse_note(&source);
         let rows = store::blocks_of(note.id);
         if rows.len() != parsed.doc.blocks.len() {
@@ -539,7 +648,7 @@ mod knowledge {
             vault,
             note_id: note.id,
             head: note.head_revision,
-            source: source.clone(),
+            tiles,
             rows,
             parsed,
         };
@@ -609,41 +718,22 @@ mod knowledge {
         }
 
         let (own_start, own_end_raw) = own_range(&ctx.parsed, idx);
-        let own_end = content_end(&ctx.source, own_start, own_end_raw);
+        let own_end = content_end(ctx.src(), own_start, own_end_raw);
         let sub_end = subtree_end(&ctx.parsed, idx);
 
-        // Preserved decoration on line 1, replacement text, continuation prefix.
         let frag_root_is_item = froot.kind == pgmind_core::BlockKind::ListItem;
-        let keep = if target.kind == pgmind_core::BlockKind::ListItem && frag_root_is_item {
-            target.first_line_strip_outer
-        } else {
-            target.first_line_strip_full
-        };
         let frag_text = &frag.source[froot.span.start..froot.span.end];
-        let cont = if frag_root_is_item {
-            target.line_prefix.clone()
-        } else {
-            target.cont_prefix.clone()
-        };
-        let mut replacement = decorate(frag_text.trim_end_matches('\n'), &cont);
-        replacement.push('\n');
+        let sp = splice_replace(
+            &ctx,
+            target,
+            own_start,
+            own_end,
+            frag_text,
+            frag_root_is_item,
+        );
 
-        let line_start = ctx.source[..own_start]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        // Nested spans start at their LINE start (decoration included), so the
-        // preserved decoration is the first `keep` bytes of that line.
-        let preserved = &ctx.source[line_start..(line_start + keep).min(own_end)];
-        let mut new_source = String::with_capacity(ctx.source.len());
-        new_source.push_str(&ctx.source[..line_start]);
-        new_source.push_str(preserved);
-        new_source.push_str(&replacement);
-        new_source.push_str(&ctx.source[own_end..]);
-
-        let edit = (line_start, line_start + preserved.len() + replacement.len());
-        let probe = parse_note(&new_source);
-        let Some(pin_new) = find_root_at(&probe, line_start, froot.kind) else {
+        let probe = parse_note(&sp.source);
+        let Some(pin_new) = find_root_at(&probe, sp.line_start, froot.kind) else {
             pm_error(
                 Pm::SpliceRestructures,
                 "replacement dissolved the target",
@@ -657,19 +747,19 @@ mod knowledge {
         let old_desc: Vec<usize> = (idx + 1..sub_end).collect();
         let new_desc: Vec<usize> = (pin_new + 1..probe_sub_end).collect();
 
-        let marker = ctx.parsed.doc.blocks[idx].block_ref_id.clone();
         commit_op(
             &ctx,
             "update",
-            new_source,
-            (idx, sub_end),
-            edit,
-            pins,
-            false,
-            vec![(old_desc, new_desc)],
-            json!({ "target": block_id.to_string(),
-                    "marker_to": marker_holder(&probe, &[pin_new], marker.as_deref()) }),
-            vec![pin_new],
+            probe,
+            OpCommit {
+                old_region: Some((idx, sub_end)),
+                edit_range: Some(sp.edit),
+                region_pins: pins,
+                scoped: vec![(old_desc, new_desc)],
+                meta_extra: json!({ "target": block_id.to_string() }),
+                result_new_idxs: vec![pin_new],
+                ..Default::default()
+            },
         )
     }
 
@@ -743,7 +833,7 @@ mod knowledge {
         // outside machinery verify hashes (region = whole note, pins = all).
         let n = ctx.parsed.doc.blocks.len();
         let moved: Vec<usize> = (idx..t_end).collect();
-        let mut rest: Vec<usize> = (0..n).filter(|i| *i < idx || *i >= t_end).collect();
+        let rest: Vec<usize> = (0..n).filter(|i| *i < idx || *i >= t_end).collect();
         let insert_at = {
             // position within `rest` where the moved run lands
             let a_pos = rest.iter().position(|&i| i == ai).unwrap();
@@ -758,7 +848,6 @@ mod knowledge {
         order.extend(&rest[..insert_at]);
         order.extend(&moved);
         order.extend(&rest[insert_at..]);
-        rest.clear();
 
         let pins: Vec<(usize, usize)> =
             order.iter().enumerate().map(|(ni, &oi)| (oi, ni)).collect();
@@ -766,14 +855,19 @@ mod knowledge {
         commit_op(
             &ctx,
             "move",
-            new_source,
-            (0, n),          // whole note is "region": every block is pinned
-            (0, usize::MAX), // no outside set — the permutation carries all
-            pins,
-            true,
-            vec![],
-            json!({ "target": block_id.to_string() }),
-            vec![target_new],
+            parse_note(&new_source),
+            OpCommit {
+                // Whole note is the region and every block is pinned by the
+                // permutation, so there is no outside set; commit_op checks
+                // the block count and pin coverage instead.
+                old_region: Some((0, n)),
+                edit_range: None,
+                region_pins: pins,
+                pin_hash_strict: true,
+                meta_extra: json!({ "target": block_id.to_string() }),
+                result_new_idxs: vec![target_new],
+                ..Default::default()
+            },
         )
     }
 
@@ -821,41 +915,20 @@ mod knowledge {
         }
 
         let (own_start, own_end_raw) = own_range(&ctx.parsed, idx);
-        let own_end = content_end(&ctx.source, own_start, own_end_raw);
+        let own_end = content_end(ctx.src(), own_start, own_end_raw);
         let sub_end = subtree_end(&ctx.parsed, idx);
         let froot0 = &frag.doc.blocks[roots[0]];
         let frag_is_items = froot0.kind == pgmind_core::BlockKind::ListItem;
-        let keep = if target.kind == pgmind_core::BlockKind::ListItem && frag_is_items {
-            target.first_line_strip_outer
-        } else {
-            target.first_line_strip_full
-        };
-        let cont = if frag_is_items {
-            target.line_prefix.clone()
-        } else {
-            target.cont_prefix.clone()
-        };
-        // Whole fragment (all roots) splices in, decorated; top-level targets
-        // take it verbatim (tiles separate naturally).
-        let frag_text = frag.source.trim_end_matches('\n');
-        let mut replacement = if target.line_prefix.is_empty() && !frag_is_items {
-            frag_text.to_string()
-        } else {
-            decorate(frag_text, &cont)
-        };
-        replacement.push('\n');
-
-        let line_start = ctx.source[..own_start]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        let preserved = &ctx.source[line_start..(line_start + keep).min(own_end)];
-        let mut new_source = String::with_capacity(ctx.source.len());
-        new_source.push_str(&ctx.source[..line_start]);
-        new_source.push_str(preserved);
-        new_source.push_str(&replacement);
-        new_source.push_str(&ctx.source[own_end..]);
-        let edit = (line_start, line_start + preserved.len() + replacement.len());
+        // The whole fragment (all roots) splices in as one replacement.
+        let sp = splice_replace(
+            &ctx,
+            target,
+            own_start,
+            own_end,
+            &frag.source,
+            frag_is_items,
+        );
+        let (new_source, edit, line_start) = (sp.source, sp.edit, sp.line_start);
 
         let probe = parse_note(&new_source);
         let Some(first_new) = find_root_at(&probe, line_start, froot0.kind) else {
@@ -895,18 +968,23 @@ mod knowledge {
         let first_sub_end = subtree_end(&probe, first_new);
         let new_desc: Vec<usize> = (first_new + 1..first_sub_end).collect();
         let marker = target.block_ref_id.clone();
+        let marker_to = marker_holder(&probe, &new_roots, marker.as_deref());
         commit_op(
             &ctx,
             "split",
-            new_source,
-            (idx, sub_end),
-            edit,
-            pins,
-            false,
-            vec![(old_desc, new_desc)],
-            json!({ "split": { "from": block_id.to_string() },
-                    "marker_to": marker_holder(&probe, &new_roots, marker.as_deref()) }),
-            new_roots,
+            probe,
+            OpCommit {
+                old_region: Some((idx, sub_end)),
+                edit_range: Some(edit),
+                region_pins: pins,
+                scoped: vec![(old_desc, new_desc)],
+                marker_to,
+                // `into` is filled in by commit_op from result_new_idxs, once
+                // the carry has assigned the resulting blocks their ids.
+                meta_extra: json!({ "split": { "from": block_id.to_string() } }),
+                result_new_idxs: new_roots,
+                ..Default::default()
+            },
         )
     }
 
@@ -962,15 +1040,6 @@ mod knowledge {
             }
             cursor = subtree_end(&ctx.parsed, i);
         }
-        for &i in &idxs[1..] {
-            if !container_children(&ctx.parsed, i).is_empty() {
-                pm_error(
-                    Pm::ContainerConstraint,
-                    "a non-surviving merge member owns container children (v1)",
-                    &format!("ord {i}"),
-                );
-            }
-        }
         let keep_id = keep.unwrap_or(ctx.rows[idxs[0]].id);
         let keep_idx = idxs
             .iter()
@@ -983,6 +1052,20 @@ mod knowledge {
                     &format!("id {keep_id}"),
                 )
             });
+        // Every member except the survivor is retired with its descendants, so
+        // every member except the survivor must be checked. Testing `idxs[1..]`
+        // was only equivalent while `keep` defaulted to the first member: with
+        // an explicit `keep`, member 0's nested content was spliced away and
+        // its rows deleted with no PM006.
+        for &i in &idxs {
+            if i != keep_idx && !container_children(&ctx.parsed, i).is_empty() {
+                pm_error(
+                    Pm::ContainerConstraint,
+                    "a non-surviving merge member owns container children (v1)",
+                    &format!("ord {i}"),
+                );
+            }
+        }
 
         let (frag, roots) = parse_fragment(&fragment.0);
         if roots.len() != 1 {
@@ -1005,39 +1088,22 @@ mod knowledge {
         let first_b = &ctx.parsed.doc.blocks[first];
         let froot = &frag.doc.blocks[roots[0]];
         let frag_root_is_item = froot.kind == pgmind_core::BlockKind::ListItem;
-        let keep_deco = if first_b.kind == pgmind_core::BlockKind::ListItem && frag_root_is_item {
-            first_b.first_line_strip_outer
-        } else {
-            first_b.first_line_strip_full
-        };
-        let cont = if frag_root_is_item {
-            first_b.line_prefix.clone()
-        } else {
-            first_b.cont_prefix.clone()
-        };
         let frag_text = &frag.source[froot.span.start..froot.span.end];
-        let mut replacement = decorate(frag_text.trim_end_matches('\n'), &cont);
-        replacement.push('\n');
 
         // Replace from the first member's line start through the end of the
         // run's last subtree line.
-        let run_start = ctx.parsed.doc.blocks[first].span.start;
-        let run_raw_end = (first..run_end)
-            .map(|i| ctx.parsed.doc.blocks[i].span.end)
-            .max()
-            .unwrap();
-        let run_bytes_end = content_end(&ctx.source, run_start, run_raw_end);
-        let line_start = ctx.source[..run_start]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        let preserved = &ctx.source[line_start..(line_start + keep_deco).min(run_bytes_end)];
-        let mut new_source = String::with_capacity(ctx.source.len());
-        new_source.push_str(&ctx.source[..line_start]);
-        new_source.push_str(preserved);
-        new_source.push_str(&replacement);
-        new_source.push_str(&ctx.source[run_bytes_end..]);
-        let edit = (line_start, line_start + preserved.len() + replacement.len());
+        let run_start = first_b.span.start;
+        let run_raw_end = span_end_of(&ctx.parsed, first, run_end);
+        let run_bytes_end = content_end(ctx.src(), run_start, run_raw_end);
+        let sp = splice_replace(
+            &ctx,
+            first_b,
+            run_start,
+            run_bytes_end,
+            frag_text,
+            frag_root_is_item,
+        );
+        let (new_source, edit, line_start) = (sp.source, sp.edit, sp.line_start);
 
         let probe = parse_note(&new_source);
         let Some(pin_new) = find_root_at(&probe, line_start, froot.kind) else {
@@ -1057,30 +1123,50 @@ mod knowledge {
             .iter()
             .filter_map(|&i| ctx.parsed.doc.blocks[i].block_ref_id.clone())
             .collect();
+        let marker_to = marker_holder(&probe, &[pin_new], markers.first().map(|s| s.as_str()));
         commit_op(
             &ctx,
             "merge",
-            new_source,
-            (first, run_end),
-            edit,
-            pins,
-            false,
-            vec![(old_desc, new_desc)],
-            json!({ "merge": { "into": keep_id.to_string(),
-                               "from": block_ids.iter().map(|u| u.to_string()).collect::<Vec<_>>() },
-                    "marker_to": marker_holder(&probe, &[pin_new],
-                                               markers.first().map(|s| s.as_str())) }),
-            vec![pin_new],
+            probe,
+            OpCommit {
+                old_region: Some((first, run_end)),
+                edit_range: Some(edit),
+                region_pins: pins,
+                scoped: vec![(old_desc, new_desc)],
+                marker_to,
+                meta_extra: json!({ "merge": { "into": keep_id.to_string(),
+                               "from": block_ids.iter().map(|u| u.to_string()).collect::<Vec<_>>() } }),
+                result_new_idxs: vec![pin_new],
+                ..Default::default()
+            },
         )
     }
 }
 
-/// Is `idx` a top-level document child (its own tile)?
+/// Is `idx` a top-level document child (i.e. IS a tile)?
+///
+/// The block must span the whole tile, not merely start at it. Blockquotes are
+/// not addressable, so a paragraph inside a top-level quote has `parent =
+/// None` and starts at the tile boundary — matching on `t.start` alone
+/// accepted it as top level, which let `insert_blocks` splice a new tile
+/// outside the quote and `move_block` relocate the entire quote, both without
+/// the PM005 the anchor guard is there to raise.
 fn is_top_level_child(parsed: &ParsedNote, idx: usize) -> bool {
     let b = &parsed.doc.blocks[idx];
     b.parent.is_none()
-        && parsed.doc.top_level.iter().any(|t| t.start == b.span.start)
         && b.kind != pgmind_core::BlockKind::ListItem
+        && parsed
+            .doc
+            .top_level
+            .iter()
+            .any(|t| t.start == b.span.start && t.end == b.span.end)
+}
+
+/// Tile index of a top-level block, from the placement the parse already
+/// computed (three ad-hoc rescans of `top_level` used to derive this, and they
+/// disagreed on failure: one fell back to tile 0, two panicked).
+fn tile_of(parsed: &ParsedNote, idx: usize) -> usize {
+    parsed.placement[idx].0 as usize
 }
 
 /// Top-level insert: fragment tiles join the tile sequence with separator
@@ -1092,14 +1178,9 @@ fn insert_top_level(
     before: bool,
 ) -> PgHeapTuple<'static, pgrx::AllocatedByRust> {
     let preamble_end = ctx.parsed.doc.preamble.end;
-    let old_trailing = trailing_newlines(&ctx.source);
-    let mut tiles: Vec<String> = ctx
-        .parsed
-        .tiles
-        .iter()
-        .map(|(raw, _)| raw.clone())
-        .collect();
-    let frag_tiles: Vec<String> = frag.tiles.iter().map(|(raw, _)| raw.clone()).collect();
+    let old_trailing = trailing_newlines(ctx.src());
+    let mut tiles: Vec<String> = ctx.parsed.tiles.clone();
+    let frag_tiles: Vec<String> = frag.tiles.clone();
     if frag_tiles.is_empty() {
         pm_error(
             Pm::FragmentArity,
@@ -1110,14 +1191,7 @@ fn insert_top_level(
     let pos = match anchor {
         None => tiles.len(),
         Some(ai) => {
-            let a_start = ctx.parsed.doc.blocks[ai].span.start;
-            let ti = ctx
-                .parsed
-                .doc
-                .top_level
-                .iter()
-                .position(|t| t.start == a_start)
-                .unwrap_or(0);
+            let ti = tile_of(&ctx.parsed, ai);
             if before {
                 ti
             } else {
@@ -1129,8 +1203,8 @@ fn insert_top_level(
     new_tiles.extend(tiles.drain(..pos));
     new_tiles.extend(frag_tiles.iter().cloned());
     new_tiles.append(&mut tiles);
-    rebuild_body(&mut new_tiles, &old_trailing);
-    let mut new_source = ctx.source[..preamble_end].to_string();
+    rebuild_body(&mut new_tiles, pos..pos + frag_tiles.len(), &old_trailing);
+    let mut new_source = ctx.src()[..preamble_end].to_string();
     let body: String = new_tiles.concat();
     new_source.push_str(&body);
 
@@ -1151,14 +1225,12 @@ fn insert_top_level(
     commit_op(
         ctx,
         "insert",
-        new_source,
-        (usize::MAX, usize::MAX), // empty old region
-        edit,
-        vec![],
-        false,
-        vec![],
-        json!({}),
-        result_idxs,
+        probe,
+        OpCommit {
+            edit_range: Some(edit),
+            result_new_idxs: result_idxs,
+            ..Default::default()
+        },
     )
 }
 
@@ -1167,19 +1239,33 @@ fn frag_tiles_len_after(tiles: &[String], pos: usize, count: usize) -> usize {
     tiles[pos..pos + count].iter().map(String::len).sum()
 }
 
-/// Separator synthesis over a tile sequence: every tile but the last ends with
-/// a blank line; the final tile carries `old_trailing` exactly.
-fn rebuild_body(tiles: &mut [String], old_trailing: &str) {
+/// Separator synthesis at the seam a splice created (RFC-003 D6): the tiles in
+/// `seam` and the tile immediately before it are blank-terminated, and the
+/// final tile carries `old_trailing` exactly.
+///
+/// Scoped to the seam on purpose. Blank-terminating EVERY tile rewrote bytes
+/// far outside the spliced span — `write('n', 'para\n# Heading\n')` produces
+/// two tiles with no blank between them, and any later insert silently
+/// rewrote them to `para\n\n# Heading\n\n`. PM008 cannot catch it, because
+/// RFC-002 D7 strips trailing newline runs before hashing, so every outside
+/// block's kind and content_hash are unchanged.
+fn rebuild_body(tiles: &mut [String], seam: std::ops::Range<usize>, old_trailing: &str) {
     let n = tiles.len();
-    for (i, t) in tiles.iter_mut().enumerate() {
-        if i + 1 < n {
-            let owned = std::mem::take(t);
-            *t = blank_terminated(owned);
-        } else {
-            let body = t.trim_end_matches('\n').to_string();
-            *t = body + old_trailing;
-        }
+    if n == 0 {
+        return;
     }
+    let first = seam.start.saturating_sub(1);
+    // Every seam tile that is followed by another must end with a blank line.
+    for t in tiles
+        .iter_mut()
+        .take(seam.end.min(n.saturating_sub(1)))
+        .skip(first)
+    {
+        let owned = std::mem::take(t);
+        *t = blank_terminated(owned);
+    }
+    let body = tiles[n - 1].trim_end_matches('\n').to_string();
+    tiles[n - 1] = body + old_trailing;
 }
 
 /// Item-level insert: fragment items splice adjacent to the anchor item,
@@ -1201,32 +1287,26 @@ fn insert_item_level(
             "insert_blocks",
         );
     }
+    let src = ctx.src();
     let anchor = &ctx.parsed.doc.blocks[ai];
     let a_end = subtree_end(&ctx.parsed, ai);
     // Insert position: line start of the anchor item, or after its subtree.
-    let (pos, _line_start) = if before {
-        let ls = ctx.source[..anchor.span.start]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        (ls, ls)
+    let pos = if before {
+        line_start_of(src, anchor.span.start)
     } else {
-        let end = (ai..a_end)
-            .map(|i| ctx.parsed.doc.blocks[i].span.end)
-            .max()
-            .unwrap();
-        (end, end)
+        span_end_of(&ctx.parsed, ai, a_end)
     };
-    // Re-mark fragment items to the anchor's marker style.
-    let anchor_line_start = ctx.source[..anchor.span.start]
-        .rfind('\n')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    let anchor_marker = &ctx.source[anchor.span.start
-        ..anchor.span.start
-            + (anchor.first_line_strip_full - anchor.first_line_strip_outer)
-                .min(ctx.source.len() - anchor.span.start)];
-    let _ = anchor_line_start;
+    // The anchor's own list marker, to re-mark the fragment's items to.
+    //
+    // A block's span starts at its LINE start, so the enclosing container's
+    // decoration occupies [0, strip_outer) of that line and the item's own
+    // marker occupies [strip_outer, strip_full). Slicing (full - outer) bytes
+    // from the line start instead returned the CONTAINER's prefix: for
+    // `> - a` it yielded "> ", so `remark_item` re-marked the fragment with
+    // '>' and the item was spliced in as a nested blockquote; for a nested
+    // ordered list it yielded the indent, and the item dissolved into a
+    // continuation line.
+    let anchor_marker = slice_marker(src, anchor);
     let mut spliced = String::new();
     for &r in roots {
         let item = &frag.doc.blocks[r];
@@ -1238,10 +1318,10 @@ fn insert_item_level(
         spliced.push_str(&decorated);
         spliced.push('\n');
     }
-    let mut new_source = String::with_capacity(ctx.source.len() + spliced.len());
-    new_source.push_str(&ctx.source[..pos]);
+    let mut new_source = String::with_capacity(src.len() + spliced.len());
+    new_source.push_str(&src[..pos]);
     new_source.push_str(&spliced);
-    new_source.push_str(&ctx.source[pos..]);
+    new_source.push_str(&src[pos..]);
     let edit = (pos, pos + spliced.len());
 
     let probe = parse_note(&new_source);
@@ -1265,22 +1345,37 @@ fn insert_item_level(
     commit_op(
         ctx,
         "insert",
-        new_source,
-        (usize::MAX, usize::MAX),
-        edit,
-        anc_pins,
-        false,
-        vec![],
-        json!({}),
-        result_idxs,
+        probe,
+        OpCommit {
+            edit_range: Some(edit),
+            region_pins: anc_pins,
+            result_new_idxs: result_idxs,
+            ..Default::default()
+        },
     )
+}
+
+/// A list item's OWN marker: the bytes of its first line between the enclosing
+/// container's decoration and the end of its own. `get` rather than direct
+/// indexing — these are parser-derived byte widths applied to user markdown,
+/// and a slice that misses a char boundary must not panic inside a backend.
+fn slice_marker<'a>(src: &'a str, item: &pgmind_core::Block) -> &'a str {
+    let start = item.span.start + item.first_line_strip_outer;
+    let end = item.span.start + item.first_line_strip_full;
+    if end < start {
+        return "";
+    }
+    src.get(start..end.min(src.len())).unwrap_or("")
 }
 
 /// Swap an item's marker for the destination list's (canonical decoration:
 /// unordered marker char swap; ordered delimiter swap, numbers kept).
 fn remark_item(item_text: &str, own_marker_len: usize, dest_marker: &str) -> String {
-    let own = &item_text[..own_marker_len.min(item_text.len())];
-    let rest = &item_text[own_marker_len.min(item_text.len())..];
+    let cut = own_marker_len.min(item_text.len());
+    let (own, rest) = match (item_text.get(..cut), item_text.get(cut..)) {
+        (Some(o), Some(r)) => (o, r),
+        _ => ("", item_text),
+    };
     let dest_trim = dest_marker.trim_start();
     let own_trim = own.trim_start();
     let dest_is_ordered = dest_trim.starts_with(|c: char| c.is_ascii_digit());
@@ -1320,37 +1415,20 @@ fn remark_item(item_text: &str, own_marker_len: usize, dest_marker: &str) -> Str
 
 /// Top-level move: tile-array surgery + separator synthesis.
 fn move_tiles(ctx: &NoteCtx, idx: usize, ai: usize, before: bool) -> String {
-    let t_start = ctx.parsed.doc.blocks[idx].span.start;
-    let a_start = ctx.parsed.doc.blocks[ai].span.start;
-    let ti = ctx
-        .parsed
-        .doc
-        .top_level
-        .iter()
-        .position(|t| t.start == t_start)
-        .unwrap();
-    let taj = ctx
-        .parsed
-        .doc
-        .top_level
-        .iter()
-        .position(|t| t.start == a_start)
-        .unwrap();
-    let old_trailing = trailing_newlines(&ctx.source);
-    let mut tiles: Vec<String> = ctx
-        .parsed
-        .tiles
-        .iter()
-        .map(|(raw, _)| raw.clone())
-        .collect();
+    let ti = tile_of(&ctx.parsed, idx);
+    let taj = tile_of(&ctx.parsed, ai);
+    let old_trailing = trailing_newlines(ctx.src());
+    let mut tiles: Vec<String> = ctx.parsed.tiles.clone();
     let moved = tiles.remove(ti);
     let mut pos = if before { taj } else { taj + 1 };
     if ti < pos {
         pos -= 1;
     }
     tiles.insert(pos, moved);
-    rebuild_body(&mut tiles, &old_trailing);
-    let mut s = ctx.source[..ctx.parsed.doc.preamble.end].to_string();
+    // Only the insertion seam needs separator synthesis; removing a tile
+    // leaves its predecessor already blank-terminated.
+    rebuild_body(&mut tiles, pos..pos + 1, &old_trailing);
+    let mut s = ctx.src()[..ctx.parsed.doc.preamble.end].to_string();
     for t in &tiles {
         s.push_str(t);
     }
@@ -1366,25 +1444,17 @@ fn move_lines(
     a_end: usize,
     before: bool,
 ) -> String {
-    let src = &ctx.source;
+    let src = ctx.src();
     let t_span_start = ctx.parsed.doc.blocks[idx].span.start;
-    let t_span_end = (idx..t_end)
-        .map(|i| ctx.parsed.doc.blocks[i].span.end)
-        .max()
-        .unwrap();
-    let m_start = src[..t_span_start].rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let m_end = t_span_end;
+    let m_start = line_start_of(src, t_span_start);
+    let m_end = span_end_of(&ctx.parsed, idx, t_end);
     let moved = src[m_start..m_end].to_string();
 
     let a_span_start = ctx.parsed.doc.blocks[ai].span.start;
-    let a_span_end = (ai..a_end)
-        .map(|i| ctx.parsed.doc.blocks[i].span.end)
-        .max()
-        .unwrap();
     let insert_at = if before {
-        src[..a_span_start].rfind('\n').map(|i| i + 1).unwrap_or(0)
+        line_start_of(src, a_span_start)
     } else {
-        a_span_end
+        span_end_of(&ctx.parsed, ai, a_end)
     };
 
     let mut without = String::with_capacity(src.len());

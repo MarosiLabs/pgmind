@@ -1,0 +1,54 @@
+{
+  "status": "ok",
+  "scale": {
+    "notes": 10000,
+    "blocks": 230000,
+    "edges": 40000,
+    "tags": 40000
+  },
+  "design_target_notes_per_s": 2000,
+  "bytes": {
+    "note": {
+      "total_bytes": 3940352,
+      "heap_bytes": 1171456,
+      "index_bytes": 2736128
+    },
+    "revision": {
+      "total_bytes": 12582912,
+      "heap_bytes": 11706368,
+      "index_bytes": 843776
+    },
+    "tile": {
+      "total_bytes": 14401536,
+      "heap_bytes": 10526720,
+      "index_bytes": 3842048
+    },
+    "block": {
+      "total_bytes": 98877440,
+      "heap_bytes": 60596224,
+      "index_bytes": 38240256
+    },
+    "edge": {
+      "total_bytes": 14614528,
+      "heap_bytes": 7651328,
+      "index_bytes": 6930432
+    },
+    "tag": {
+      "total_bytes": 6905856,
+      "heap_bytes": 3727360,
+      "index_bytes": 3145728
+    }
+  },
+  "latency_p95_ms": {
+    "backlinks": 0.98505,
+    "read": 0.34369999999999995,
+    "tagged": 4.5924499999999995
+  },
+  "verify_violations": 0,
+  "write_throughput_notes_per_s": 174.3,
+  "bytes_per_block_all_in": 657.9,
+  "extrapolation_100k_notes_10m_blocks": {
+    "assumption": "linear in blocks; revision-load behavior modeled only until Phase 3 measures it",
+    "projected_total_gb": 6.58
+  }
+}

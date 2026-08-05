@@ -28,12 +28,20 @@ extension_sql!(
     r#"
 -- Typed-error trampoline (RFC-004 A6): plpgsql RAISE accepts arbitrary
 -- SQLSTATEs, which pgrx's closed errcode enum cannot emit directly.
+-- search_path is pinned on every function this script defines. Nothing here
+-- is SECURITY DEFINER today, so an unqualified `lower()` or operator would
+-- only let a caller confuse their own session; pinning it now means the
+-- grant-anchored boundary (D1) can adopt SECURITY DEFINER later without this
+-- becoming a privilege-escalation retrofit.
 CREATE FUNCTION pgmind.raise_error(code text, message text, detail text)
-RETURNS void LANGUAGE plpgsql AS $fn$
+RETURNS void LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $fn$
 BEGIN
   RAISE EXCEPTION USING ERRCODE = code, MESSAGE = message, DETAIL = detail;
 END
 $fn$;
+REVOKE ALL ON FUNCTION pgmind.raise_error(text, text, text) FROM PUBLIC;
 
 CREATE TYPE pgmind.block_kind AS ENUM
   ('heading','paragraph','list_item','code_block','table','thematic_break','html_block');
@@ -135,6 +143,12 @@ CREATE INDEX tag_lookup       ON pgmind.tag (vault_id, lower(tag));
 CREATE INDEX tag_note         ON pgmind.tag (note_id);
 CREATE INDEX tag_block        ON pgmind.tag (block_id) WHERE block_id IS NOT NULL;
 CREATE INDEX revision_note    ON pgmind.revision (note_id, created_at);
+-- vault_id is the predicate on every knowledge.stats() count and on the RLS
+-- policy D1 documents, so it must be indexed on the tables that carry it —
+-- without these, stats() sequentially scans the block, revision and tile heaps.
+CREATE INDEX block_vault      ON pgmind.block (vault_id);
+CREATE INDEX revision_vault   ON pgmind.revision (vault_id);
+CREATE INDEX tile_vault       ON pgmind.tile (vault_id);
 
 -- LZ4 TOAST where the server supports it (RFC-003 D4: recommended, not required)
 DO $lz4$
@@ -151,6 +165,39 @@ BEGIN
   END;
 END
 $lz4$;
+
+-- RFC-003 D1's tenant boundary, as shipped SQL rather than prose.
+--
+-- `pgmind.vault_id` is Userset by design: it SCOPES a session to a vault, it
+-- does not defend one. The boundary is row-level security plus grants, and
+-- until now that existed only in the RFC and in a test — a deployer who
+-- granted table access and skipped the policy got a role that could read and
+-- write every vault by SETting one GUC.
+--
+-- Deliberately not enabled by default: turning RLS on for every install would
+-- change the behaviour of existing single-vault deployments. Call this once
+-- per database to adopt the boundary. Idempotent.
+CREATE FUNCTION pgmind.enable_vault_rls(force boolean DEFAULT false)
+RETURNS void LANGUAGE plpgsql
+SET search_path = pg_catalog, pg_temp
+AS $fn$
+DECLARE t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['note','revision','tile','block','edge','tag'] LOOP
+    EXECUTE format('ALTER TABLE pgmind.%I ENABLE ROW LEVEL SECURITY', t);
+    -- FORCE also subjects the table owner, which is what a deployment where
+    -- the extension owner is also an application role actually needs.
+    IF force THEN
+      EXECUTE format('ALTER TABLE pgmind.%I FORCE ROW LEVEL SECURITY', t);
+    END IF;
+    EXECUTE format('DROP POLICY IF EXISTS vault_isolation ON pgmind.%I', t);
+    EXECUTE format(
+      'CREATE POLICY vault_isolation ON pgmind.%I USING '
+      '(vault_id = current_setting(''pgmind.vault_id'', true)::uuid)', t);
+  END LOOP;
+END
+$fn$;
+REVOKE ALL ON FUNCTION pgmind.enable_vault_rls(boolean) FROM PUBLIC;
 
 -- Backups (RFC-003 D3): extension-script tables are skipped by pg_dump unless
 -- registered. Registration order is normative (FK-topological; pg_dump emits

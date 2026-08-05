@@ -91,6 +91,21 @@ pub enum LinkKind {
     Blockref,
 }
 
+impl LinkKind {
+    /// Stable wire tag, matching the `pgmind.edge_kind` SQL enum. Same role as
+    /// [`BlockKind::tag`]: block kinds could not drift between the write path,
+    /// `verify_note`, and the read APIs because they all went through one
+    /// method, while link kinds were three separate inline `match`es.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            LinkKind::Wikilink => "wikilink",
+            LinkKind::Transclusion => "transclusion",
+            LinkKind::Mdlink => "mdlink",
+            LinkKind::Blockref => "blockref",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LinkRef {
     pub kind: LinkKind,
