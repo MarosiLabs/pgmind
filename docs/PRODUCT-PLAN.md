@@ -211,7 +211,22 @@ knowledge.context_explain(same args)                                        → 
 knowledge.stats() · knowledge.excise(target, reason) · knowledge.embedding_queue⁶(model)
 ```
 
-Error contract: conflicts raise typed errors (`pgmind_head_moved`, `pgmind_hash_moved`) with the current head in the detail — agents retry by re-reading, never by forcing.
+Error contract: conflicts raise typed errors with the current head in the detail — agents retry by re-reading, never by forcing.
+
+### 7.1 What actually shipped, against the sketch above *(audited 2026-08-06, end of Phase 3)*
+
+This catalog is a sketch that the RFCs finalize, and twice now a Phase 3 deliverable named here failed to survive into its RFC and therefore into the gates — which is how it went unbuilt without anything noticing. Keeping this table accurate is the cheap fix for that failure mode; RFC-007 ratifies the names at the Phase 5 API freeze.
+
+| sketched here | shipped as | why |
+|---|---|---|
+| `patch_block(block_id, markdown, expected_hash)` | `update_block(block_id, fragment, expected_head, expected_hash)` | Two functions differing only in which CAS guard they accept is two ways to do one thing (RFC-005 D5.11/D11). |
+| `read(path, at => revision)` | `read(path)` plus `read_as_of(path, …)` overloaded on uuid / bigint / timestamptz | One `at` parameter cannot be three types; the overloads keep each call unambiguous (RFC-005 D3). |
+| `move(path, new_path)` · `delete(path)` | `move_note` · `delete_note` (· `undelete_note`) | `delete` and `move` are not safe bare names in a schema agents type into; RFC-005 D6 names all three. |
+| `insert_block` | `insert_blocks` | The fragment may contain several blocks; the plural is what the operation does. |
+| `knowledge.excise(target, reason)` | `pgmind.excise(...)` | Erasure is an admin surface, revoked from `PUBLIC` (Law 11, RFC-005 §6) — not part of the agent-facing API. |
+| `pgmind_head_moved` · `pgmind_hash_moved` | `pgmind_stale_head` (PM009) · `pgmind_stale_block` (PM016) | "Stale" says whose problem it is: the caller's copy is old. Named in RFC-004 A6 and RFC-005 D10. |
+
+**Not built, correctly:** `search`, `traverse`, `expand`, `context`, `context_explain` (Phase 5, RFC-007/008) and `embedding_queue` (Phase 6, RFC-009).
 
 ## 8. The MCP surface (normative home: RFC-007)
 
