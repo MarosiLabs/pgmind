@@ -15,5 +15,5 @@ Canonical index — mirrors [handbook §12](../PGMIND.md) and the [product plan 
 | 008 | Deterministic Context Assembly & Token Budgeting | 5, matured 7 | not started |
 | 009 | Optional Vector Lane (pgvector hooks) | 6 | not started |
 | 010 | Retrieval Planner (incl. BM25 adapter decision) | 7 | not started |
-| 011 | Provenance | 3+ | not started |
+| [011](RFC-011-provenance.md) | Provenance | 3 | **Drafted 2026-08-06 — proposed for acceptance, not implemented** |
 | 012 | Packaging & Distribution | 5+ | not started |
