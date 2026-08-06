@@ -1024,6 +1024,52 @@ mod tests {
         assert_eq!(rows[0].1, before[0].1, "identity is preserved across time");
     }
 
+    /// Blame attributes a block from the moment it was written, not only after
+    /// somebody edits it. Restricting the lookup to pre-image rows reported
+    /// NULL author for every untouched block — i.e. for most of a vault.
+    #[pg_test]
+    fn blame_attributes_blocks_nobody_has_edited() {
+        write("tt/blame", "# Doc\n\nalpha\n\nbeta\n");
+        let rows: Vec<(String, Option<String>, Option<Uuid>)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT k.content, b.author, b.last_changed_revision
+                       FROM knowledge.blame('tt/blame') b
+                       JOIN knowledge.blocks('tt/blame') k USING (block_id)
+                      ORDER BY b.ord",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| {
+                    (
+                        r.get::<String>(1).unwrap().unwrap(),
+                        r.get::<String>(2).unwrap(),
+                        r.get::<Uuid>(3).unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(rows.len(), 3, "every block is blamed");
+        for (content, author, rev) in &rows {
+            assert!(
+                author.is_some() && rev.is_some(),
+                "the minting revision attributes {content:?}: {author:?}"
+            );
+        }
+
+        // And an edit moves the attribution to the newer revision.
+        let head = write("tt/blame", "# Doc\n\nALPHA\n\nbeta\n");
+        let edited: Option<Uuid> = Spi::get_one(
+            "SELECT b.last_changed_revision
+               FROM knowledge.blame('tt/blame') b
+               JOIN knowledge.blocks('tt/blame') k USING (block_id)
+              WHERE k.content = 'ALPHA'",
+        )
+        .unwrap();
+        assert_eq!(edited, Some(head), "the edit is the last change");
+    }
+
     /// PM011 and PM010 mean opposite things and are never interchanged.
     #[pg_test]
     fn history_errors_distinguish_missing_from_compacted() {
