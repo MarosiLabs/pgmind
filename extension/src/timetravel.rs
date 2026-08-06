@@ -842,7 +842,10 @@ pub mod knowledge {
             Some(head),
             "api",
             "delete_note",
-            &serde_json::json!({"deleted": true}),
+            // Not `{"deleted": true}`: `verb` already says so, and RFC-011 D3
+            // forbids putting a per-revision fact in the blob when a typed
+            // column carries it. Retired 2026-08-06; the provenance gate found it.
+            &serde_json::json!({}),
         );
         let seq = crate::write::seq_of(rev);
         crate::history::record(vault, note.id, rev, seq, &pre);

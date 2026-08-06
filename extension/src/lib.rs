@@ -35,6 +35,11 @@ static MAX_DOCUMENT_BYTES: GucSetting<i32> = GucSetting::<i32>::new(8 * 1024 * 1
 /// deep-read latency; the storage-growth gate measures both ends of it.
 pub static FRAME_EVERY: GucSetting<i32> = GucSetting::<i32>::new(50);
 
+/// RFC-011 D1: who is writing. Free text, and deliberately so — this is the
+/// connected role's claim about itself, not an identity pgmind derived or
+/// verified. Unset (or empty) falls back to `current_user`.
+pub static AUTHOR_GUC: GucSetting<Option<CString>> = GucSetting::<Option<CString>>::new(None);
+
 /// RFC-003 D1: the current vault. Userset by design — vault *scoping*; the
 /// tenant *boundary* story is the documented RLS patterns, not this GUC.
 pub static VAULT_ID_GUC: GucSetting<Option<CString>> =
@@ -59,6 +64,14 @@ pub extern "C-unwind" fn _PG_init() {
         &FRAME_EVERY,
         1,
         1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_string_guc(
+        c"pgmind.author",
+        c"Who is writing (RFC-011 D1).",
+        c"Recorded as revision.author. An ASSERTION by the connected role, never authenticated: any session that can write can claim any author. Unset => current_user.",
+        &AUTHOR_GUC,
         GucContext::Userset,
         GucFlags::default(),
     );

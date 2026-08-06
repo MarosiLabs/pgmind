@@ -203,6 +203,57 @@ the manual (mostly Concepts §"Sharp edges" and Cookbook §8):
 25. `insert_blocks` with neither `before` nor `after` appends after the last top-level block;
     giving **both** is PM005.
 
+### 2.4 Verified against the live extension on 2026-08-06 (PG 18.4, pgmind 0.0.1)
+
+Everything here was executed, not inferred. These are the facts the pages quote.
+
+- **The GUCs do not exist until the library loads.** In a fresh session
+  `SHOW pgmind.frame_every` fails with *unrecognized configuration parameter*; after any pgmind
+  function call — or an explicit `LOAD 'pgmind';` — all three `SHOW` correctly. `SET
+  pgmind.vault_id = …` works before the load (Postgres accepts the placeholder) and the value is
+  honoured once `_PG_init` runs. This surprises everyone once; it belongs in Quick start and in
+  the GUC section.
+- **`knowledge.notes().title` is the path's last segment, not the frontmatter `title`.** For
+  `projects/auth` with `title: Auth` in the frontmatter, `notes()` reports `auth`; the
+  frontmatter value is in `properties->>'title'`.
+- **`append_to_section` records `verb = 'insert_blocks'`** in `history()`, because it delegates
+  to `insert_blocks` after resolving the anchor.
+- **`excise` refuses live content even under `dry_run => true`.** The PM012 refusal is evaluated
+  *before* the dry-run short-circuit, so a dry run against live content raises rather than
+  reporting. `and_head => true` makes the dry run report
+  `WARNING: pgmind: dry run — would erase 1 live and touch 4 history surface(s)` and return the
+  nil UUID.
+- **Excision's live-removal step records `verb = 'write'`,** not `'excise'` — the removal is an
+  ordinary audited write through the normal path. (RFC-005 D7.1 says `'excise'`; the code does
+  not. Document the code.)
+- **`enable_vault_rls()` creates 10 policies** on this build — every `pgmind` table carrying
+  `vault_id` — and emits a `NOTICE … does not exist, skipping` per table on its first run
+  because it is idempotent by `DROP POLICY IF EXISTS`.
+- **`CREATE EXTENSION` emits `WARNING: pgmind: lz4 toast compression unavailable on this
+  server`** on a pgrx-built Postgres. It is not an error.
+- **`SELECT (knowledge.append_to_section(…)).*` applied the append twice** — measured: one call,
+  two identical blocks in the note. The trap is real, not theoretical.
+- **Confirmed error text** (use verbatim, including `DETAIL:`):
+  - PM001 `pgmind: invalid note path` / `pgmind_invalid_path — path "/bad/"`
+  - PM002 `pgmind: note not found` / `pgmind_note_not_found — path "no/such/note"`
+  - PM004 `pgmind: split_block fragment must contain at least two blocks` / `… — found 1`
+  - PM007 `pgmind: section not found` / `… — heading path ["Nope"] in note "projects/auth"`
+  - PM009 `pgmind: expected_head is not the note's current head` / `… — note projects/auth:
+    expected …, head is …`
+  - PM012 `pgmind: target is still live at head` / `… — 1 live row(s); pass and_head => true to
+    remove it first`
+  - PM016 `pgmind: expected_hash is not the block's current content hash` / `… — block …:
+    expected …, current is …`
+  - Every PM error arrives with `CONTEXT: PL/pgSQL function pgmind.raise_error(text,text,text)
+    line 3 at RAISE`. Show it once, then elide it in later examples.
+- **The seeded vault** reports `7 notes, 48 blocks, 16 resolved edges, 2 dangling, 9 tags,
+  7 revisions, 1383 bytes` immediately after `seed.sql`. A bulleted list item produces **two**
+  rows (the `list_item` and its inner `paragraph`) — that is why 7 short notes are 48 blocks, and
+  it is worth stating early.
+
+**Output convention.** UUIDs differ every run, so examples elide them the way the README does
+(`019fd618-7bae-…`), and verification asserts *executes without error*, never *output matches*.
+
 ---
 
 ## 3. Files
@@ -500,6 +551,47 @@ categories.
    `(f(x)).*` double edit; appending to a list-terminated section; wiki-links in table cells;
    the reference-definition collision; whole-note rewrite vs block ops for identity; PM011 after
    `retain`; `vault_id` without RLS.
+
+### 4.7 Mandated anchor ids
+
+The sidebar is byte-identical in all six pages and links into these anchors, so they are a
+contract. An author who renames one breaks five other files. Every `h2`/`h3` needs *some* id
+(the TOC is generated from them); these specific ones are fixed:
+
+| Page | Required `h2` ids, in order |
+|---|---|
+| `quickstart.html` | `what-it-is`, `when-to-use`, `install`, `first-note`, `agent-loop`, `concurrency`, `tenancy`, `not-yet`, `troubleshooting`, `next` |
+| `concepts.html` | `model`, `paths`, `anatomy`, `blocks`, `sections`, `dialect`, `frontmatter`, `hashing`, `identity`, `resolution`, `revisions`, `vaults`, `errors`, `edges` |
+| `internals.html` | `laws`, `lanes`, `schema`, `write-path`, `carry`, `rebinding`, `block-ops`, `history`, `concurrency`, `erasure`, `verification`, `capacity`, `backup`, `boundary` |
+| `sql.html` | `types`, `parsing`, `reading`, `writing`, `lifecycle`, `history`, `admin`, `settings`, `errors`, `not-yet` |
+| `cookbook.html` | `agent-memory`, `navigation`, `retrieval`, `history-audit`, `tenancy`, `operations`, `integration`, `sharp-edges` |
+
+Per-function anchors in `sql.html` are `fn-<schema>-<name>`, e.g.
+`fn-knowledge-append-to-section`, `fn-pgmind-verify-note`. Overloads share one entry.
+
+Recipe anchors in `cookbook.html` are `r-<kebab-slug>`, e.g. `r-atomic-append`.
+
+### 4.8 The shell exemplar
+
+`website/docs/index.html` is finished and is the template. Copy its `<head>` (adjusting title,
+description, canonical, og/twitter), its sprite, its `<header>`, its entire `<aside
+class="docs-side">`, and its `<footer>` verbatim. Change only `<main>` and the per-page metadata.
+`docs.css` and `docs.js` are finished; do not edit them — report a need instead.
+
+Markup vocabulary available (all styled, nothing else needed):
+
+- `<div class="code"><div class="cap">psql</div><pre><code class="sql">…</code></pre>
+  <pre class="out"><code class="out">…</code></pre></div>` — input then captured output. The
+  `cap` div is optional. `class="shell"` on the code element for shell snippets.
+- `<div class="note-box">` (informational), `.note-box.warn`, `.note-box.trap`; optional
+  `<span class="lbl">Label</span>` as the first child.
+- `<span class="badge ok|next|admin|err">` — see §5.
+- `<div class="table-scroll"><table>…</table></div>` for anything wide.
+- `<div class="cards"><a href><b>Title</b><span>blurb</span></a>…</div>`.
+- Reference entries: `<section class="fn-group">` wrapping `<div class="fn" id="fn-…">` with
+  `<h3>`, `<div class="sig"><code>…</code></div>`, `<p class="purpose">`, then `<h4>` labels
+  (`Parameters`, `Returns`, `Raises`, `Notes`, `Example`, `See also`).
+- `<nav class="page-nav">` with `<a>`/`<a class="next">` containing `<span>Previous|Next</span>`.
 
 ---
 

@@ -380,6 +380,10 @@ PGRX_TEST_SUITES = {
         # RFC-005 D5.11 block-granular CAS, and the false conflict it removes.
         "disjoint_patches_both_land_with_block_cas",
         "stale_block_hash_is_pm016_and_head_is_checked_first",
+        # RFC-011: attribution must survive every verb, not just `write`.
+        "author_flows_into_every_verb",
+        "empty_author_guc_falls_back_to_current_user",
+        "over_long_author_is_pm017_and_writes_nothing",
         "append_to_section_keeps_both_appends",
         # RFC-005 D6: tombstones, reconstruction-based undelete, rename repair.
         "delete_then_undelete_restores_the_note",
@@ -998,6 +1002,97 @@ def sqlstate(c: PgCluster, db: str, sql: str) -> str:
     return c.psql(db, "SELECT pg_catch($$%s$$);" % sql.replace("$$", ""), tuples_only=True).strip()
 
 
+def suite_provenance_integrity():
+    """RFC-011 §5: provenance is a contract, not a measurement.
+
+    Every assertion here is zero-tolerance, and none of them scores the
+    *quality* of provenance -- there is no honest metric for "is this
+    attribution true", and inventing one would contradict D1's whole point
+    that an author is a claim rather than a verified fact.
+    """
+    c = cluster()
+    c.createdb("pgmind_prov")
+
+    def run(sql, author=None):
+        prefix = f"SET pgmind.author = '{author}'; " if author is not None else ""
+        return c.psql("pgmind_prov", prefix + sql)
+
+    # Every verb, one session, one claimed author.
+    run("SELECT knowledge.write('p/n', E'# H\n\nalpha\n\nbeta\n'::markdown);", "agent:a")
+    bid = c.psql("pgmind_prov",
+                 "SELECT block_id FROM knowledge.blocks('p/n') WHERE ord = 1;",
+                 tuples_only=True).strip()
+    run(f"SELECT knowledge.update_block('{bid}'::uuid, 'alpha edited'::markdown);", "agent:a")
+    run("SELECT knowledge.append_to_section('p/n', ARRAY['H'], 'gamma'::markdown);", "agent:a")
+    run("SELECT knowledge.move_note('p/n', 'p/moved');", "agent:a")
+    run("SELECT knowledge.delete_note('p/moved');", "agent:a")
+    run("SELECT knowledge.undelete_note('p/moved');", "agent:a")
+
+    verbs = int(c.psql("pgmind_prov",
+                       "SELECT count(DISTINCT verb) FROM pgmind.revision WHERE author='agent:a';",
+                       tuples_only=True).strip())
+    foreign = int(c.psql("pgmind_prov",
+                         "SELECT count(*) FROM pgmind.revision WHERE author <> 'agent:a';",
+                         tuples_only=True).strip())
+    empty = int(c.psql("pgmind_prov",
+                       "SELECT count(*) FROM pgmind.revision WHERE author = '';",
+                       tuples_only=True).strip())
+
+    # Unset GUC => current_user, never an empty string.
+    c.createdb("pgmind_prov2")
+    c.psql("pgmind_prov2", "SELECT knowledge.write('p/d', 'alpha'::markdown);")
+    fallback = c.psql("pgmind_prov2",
+                      "SELECT bool_and(author = current_user) FROM pgmind.revision;",
+                      tuples_only=True).strip()
+
+    # Over-long author aborts the write and leaves nothing behind.
+    long_author = "a" * 201
+    over = sqlstate(c, "pgmind_prov2",
+                    f"SET pgmind.author = '{long_author}'; "
+                    "SELECT knowledge.write('p/long', 'x'::markdown)")
+    leaked = int(c.psql("pgmind_prov2",
+                        "SELECT count(*) FROM pgmind.note WHERE path = 'p/long';",
+                        tuples_only=True).strip())
+
+    # D4: inferred identity is visibly inferred, and ONLY inferred identity is.
+    # If everything carries a confidence, confidence stops meaning anything.
+    c.psql("pgmind_prov2", "SELECT knowledge.write('p/r', E'alpha one two\n\nbeta\n'::markdown);")
+    c.psql("pgmind_prov2", "SELECT knowledge.write('p/r', E'alpha one three\n\nbeta\n'::markdown);")
+    mismatched = int(c.psql("pgmind_prov2", """
+        SELECT count(*) FROM pgmind.block_revision
+         WHERE (bind = 'rebind') <> (confidence IS NOT NULL);""", tuples_only=True).strip())
+    rebinds = int(c.psql("pgmind_prov2",
+                         "SELECT count(*) FROM pgmind.block_revision WHERE bind = 'rebind';",
+                         tuples_only=True).strip())
+
+    # D3: meta carries op-shaped provenance only. A new key here means someone
+    # put a per-block or per-revision fact in a blob instead of a column.
+    stray = c.psql("pgmind_prov", """
+        SELECT coalesce(string_agg(DISTINCT k, ','), '') FROM pgmind.revision r,
+               jsonb_object_keys(r.meta) k
+         WHERE k NOT IN ('op','carried','split','merge','rebind','target','move');""",
+        tuples_only=True).strip()
+
+    checks = {
+        "every_verb_carried_the_author": verbs >= 5,
+        "no_revision_escaped_the_author": foreign == 0,
+        "no_empty_author": empty == 0,
+        "unset_guc_falls_back_to_current_user": fallback == "t",
+        "over_long_author_raises_pm017": over == "PM017",
+        "rejected_write_left_nothing": leaked == 0,
+        "confidence_iff_rebind": mismatched == 0,
+        "the_rebind_case_actually_rebound": rebinds > 0,
+        "meta_has_no_untyped_keys": stray == "",
+    }
+    ok = all(checks.values())
+    out = {"status": "ok" if ok else "fail", "checks": checks,
+           "verbs_attributed": verbs, "rebinds_observed": rebinds,
+           "observed": {"over_long": over, "stray_meta_keys": stray}}
+    if not ok:
+        out["reason"] = "; ".join(k for k, v in checks.items() if not v)
+    return out
+
+
 def suite_gate_selftest():
     """RFC-005 §5.0(b): every checker the Phase 3 gates rely on must be able to
     FAIL. This repo has three times shipped a gate that could not -- an exit code
@@ -1111,6 +1206,38 @@ beta
     cases["rebinding_index_check_catches_drift"] = (
         rebinding.index_is_current(good, good.index)
         and not rebinding.index_is_current(good, "    before[0] paragraph      NOT WHAT IS THERE"))
+
+    # 5. The provenance contract. Both halves of D4 are breakable in opposite
+    #    directions, and only one of them is obvious: a rebind that forgot its
+    #    confidence, and a deterministic carry that grew one. The second is the
+    #    dangerous one -- if everything carries a confidence, the column stops
+    #    distinguishing inferred identity from known identity, which is the
+    #    entire reason it exists.
+    c.createdb("pgmind_selftest3")
+    c.psql("pgmind_selftest3", """
+        SELECT knowledge.write('st/p', E'alpha one two\n\nbeta\n'::markdown);
+        SELECT knowledge.write('st/p', E'alpha one three\n\nbeta\n'::markdown);""")
+
+    def contract_violations() -> int:
+        return int(c.psql("pgmind_selftest3", """
+            SELECT count(*) FROM pgmind.block_revision
+             WHERE (bind = 'rebind') <> (confidence IS NOT NULL);""",
+            tuples_only=True).strip())
+
+    cases["provenance_contract_clean_before_injection"] = contract_violations() == 0
+    c.psql("pgmind_selftest3",
+           "UPDATE pgmind.block_revision SET confidence = NULL WHERE bind = 'rebind';")
+    cases["confidence_check_catches_an_unmarked_rebind"] = contract_violations() > 0
+    c.psql("pgmind_selftest3",
+           "UPDATE pgmind.block_revision SET confidence = 0.9 WHERE bind = 'carry';")
+    cases["confidence_check_catches_a_confident_deterministic_carry"] = contract_violations() > 0
+    # And the author check: NOT NULL is satisfied by the empty string, so the
+    # constraint does not protect what the gate claims to protect.
+    c.psql("pgmind_selftest3", "UPDATE pgmind.revision SET author = '' WHERE seq = 0;")
+    empty_authors = int(c.psql("pgmind_selftest3",
+                               "SELECT count(*) FROM pgmind.revision WHERE author = '';",
+                               tuples_only=True).strip())
+    cases["author_check_catches_an_empty_author"] = empty_authors > 0
 
     ok = all(cases.values())
     out = {"status": "ok" if ok else "fail", "cases": cases}
@@ -1516,6 +1643,7 @@ SUITES = {
     "storage-growth": suite_storage_growth,
     "excision-completeness": suite_excision_completeness,
     "rebinding-edit-corpus": suite_rebinding_corpus,
+    "provenance-integrity": suite_provenance_integrity,
     "gate-selftest": suite_gate_selftest,
     # Phase 4 (RFC-006):     sync-round-trip (incl. unicode/case collisions), torture
     # Phase 5 (RFC-007/008): context-determinism, quality-per-token

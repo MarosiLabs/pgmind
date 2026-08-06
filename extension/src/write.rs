@@ -307,16 +307,6 @@ pub fn carry(old: &[BlockRow], new: &[pgmind_core::Block]) -> Carry {
     finish_carry(&input, state)
 }
 
-fn capped(ids: &[Uuid]) -> serde_json::Value {
-    const CAP: usize = 200;
-    let strs: Vec<String> = ids.iter().take(CAP).map(|u| u.to_string()).collect();
-    if ids.len() > CAP {
-        json!({ "list": strs, "truncated": true, "count": ids.len() })
-    } else {
-        json!(strs)
-    }
-}
-
 /// RFC-004 A4 `rebind` record. Emitted only when Part B did something worth
 /// recording — a binding it inferred, or a note it declined to rebind because
 /// the residual blew the budget. A skipped note churned identity silently
@@ -336,11 +326,15 @@ fn rebind_meta(c: &Carry) -> Option<serde_json::Value> {
 }
 
 pub fn write_meta(op: &str, c: &Carry) -> serde_json::Value {
+    // No `minted` / `removed` lists. RFC-005 D11 declared them retired in
+    // favour of `block_revision` rows carrying the same facts in typed columns
+    // (`bind = 'mint'` / `'remove'`) -- the declaration shipped, the deletion
+    // did not, and both copies have been written ever since. RFC-011 D3's rule
+    // is the general form: a per-block fact does not belong in a per-revision
+    // blob. Removed 2026-08-06; the provenance gate is what noticed.
     let mut m = json!({
         "op": op,
-        "minted": capped(&c.minted),
         "carried": { "ref": c.carried_ref, "hash": c.carried_hash, "rebind": c.carried_rebind },
-        "removed": capped(&c.removed),
     });
     if let Some(r) = rebind_meta(c) {
         m["rebind"] = r;
@@ -370,6 +364,35 @@ pub fn seq_of(revision: Uuid) -> i64 {
 }
 
 /// Insert the revision row and swap the note head. Returns the revision id.
+/// RFC-011 D1: the writer's own claim about who it is, from `pgmind.author`.
+///
+/// `None` lets the column default to `current_user`. The value is never
+/// validated beyond its length and never namespaced: any session that can
+/// write can claim any author, and dressing that up — a registry, a required
+/// prefix, an FK to a principals table — would make a claim look verified
+/// without verifying it, which is worse than a plain string.
+pub fn current_author() -> Option<String> {
+    let raw = crate::AUTHOR_GUC.get()?;
+    let s = raw.to_str().unwrap_or("").trim().to_string();
+    if s.is_empty() {
+        // An empty GUC is "unset", not an empty author: the column is NOT NULL
+        // and an empty string would satisfy it while answering nothing.
+        return None;
+    }
+    if s.chars().count() > AUTHOR_MAX_CHARS {
+        pm_error(
+            Pm::InvalidAuthor,
+            "pgmind.author is longer than the limit",
+            &format!("{} characters, limit {AUTHOR_MAX_CHARS}", s.chars().count()),
+        );
+    }
+    Some(s)
+}
+
+/// RFC-011 D1. Chars, not bytes — a limit that cuts a multi-byte name in half
+/// is a limit that produces a different author.
+pub const AUTHOR_MAX_CHARS: usize = 200;
+
 pub fn new_revision(
     vault: Uuid,
     note: Uuid,
@@ -379,9 +402,13 @@ pub fn new_revision(
     meta: &serde_json::Value,
 ) -> Uuid {
     let rev = ids::mint();
+    // Read once, before the INSERT: an over-long author must abort the write
+    // rather than land a revision row and fail afterwards.
+    let author = current_author();
     Spi::run_with_args(
-        "INSERT INTO pgmind.revision (id, vault_id, note_id, parent, source, verb, seq, meta)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        "INSERT INTO pgmind.revision
+             (id, vault_id, note_id, parent, source, verb, seq, meta, author)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, coalesce($9, current_user))",
         &[
             arg(rev),
             arg(vault),
@@ -393,6 +420,7 @@ pub fn new_revision(
             verb.into(),
             next_seq(note).into(),
             JsonB(meta.clone()).into(),
+            author.as_deref().into(),
         ],
     )
     .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure inserting revision: {e}"));
@@ -986,13 +1014,15 @@ pub fn write_note(path_raw: &str, source: &str, expected_head: Option<Uuid>) -> 
             let c = carry(&[], &parsed.doc.blocks);
             reconcile(vault, note_id, &parsed, &[], &[], &c);
             Spi::run_with_args(
-                "INSERT INTO pgmind.revision (id, vault_id, note_id, parent, source, verb, seq, meta)
-                 VALUES ($1, $2, $3, NULL, 'api', 'write', 0, $4)",
+                "INSERT INTO pgmind.revision
+                     (id, vault_id, note_id, parent, source, verb, seq, meta, author)
+                 VALUES ($1, $2, $3, NULL, 'api', 'write', 0, $4, coalesce($5, current_user))",
                 &[
                     arg(rev_id),
                     arg(vault),
                     arg(note_id),
                     JsonB(write_meta("write", &c)).into(),
+                    current_author().as_deref().into(),
                 ],
             )
             .unwrap_or_else(|e| pgrx::error!("pgmind: SPI revision insert: {e}"));

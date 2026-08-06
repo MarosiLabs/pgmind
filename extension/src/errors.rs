@@ -48,6 +48,8 @@ pub enum Pm {
     PathTaken,
     /// PM016 pgmind_stale_block
     StaleBlock,
+    /// PM017 pgmind_invalid_author
+    InvalidAuthor,
 }
 
 impl Pm {
@@ -69,6 +71,7 @@ impl Pm {
             Pm::NoteTombstoned => "PM014",
             Pm::PathTaken => "PM015",
             Pm::StaleBlock => "PM016",
+            Pm::InvalidAuthor => "PM017",
         }
     }
 
@@ -90,6 +93,7 @@ impl Pm {
             Pm::NoteTombstoned => "pgmind_note_tombstoned",
             Pm::PathTaken => "pgmind_path_taken",
             Pm::StaleBlock => "pgmind_stale_block",
+            Pm::InvalidAuthor => "pgmind_invalid_author",
         }
     }
 }

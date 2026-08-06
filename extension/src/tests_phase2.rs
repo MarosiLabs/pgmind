@@ -1290,6 +1290,78 @@ mod tests {
         );
     }
 
+    // ---------- RFC-011: provenance ----------
+
+    /// Attribution must hold for EVERY verb. A write path that sets `author`
+    /// for `write` and silently drops it for the nine other mutating verbs is
+    /// the likely bug, and it is invisible unless every verb is exercised.
+    #[pg_test]
+    fn author_flows_into_every_verb() {
+        Spi::run("SET pgmind.author = 'agent:tester@run-1'").unwrap();
+        write("prov/note", "# H\n\nalpha\n\nbeta\n");
+        let blocks = block_ids("prov/note");
+        Spi::run(&format!(
+            "SELECT knowledge.update_block('{}'::uuid, 'alpha edited'::markdown)",
+            blocks[1].1
+        ))
+        .unwrap();
+        Spi::run("SELECT knowledge.append_to_section('prov/note', ARRAY['H'], 'gamma'::markdown)")
+            .unwrap();
+        Spi::run("SELECT knowledge.move_note('prov/note', 'prov/moved')").unwrap();
+        Spi::run("SELECT knowledge.delete_note('prov/moved')").unwrap();
+        Spi::run("SELECT knowledge.undelete_note('prov/moved')").unwrap();
+
+        let verbs: i64 = Spi::get_one(
+            "SELECT count(DISTINCT verb) FROM pgmind.revision WHERE author = 'agent:tester@run-1'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(verbs >= 5, "only {verbs} distinct verbs carried the author");
+        let wrong: i64 = Spi::get_one(
+            "SELECT count(*) FROM pgmind.revision WHERE author <> 'agent:tester@run-1'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(wrong, 0, "a verb dropped the author");
+    }
+
+    /// An empty GUC is "unset", not an empty author: `author` is NOT NULL, so
+    /// an empty string satisfies the constraint while answering nothing.
+    #[pg_test]
+    fn empty_author_guc_falls_back_to_current_user() {
+        Spi::run("SET pgmind.author = ''").unwrap();
+        write("prov/fallback", "alpha\n");
+        // Compare against current_user itself, not a hardcoded role: the pg_test
+        // cluster and the eval harness's cluster run as different users, and a
+        // literal here tests the test environment rather than the fallback.
+        let fell_back: bool = Spi::get_one(
+            "SELECT bool_and(r.author = current_user) AND count(*) > 0
+               FROM pgmind.revision r JOIN pgmind.note n ON n.id = r.note_id
+              WHERE n.path = 'prov/fallback'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(fell_back, "empty GUC must fall back to current_user");
+    }
+
+    /// Silent truncation writes a WRONG author and the failure is unobservable
+    /// afterwards, so the write must abort instead — and abort before the
+    /// revision row lands.
+    #[pg_test]
+    fn over_long_author_is_pm017_and_writes_nothing() {
+        let long = "a".repeat(crate::write::AUTHOR_MAX_CHARS + 1);
+        Spi::run(&format!("SET pgmind.author = '{long}'")).unwrap();
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.write('prov/long', 'alpha'::markdown)"),
+            "PM017"
+        );
+        Spi::run("SET pgmind.author = ''").unwrap();
+        let notes: i64 = Spi::get_one("SELECT count(*) FROM pgmind.note WHERE path = 'prov/long'")
+            .unwrap()
+            .unwrap();
+        assert_eq!(notes, 0, "the rejected write must leave nothing behind");
+    }
+
     /// RFC-005 D5.11: block-granular CAS. The point of the whole parameter is
     /// the SECOND half of this test — that the same interleaving with the
     /// note-level guard fails. Without that comparison "block CAS avoids false
@@ -1997,10 +2069,21 @@ mod tests {
             a.to_string(),
             "the surviving holder, by uuid"
         );
-        assert!(meta["removed"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::Value::String(b.to_string())));
+        // The retiree's removal is a per-BLOCK fact and lives in typed columns,
+        // not in this blob: RFC-005 D11 declared meta.removed retired and
+        // RFC-011 D3 generalised the rule. This assertion is what D11 said
+        // would change with it.
+        let removed: i64 = Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.block_revision WHERE block_id = $1 AND bind = 'remove'",
+            &[crate::store::arg(b)],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(removed, 1, "the merge retiree is recorded as removed");
+        assert!(
+            meta.get("removed").is_none(),
+            "meta must not carry a second copy of a per-block fact"
+        );
         verify_clean(path);
     }
 

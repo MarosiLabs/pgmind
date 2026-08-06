@@ -1,9 +1,9 @@
 # RFC-011: Provenance — who wrote this, how, and how sure
 
-- **Status:** Draft — proposed for acceptance, not implemented
+- **Status:** Living — **accepted 2026-08-06**, implemented the same day. Two amendments were made at implementation and are recorded in place: D3's permitted key set (the gate found two violations the RFC had not anticipated) and §5's negative control (built the way the shipped gate-selftest builds them, not as a new admin function).
 - **Phase:** 3
 - **Owner:** project author
-- **Created:** 2026-08-06 · **Accepted:** — · **Frozen:** —
+- **Created:** 2026-08-06 · **Accepted:** 2026-08-06 · **Frozen:** —
 
 ## 1. Context
 
@@ -56,7 +56,10 @@ Normative, going forward:
 
 - `meta` is for op-shaped provenance only. **Anything that is a fact about one block or one revision MUST get a typed column instead**, and an addition to `meta` MUST state in its RFC why a column was rejected.
 - The 200-entry cap and `"truncated": true` behaviour (A4) stands.
-- **No migration of accumulated `meta` is required**, and this RFC discharges A4's obligation by narrowing it rather than performing it. Existing rows are already in the shape above.
+- The permitted key set is exactly: `op`, `carried`, `split`, `merge`, `rebind` (RFC-004 A4 and Part B), `target` (which block a block op addressed — the `block_revision` rows say which blocks *changed*, not which one the caller named), and `move` (`{from, to}` for `move_note`, the one place a rename is readable without joining the pre-image lane).
+- **No migration of accumulated `meta` is required**, and this RFC discharges A4's obligation by narrowing it rather than performing it.
+
+*Amended at implementation, 2026-08-06 — the gate below found this before a human did.* `delete_note` was writing `{"deleted": true}`, which is a per-revision fact that `verb = 'delete_note'` already carries: precisely what the first rule above forbids. It is removed rather than added to the permitted set. Rows written before this change still carry the key; the gate runs against fresh databases, so the discrepancy is invisible in CI and belongs to RFC-012's upgrade script, which MUST either strip it or widen the check for historical rows. Naming it here so it does not arrive as a surprise.
 
 ### D4. What `confidence` means, and what a consumer may conclude
 
@@ -110,7 +113,7 @@ Stated because each of these is a thing readers assume, and every one of them is
 | Every block bound by Part B has `confidence IS NOT NULL AND bind = 'rebind'`; every deterministically carried block has `confidence IS NULL`. | If everything gets a confidence, confidence stops meaning anything — the exact failure D4 legislates against. |
 | `revision.meta` contains no key outside the A4 schema plus `rebind`. | The rule in D3 is only real if something enforces it. |
 
-**Negative control** (RFC-005 §5.0(b)): `pgmind.break_provenance` — an admin-only, fault-injection-gated function that writes one revision with an author of `''` and one rebound block with `confidence = NULL` — and the suite must report `fail`.
+**Negative control** (RFC-005 §5.0(b)). *Amended at implementation:* this RFC specified a `pgmind.break_provenance` admin function. The shipped `gate-selftest` suite breaks its subjects with direct SQL instead, and no fault-injection function has ever been built — deliberately, because an admin surface whose only purpose is corrupting data is real attack surface in a production extension, and the existing suite proves you do not need one. The control follows that precedent: it nulls a rebind's confidence, gives a deterministic carry a confidence, and empties an author, asserting the checker notices each. **The second of those is the one worth having** — an unmarked rebind is an obvious bug, while a confident deterministic carry silently destroys the distinction the column exists to draw.
 
 The gate deliberately measures no *quality* of provenance. There is no honest metric for "is this attribution true", and inventing one would contradict D1.
 
