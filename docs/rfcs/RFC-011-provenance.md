@@ -1,9 +1,9 @@
 # RFC-011: Provenance — who wrote this, how, and how sure
 
-- **Status:** Living — **accepted 2026-08-06**, implemented the same day. Two amendments were made at implementation and are recorded in place: D3's permitted key set (the gate found two violations the RFC had not anticipated) and §5's negative control (built the way the shipped gate-selftest builds them, not as a new admin function).
+- **Status:** **Frozen 2026-08-06 (Phase 3 exited)** — accepted and implemented the same day. Two amendments were made at implementation and are recorded in place: D3's permitted key set (the gate found two violations the RFC had not anticipated) and §5's negative control (built the way the shipped gate-selftest builds them, not as a new admin function).
 - **Phase:** 3
 - **Owner:** project author
-- **Created:** 2026-08-06 · **Accepted:** 2026-08-06 · **Frozen:** —
+- **Created:** 2026-08-06 · **Accepted:** 2026-08-06 · **Frozen:** 2026-08-06
 
 ## 1. Context
 

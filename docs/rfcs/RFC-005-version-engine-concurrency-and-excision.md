@@ -1,9 +1,9 @@
 # RFC-005: Version Engine, Concurrency Semantics & Excision
 
-- **Status:** **Accepted 2026-08-06 — living while Phase 3 is active** (amendments land in place per §12 lifecycle; frozen at Phase 3 exit). **Amended 2026-08-06 after the pre-implementation adversarial review** — five critical defects (tenant RLS on the new tables, the audit row that kept what it erased, a privilege-filtered erasure sweep, arity-destroying redaction escalation, a dump-restore gate blind to every history table) and eleven majors, each marked in place below.
+- **Status:** **Frozen 2026-08-06 (Phase 3 exited).** Accepted 2026-08-06 and living through the phase, with amendments landing in place per the §12 lifecycle — the last of them D5.11's block-granular CAS and D11's correction of a `revision.source` claim the code disproved. **Amended 2026-08-06 after the pre-implementation adversarial review** — five critical defects (tenant RLS on the new tables, the audit row that kept what it erased, a privilege-filtered erasure sweep, arity-destroying redaction escalation, a dump-restore gate blind to every history table) and eleven majors, each marked in place below.
 - **Phase:** 3
 - **Owner:** project author
-- **Created:** 2026-08-05 · **Accepted:** 2026-08-06 · **Frozen:** —
+- **Created:** 2026-08-05 · **Accepted:** 2026-08-06 · **Frozen:** 2026-08-06 (Phase 3 exited)
 
 ## 1. Context
 

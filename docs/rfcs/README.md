@@ -8,12 +8,12 @@ Canonical index — mirrors [handbook §12](../PGMIND.md) and the [product plan 
 | [001](RFC-001-implementation-platform.md) | Implementation Platform | 0 | **Frozen 2026-08-05** (Phase 0 exited) |
 | [002](RFC-002-markdown-type-ast-vault-syntax.md) | Markdown Type, AST & Vault Syntax | 1 | **Frozen 2026-08-05** (Phase 1 exited) |
 | [003](RFC-003-vault-and-block-storage-layout.md) | Vault & Block Storage Layout | 2 | **Frozen 2026-08-05** (Phase 2 exited) |
-| [004](RFC-004-block-identity-and-rebinding.md) | Block Identity & Rebinding Semantics | 2-3 | **Part A accepted 2026-08-05** (post-review amendments accepted the same day); **Part B revised from corpus measurement and accepted 2026-08-06** — shipped, with two corrections recorded in place (merge stage dropped, alignment budget declared) |
-| [005](RFC-005-version-engine-concurrency-and-excision.md) | Version Engine, Concurrency Semantics & Excision | 3 | **Accepted 2026-08-06** (living; Phase 3 active) |
+| [004](RFC-004-block-identity-and-rebinding.md) | Block Identity & Rebinding Semantics | 2-3 | **Frozen 2026-08-06** (Phase 3 exited). Part A accepted 2026-08-05; Part B rewritten from corpus measurement, accepted and shipped 2026-08-06 |
+| [005](RFC-005-version-engine-concurrency-and-excision.md) | Version Engine, Concurrency Semantics & Excision | 3 | **Frozen 2026-08-06** (Phase 3 exited) |
 | 006 | Sync Bridge & Import/Export | 4 | not started |
 | 007 | Query API & MCP Surface | 5 | not started |
 | 008 | Deterministic Context Assembly & Token Budgeting | 5, matured 7 | not started |
 | 009 | Optional Vector Lane (pgvector hooks) | 6 | not started |
 | 010 | Retrieval Planner (incl. BM25 adapter decision) | 7 | not started |
-| [011](RFC-011-provenance.md) | Provenance | 3 | **Drafted 2026-08-06 — proposed for acceptance, not implemented** |
+| [011](RFC-011-provenance.md) | Provenance | 3 | **Frozen 2026-08-06** (Phase 3 exited) |
 | 012 | Packaging & Distribution | 5+ | not started |

@@ -297,7 +297,7 @@ Design targets (to validate, not promises): vaults to **100k notes / 10M blocks 
 | 0 | Groundwork | 000, 001 | eval harness, CI matrix | S (weeks) |
 | 1 | Markdown type & parser | 002 | `markdown` type, AST fns, round-trip | M |
 | 2 | The vault model | 003, 004 (write-path part accepted) | notes/blocks/links/tags in SQL | L |
-| 3 | Versioning & concurrency | 004 (final), 005, 011 | history, CAS, append, rebinding, excision | L (the hard one) |
+| 3 | Versioning & concurrency | 004 (final), 005, 011 | history, CAS, append, rebinding, excision | L (the hard one) — **exited 2026-08-06** |
 | 4 | Sync bridge | 006 | import/export/sync CLI, quickstart | M |
 | 5 | MCP + context ⇒ **pgmind 0.1.0** | 007, 008, 012 | MCP server, `context()` v1, packaging | M |
 | 6 | Optional vector lane | 009 | embedding hooks + queue, blended search | S |
@@ -330,7 +330,7 @@ Rules binding all phases (handbook §8/§9): build order parser → storage → 
 **Goal:** history for everything; many writers, zero silent clobbers; honest rebinding.
 **RFCs:** RFC-004 (final — rebinding pipeline, thresholds, split/merge policy); RFC-005 (revisions, delta/keyframe format, CAS + append semantics, excision mechanics); RFC-011 (provenance model: authors, sources, confidence).
 **Deliverables:** revision engine (append-only, deltas + keyframes); history/diff/blame/as-of; `write` CAS, `append_to_section`, `patch_block`; `move`/`delete` (tombstone revisions); rebinding pipeline; excision + retention + audit log.
-**Gate:** adversarial edit corpus with published match-rate (the number is the deliverable — start honest, improve); concurrency suite (CAS conflicts, concurrent appends, interleaved rebind-source (`source='sync'`) and API writes — true bridge interleaving lands in Phase 4's torture suite); storage-growth benchmark under revision load.
+**Gate:** adversarial edit corpus with published match-rate (the number is the deliverable — start honest, improve); concurrency suite (CAS conflicts, concurrent appends, ~~interleaved rebind-source (`source='sync'`) and API writes~~ — **deferred to Phase 4, recorded at the exit**: `revision.source` is hardcoded `'api'` and the only thing that can set `'sync'` is the sync bridge, which is RFC-006; the plan already puts true bridge interleaving in Phase 4's torture suite); storage-growth benchmark under revision load.
 **Risks:** rebinding quality (mitigation: corpus-driven iteration, `^id` escape hatch); delta-chain read cost (mitigation: keyframe cadence tuning in the benchmark).
 
 ### Phase 4 — Sync bridge
