@@ -9,14 +9,14 @@
   "design_target_notes_per_s": 2000,
   "bytes": {
     "note": {
-      "total_bytes": 3940352,
-      "heap_bytes": 1171456,
+      "total_bytes": 4030464,
+      "heap_bytes": 1261568,
       "index_bytes": 2736128
     },
     "revision": {
-      "total_bytes": 12582912,
+      "total_bytes": 13017088,
       "heap_bytes": 11706368,
-      "index_bytes": 843776
+      "index_bytes": 1277952
     },
     "tile": {
       "total_bytes": 14401536,
@@ -37,93 +37,118 @@
       "total_bytes": 6905856,
       "heap_bytes": 3727360,
       "index_bytes": 3145728
+    },
+    "note_revision": {
+      "total_bytes": 3211264,
+      "heap_bytes": 1908736,
+      "index_bytes": 1269760
+    },
+    "block_revision": {
+      "total_bytes": 47882240,
+      "heap_bytes": 23265280,
+      "index_bytes": 24584192
+    },
+    "note_frame": {
+      "total_bytes": 21446656,
+      "heap_bytes": 20480000,
+      "index_bytes": 933888
+    },
+    "excision_log": {
+      "total_bytes": 16384,
+      "heap_bytes": 0,
+      "index_bytes": 8192
+    },
+    "excision_replay": {
+      "total_bytes": 16384,
+      "heap_bytes": 0,
+      "index_bytes": 8192
     }
   },
   "latency_p95_ms": {
-    "backlinks": 2.2693999999999996,
-    "read": 0.4536499999999999,
-    "tagged": 3.9867
+    "backlinks": 1.2079499999999999,
+    "read": 0.3181,
+    "tagged": 4.16475
   },
   "verify_violations": 0,
-  "bulk_pass_notes_per_s_one_sample": 200.2,
+  "bulk_pass_notes_per_s_one_sample": 143.9,
   "write_cost": {
     "procedure": "5 rounds x 3 shapes, each pass writing a 500-note corpus into an EMPTY database (every write a create, release build, single connection, staging loaded untimed); then 8 successive passes into one database for the growth curve",
     "notes_per_pass": 500,
     "ms_per_note_by_pass_empty_vault": {
       "full": [
-        3.902,
-        3.882,
-        3.998,
-        4.029,
-        3.856
+        5.873,
+        5.854,
+        5.767,
+        5.953,
+        6.324
       ],
       "no_extraction": [
-        2.692,
-        2.775,
-        2.714,
-        2.679,
-        2.87
+        4.362,
+        4.487,
+        4.691,
+        4.474,
+        4.714
       ],
       "single_block": [
-        1.072,
-        1.057,
-        1.077,
-        1.053,
-        1.074
+        1.846,
+        1.806,
+        1.946,
+        1.869,
+        1.783
       ]
     },
-    "ms_per_note_median": 3.902,
+    "ms_per_note_median": 5.873,
     "ms_per_note_range": [
-      3.856,
-      4.029
+      5.767,
+      6.324
     ],
-    "notes_per_s_median": 256.3,
+    "notes_per_s_median": 170.3,
     "measured_at_vault_size": 0,
     "attribution_ms_per_note": {
-      "extraction": 1.188,
-      "blocks_and_tiles_beyond_the_first": 1.642,
-      "per_note_fixed": 1.072,
-      "run_to_run_spread_of_full": 0.173
+      "extraction": 1.386,
+      "blocks_and_tiles_beyond_the_first": 2.641,
+      "per_note_fixed": 1.846,
+      "run_to_run_spread_of_full": 0.557
     },
     "growth_ms_per_note_by_vault_size": [
       {
         "notes_already_in_vault": 0,
-        "ms_per_note": 3.966
+        "ms_per_note": 5.725
       },
       {
         "notes_already_in_vault": 500,
-        "ms_per_note": 4.633
+        "ms_per_note": 6.415
       },
       {
         "notes_already_in_vault": 1000,
-        "ms_per_note": 4.363
+        "ms_per_note": 6.257
       },
       {
         "notes_already_in_vault": 1500,
-        "ms_per_note": 4.479
+        "ms_per_note": 6.364
       },
       {
         "notes_already_in_vault": 2000,
-        "ms_per_note": 4.918
+        "ms_per_note": 6.421
       },
       {
         "notes_already_in_vault": 2500,
-        "ms_per_note": 5.024
+        "ms_per_note": 6.498
       },
       {
         "notes_already_in_vault": 3000,
-        "ms_per_note": 4.12
+        "ms_per_note": 6.186
       },
       {
         "notes_already_in_vault": 3500,
-        "ms_per_note": 3.87
+        "ms_per_note": 5.987
       }
     ]
   },
-  "write_throughput_notes_per_s": 256.3,
-  "bytes_per_block_all_in": 657.9,
+  "write_throughput_notes_per_s": 170.3,
+  "bytes_per_block_all_in": 975.7,
   "extrapolation_100k_notes_10m_blocks": {
     "assumption": "linear in blocks; revision-load behavior modeled only until Phase 3 measures it",
-    "projected_total_gb": 6.58
+    "projected_total_gb": 9.76
   }
 }

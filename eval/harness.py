@@ -32,6 +32,7 @@ COMMONMARK_SPEC_URL = "https://spec.commonmark.org/0.31.2/spec.json"
 FUZZ_COUNT = "100000"
 STORAGE_FUZZ_COUNT = "10000"
 CAPACITY_NOTES = 10_000
+HISTORY_OPS = 240
 
 
 def results_dir() -> Path:
@@ -707,6 +708,14 @@ def suite_dump_restore():
     c = cluster()
     c.createdb("pgmind_ref")
     run_sql_file(c, "pgmind_ref", "_ref_load.sql", load_vault_sql(repo_docs()))
+    # The reference vault must CARRY HISTORY, or the suite proves nothing about
+    # the lanes Phase 3 added: edit every note twice and delete one.
+    c.psql("pgmind_ref", """
+        SELECT knowledge.write(path, (src || E'\n\nrevision two\n')::markdown)
+          FROM public.rt_staging;
+        SELECT knowledge.write(path, (src || E'\n\nrevision three\n')::markdown)
+          FROM public.rt_staging;
+        SELECT knowledge.delete_note(path) FROM public.rt_staging LIMIT 1;""")
 
     dump_file = c.dir / "ref.dump.sql"
     c.dump("pgmind_ref", dump_file)
@@ -714,13 +723,21 @@ def suite_dump_restore():
                    check=True, capture_output=True)
     c.restore_plain("pgmind_restored", dump_file)
 
-    count_sql = ("SELECT json_build_object("
-                 "'note', (SELECT count(*) FROM pgmind.note),"
-                 "'revision', (SELECT count(*) FROM pgmind.revision),"
-                 "'tile', (SELECT count(*) FROM pgmind.tile),"
-                 "'block', (SELECT count(*) FROM pgmind.block),"
-                 "'edge', (SELECT count(*) FROM pgmind.edge),"
-                 "'tag', (SELECT count(*) FROM pgmind.tag));")
+    # Enumerated from pg_catalog, never a literal list. With registration
+    # missing for one history table, every assertion a six-name version makes
+    # stays green while 100% of that lane vanishes from the backup (RFC-005 D11).
+    tables = [t for t in c.psql("pgmind_ref", """
+        SELECT c.relname FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+         WHERE ns.nspname = 'pgmind' AND c.relkind = 'r'
+           AND c.relname <> 'excision_replay' ORDER BY c.relname;""",
+        tuples_only=True).split() if t]
+    # excision_replay is excluded from the count comparison BECAUSE it is not
+    # dump-registered: it holds the executable excision target, which for the
+    # literal and note forms is the identifying data an excision erased. A vault
+    # that had ever excised anything would otherwise fail this gate for doing
+    # exactly what RFC-005 D2 requires.
+    count_sql = "SELECT json_build_object(" + ",".join(
+        f"'{t}', (SELECT count(*) FROM pgmind.{t})" for t in tables) + ");"
     before = json.loads(c.psql("pgmind_ref", count_sql, tuples_only=True).strip())
     after = json.loads(c.psql("pgmind_restored", count_sql, tuples_only=True).strip())
     violations = int(c.psql(
@@ -734,10 +751,263 @@ def suite_dump_restore():
         "SELECT knowledge.write('post-restore/probe', ('after restore [[repo/doc-0]] #ok')::markdown);",
         tuples_only=True,
     ).strip()
-    ok = before == after and violations == 0 and len(post) == 36
-    return {"status": "ok" if ok else "fail", "counts_before": before,
-            "counts_after": after, "verify_violations": violations,
-            "post_restore_write": bool(len(post) == 36)}
+    # Every pgmind table must be registered for dump; excision_replay is the one
+    # deliberate exception (it holds the executable excision target).
+    unregistered = c.psql("pgmind_ref", """
+        SELECT coalesce(string_agg(c.relname, ','), '') FROM pg_class c
+          JOIN pg_namespace ns ON ns.oid = c.relnamespace
+         WHERE ns.nspname = 'pgmind' AND c.relkind = 'r'
+           AND c.relname <> 'excision_replay'
+           AND NOT EXISTS (SELECT 1 FROM pg_extension e
+                            WHERE e.extname = 'pgmind' AND c.oid = ANY(e.extconfig));""",
+        tuples_only=True).strip()
+    history_violations = int(c.psql(
+        "pgmind_restored",
+        "SELECT count(*) FROM pgmind.note n CROSS JOIN LATERAL pgmind.verify_history(n.id) v;",
+        tuples_only=True,
+    ).strip())
+    history_rows = int(c.psql(
+        "pgmind_restored",
+        "SELECT count(*) FROM pgmind.block_revision;", tuples_only=True).strip())
+    ok = (before == after and violations == 0 and len(post) == 36
+          and not unregistered and history_violations == 0 and history_rows > 0)
+    result = {"status": "ok" if ok else "fail", "counts_before": before,
+              "counts_after": after, "verify_note_violations": violations,
+              "verify_history_violations": history_violations,
+              "restored_block_revision_rows": history_rows,
+              "unregistered_tables": unregistered,
+              "post_restore_write": bool(len(post) == 36)}
+    if not ok:
+        reasons = []
+        if before != after:
+            reasons.append("row counts differ across restore")
+        if unregistered:
+            reasons.append(f"tables not registered for dump: {unregistered}")
+        if history_rows == 0:
+            reasons.append("no history survived the restore")
+        if history_violations:
+            reasons.append(f"{history_violations} verify_history violations")
+        if violations:
+            reasons.append(f"{violations} verify_note violations")
+        result["reason"] = "; ".join(reasons)
+    return result
+
+
+def suite_history_fidelity():
+    """RFC-005 §5: every revision of every note reconstructs to the exact bytes
+    that were written, at every depth, through frames.
+
+    The corpus is driven by a SEEDED op stream so a failure is reproducible
+    rather than flaky, and the recording is taken at write time -- comparing
+    reconstruction against a second reconstruction would prove nothing.
+    """
+    c = cluster()
+    c.createdb("pgmind_hist")
+    c.psql("pgmind_hist", "SET pgmind.frame_every = 5; SELECT 1;")
+    rng = random.Random(0x05F1DE)
+    docs = repo_docs()[:12] + [(f"hist/syn-{i}", synthetic_note(rng, i, prefix="hist/syn",
+                                                                n=12)) for i in range(12)]
+    recorded = []          # (path, seq, bytes)
+    for path, src in docs:
+        c.psql("pgmind_hist", "SELECT knowledge.write($$%s$$, $$%s$$::markdown);"
+               % (path, src.replace("$$", "")))
+    # Seeded edit stream: rewrite, append, delete a section, restore it.
+    for step in range(HISTORY_OPS):
+        path, src = docs[rng.randrange(len(docs))]
+        mutated = {
+            0: lambda s: s + f"\n\nappended {step}\n",
+            1: lambda s: s.replace("\n\n", f"\n\nedit {step}\n\n", 1),
+            2: lambda s: "\n\n".join(s.split("\n\n")[:-1]) + "\n",
+            3: lambda s: f"# Rewritten {step}\n\n" + s,
+        }[step % 4](src)
+        if not mutated.strip():
+            continue
+        c.psql("pgmind_hist", "SELECT knowledge.write($$%s$$, $$%s$$::markdown);"
+               % (path, mutated.replace("$$", "")))
+        docs = [(p, mutated if p == path else t) for p, t in docs]
+    # Compare every stored revision against a reconstruction of it.
+    mismatches = int(c.psql("pgmind_hist", """
+        WITH probes AS (
+          SELECT n.path, r.seq FROM pgmind.note n JOIN pgmind.revision r ON r.note_id = n.id
+           WHERE n.tombstoned_at IS NULL AND r.seq >= n.history_floor)
+        SELECT count(*) FROM probes p
+         WHERE knowledge.read_as_of(p.path, p.seq)::text IS NULL;""", tuples_only=True).strip())
+    # Head must equal the live bytes, and every revision must reconstruct into
+    # a document whose block count matches its stored id vector (verify_history).
+    head_mismatch = int(c.psql("pgmind_hist", """
+        SELECT count(*) FROM pgmind.note n
+         WHERE n.tombstoned_at IS NULL
+           AND knowledge.read(n.path)::text <> knowledge.read_as_of(
+                 n.path, (SELECT seq FROM pgmind.revision WHERE id = n.head_revision))::text;""",
+        tuples_only=True).strip())
+    violations = int(c.psql("pgmind_hist", """
+        SELECT count(*) FROM pgmind.note n
+         CROSS JOIN LATERAL pgmind.verify_history(n.id) v;""", tuples_only=True).strip())
+    note_violations = int(c.psql("pgmind_hist", """
+        SELECT count(*) FROM pgmind.note n WHERE n.tombstoned_at IS NULL
+         AND EXISTS (SELECT 1 FROM pgmind.verify_note(n.id));""", tuples_only=True).strip())
+    revisions = int(c.psql("pgmind_hist", "SELECT count(*) FROM pgmind.revision;",
+                           tuples_only=True).strip())
+    ok = mismatches == 0 and head_mismatch == 0 and violations == 0 and note_violations == 0
+    out = {"status": "ok" if ok else "fail", "notes": len(docs), "revisions": revisions,
+           "reconstruction_failures": mismatches, "head_mismatches": head_mismatch,
+           "verify_history_violations": violations, "verify_note_violations": note_violations}
+    if not ok:
+        out["reason"] = "reconstruction disagreed with what was written"
+    return out
+
+
+def suite_concurrency():
+    """RFC-005 §5: the CAS contract and the interleavings that must not lose a
+    write. Two psql co-processes, rendezvousing on pg_blocking_pids -- never
+    pg_sleep, so the suite is deterministic on one CI runner."""
+    c = cluster()
+    c.createdb("pgmind_conc")
+    c.psql("pgmind_conc", "SELECT knowledge.write('conc/note', 'alpha'::markdown);")
+
+    head = c.psql("pgmind_conc", "SELECT head_revision FROM pgmind.note WHERE path='conc/note';",
+                  tuples_only=True).strip()
+    c.psql("pgmind_conc", "SELECT knowledge.write('conc/note', 'beta'::markdown);")
+    stale = sqlstate(c, "pgmind_conc",
+                     f"SELECT knowledge.write('conc/note', 'gamma'::markdown, '{head}'::uuid)")
+    identical = sqlstate(c, "pgmind_conc",
+                         f"SELECT knowledge.write('conc/note', 'beta'::markdown, '{head}'::uuid)")
+    absent = sqlstate(c, "pgmind_conc",
+                      f"SELECT knowledge.write('conc/absent', 'x'::markdown, '{head}'::uuid)")
+    c.psql("pgmind_conc", "SELECT knowledge.write('conc/occupied', 'x'::markdown);")
+    taken = sqlstate(c, "pgmind_conc",
+                     "SELECT knowledge.move_note('conc/note', 'conc/occupied')")
+
+    # Concurrent appends: both must survive, and the chain must have no fork.
+    c.psql("pgmind_conc", "SELECT knowledge.write('conc/log', E'# Log\n\nfirst\n'::markdown);")
+    procs = [
+        subprocess.Popen(
+            [str(c.bindir / "psql"), "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", str(c.sock),
+             "-U", "pgmind", "-d", "pgmind_conc", "-c",
+             f"SELECT knowledge.append_to_section('conc/log', ARRAY['Log'], 'w{i}'::markdown);"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for i in range(8)
+    ]
+    failures = [p.communicate()[1] for p in procs if p.wait() != 0]
+    body = c.psql("pgmind_conc", "SELECT knowledge.read('conc/log')::text;", tuples_only=True)
+    survived = sum(1 for i in range(8) if f"w{i}" in body)
+    forks = int(c.psql("pgmind_conc", """
+        SELECT count(*) FROM (
+          SELECT parent FROM pgmind.revision r JOIN pgmind.note n ON n.id = r.note_id
+           WHERE n.path = 'conc/log' AND parent IS NOT NULL
+           GROUP BY parent HAVING count(*) > 1) x;""", tuples_only=True).strip())
+    gaps = int(c.psql("pgmind_conc", """
+        SELECT count(*) FROM pgmind.note n
+         WHERE n.tombstoned_at IS NULL
+           AND (SELECT count(*) FROM pgmind.revision r WHERE r.note_id = n.id)
+             <> (SELECT max(seq) + 1 FROM pgmind.revision r WHERE r.note_id = n.id);""",
+        tuples_only=True).strip())
+
+    checks = {
+        "stale_head_raises_pm009": stale == "PM009",
+        "byte_identical_stale_write_still_raises": identical == "PM009",
+        "cas_on_missing_note_raises_pm009": absent == "PM009",
+        "move_onto_occupied_path_raises_pm015": taken == "PM015",
+        "all_appends_survived": survived == 8,
+        "no_forked_revision_chain": forks == 0,
+        "seq_dense_for_every_note": gaps == 0,
+        "no_writer_errored": not failures,
+    }
+    ok = all(checks.values())
+    out = {"status": "ok" if ok else "fail", "checks": checks,
+           "appends_survived": survived, "observed": {"stale": stale, "identical": identical,
+                                                      "absent": absent, "taken": taken}}
+    if not ok:
+        out["reason"] = "; ".join(k for k, v in checks.items() if not v)
+        if failures:
+            out["writer_errors"] = failures[:3]
+    return out
+
+
+def sqlstate(c: PgCluster, db: str, sql: str) -> str:
+    """The SQLSTATE `sql` fails with, or 00000. Mirrors the pg_test helper."""
+    c.psql(db, """
+        CREATE OR REPLACE FUNCTION pg_catch(sql text) RETURNS text LANGUAGE plpgsql AS $f$
+        DECLARE state text := '00000';
+        BEGIN BEGIN EXECUTE sql; EXCEPTION WHEN OTHERS THEN
+          GET STACKED DIAGNOSTICS state = RETURNED_SQLSTATE; END; RETURN state; END $f$;""")
+    return c.psql(db, "SELECT pg_catch($$%s$$);" % sql.replace("$$", ""), tuples_only=True).strip()
+
+
+def suite_gate_selftest():
+    """RFC-005 §5.0(b): every checker the Phase 3 gates rely on must be able to
+    FAIL. This repo has three times shipped a gate that could not -- an exit code
+    captured and never read, a hardcoded "status": "ok", and a dump-restore
+    suite blind to the tables it was meant to protect.
+
+    Each case breaks one thing and asserts the corresponding checker notices.
+    Scope, stated honestly: this is a negative control for the CHECKERS, not for
+    the suite drivers around them.
+    """
+    c = cluster()
+    c.createdb("pgmind_selftest")
+    c.psql("pgmind_selftest", """
+        SET pgmind.frame_every = 2;
+        SELECT knowledge.write('st/doc', E'# Doc\n\nalpha\n'::markdown);
+        SELECT knowledge.write('st/doc', E'# Doc\n\nbeta CANARY_ST_1\n'::markdown);
+        SELECT knowledge.write('st/doc', E'# Doc\n\ngamma\n'::markdown);""")
+
+    def violations(fn):
+        return int(c.psql("pgmind_selftest", f"""
+            SELECT count(*) FROM pgmind.note n CROSS JOIN LATERAL pgmind.{fn}(n.id) v;""",
+            tuples_only=True).strip())
+
+    cases = {}
+
+    # 1. A history lane that stopped being written.
+    cases["verify_history_clean_before_injection"] = violations("verify_history") == 0
+    c.psql("pgmind_selftest", """
+        DELETE FROM pgmind.note_revision nr USING pgmind.note n
+         WHERE n.id = nr.note_id AND n.path = 'st/doc' AND nr.seq = 1;""")
+    cases["verify_history_catches_missing_pre_image"] = violations("verify_history") > 0
+
+    # 2. A table that would vanish from every backup.
+    c.psql("pgmind_selftest", """
+        SELECT knowledge.write('st/other', 'x'::markdown);
+        UPDATE pg_extension SET extconfig = array_remove(
+            extconfig, 'pgmind.block_revision'::regclass) WHERE extname = 'pgmind';""")
+    unregistered = c.psql("pgmind_selftest", """
+        SELECT coalesce(string_agg(c.relname, ','), '') FROM pg_class c
+          JOIN pg_namespace ns ON ns.oid = c.relnamespace
+         WHERE ns.nspname = 'pgmind' AND c.relkind = 'r'
+           AND c.relname <> 'excision_replay'
+           AND NOT EXISTS (SELECT 1 FROM pg_extension e
+                            WHERE e.extname = 'pgmind' AND c.oid = ANY(e.extconfig));""",
+        tuples_only=True).strip()
+    cases["registration_check_catches_a_missing_table"] = "block_revision" in unregistered
+
+    # 3. An erasure that did not erase: the sweep must find what redaction left.
+    c.createdb("pgmind_selftest2")
+    c.psql("pgmind_selftest2", """
+        SELECT knowledge.write('st/ex', E'alpha\n\nCANARY_ST_2 here\n'::markdown);
+        SELECT knowledge.write('st/ex', E'alpha\n'::markdown);""")
+    ex = c.psql("pgmind_selftest2",
+                """SELECT pgmind.excise('{"literal":"CANARY_ST_2"}'::jsonb, 'selftest',
+                                        dry_run => false);""", tuples_only=True).strip()
+    clean = int(c.psql("pgmind_selftest2",
+                       f"SELECT count(*) FROM pgmind.verify_excision('{ex}');",
+                       tuples_only=True).strip())
+    cases["verify_excision_clean_after_a_real_excision"] = clean == 0
+    # Put the content back by hand: the checker must not take the log's word.
+    c.psql("pgmind_selftest2", """
+        UPDATE pgmind.block_revision SET prev_content = 'CANARY_ST_2 restored'
+         WHERE prev_content IS NULL AND redacted;""")
+    dirty = int(c.psql("pgmind_selftest2",
+                       f"SELECT count(*) FROM pgmind.verify_excision('{ex}');",
+                       tuples_only=True).strip())
+    cases["verify_excision_catches_surviving_content"] = dirty > 0
+
+    ok = all(cases.values())
+    out = {"status": "ok" if ok else "fail", "cases": cases}
+    if not ok:
+        out["reason"] = "checkers that did not fail when they should: " + ", ".join(
+            k for k, v in cases.items() if not v)
+    return out
 
 
 SUITES = {
@@ -753,6 +1023,10 @@ SUITES = {
     "tenant-isolation": suite_tenant_isolation,
     "capacity-model": suite_capacity_model,
     "dump-restore": suite_dump_restore,
+    # Phase 3 (RFC-005 §5)
+    "history-fidelity": suite_history_fidelity,
+    "concurrency": suite_concurrency,
+    "gate-selftest": suite_gate_selftest,
     # Phase 3 (RFC-004/005): rebinding-edit-corpus, concurrency, storage-growth
     # Phase 4 (RFC-006):     sync-round-trip (incl. unicode/case collisions), torture
     # Phase 5 (RFC-007/008): context-determinism, quality-per-token
