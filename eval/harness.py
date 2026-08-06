@@ -33,6 +33,8 @@ FUZZ_COUNT = "100000"
 STORAGE_FUZZ_COUNT = "10000"
 CAPACITY_NOTES = 10_000
 HISTORY_OPS = 240
+GROWTH_NOTES = 40
+GROWTH_DEPTH = 25
 
 
 def results_dir() -> Path:
@@ -1010,6 +1012,167 @@ def suite_gate_selftest():
     return out
 
 
+def suite_storage_growth():
+    """RFC-005 §5: what history costs under revision load.
+
+    D9 makes one claim conditional on one unmeasured quantity -- history size is
+    linear in EFFECT ROWS PER REVISION, and the modal edit's shape is a property
+    of agent traffic, not of the design. This suite measures the histogram
+    first; the multiplier is published against it, with both denominators named
+    in the key so a single flattering ratio cannot be quoted alone.
+
+    Three shapes, because they bracket real traffic:
+      patch      one update_block per revision  (an agent editing one block)
+      doc        a whole-document write          (an importer, or a naive
+                                                  read-edit-write agent loop)
+      structural an insert at ord 0              (the shape that would be O(note)
+                                                  per revision in a design that
+                                                  put position in the effect row)
+    """
+    c = cluster()
+    c.createdb("pgmind_growth")
+    c.psql("pgmind_growth", "SET pgmind.frame_every = 50; SELECT 1;")
+    rng = random.Random(0x5DEEDD)
+    notes = GROWTH_NOTES
+    depth = GROWTH_DEPTH
+
+    for i in range(notes):
+        for shape in ("patch", "doc", "structural"):
+            c.psql("pgmind_growth", "SELECT knowledge.write($$%s$$, $$%s$$::markdown);"
+                   % (f"g/{shape}/{i}", synthetic_note(rng, i, prefix=f"g/{shape}", n=notes)))
+
+    timings = {}
+    for shape in ("patch", "doc", "structural"):
+        t0 = time.monotonic()
+        if shape == "patch":
+            c.psql("pgmind_growth", f"""
+                DO $$
+                DECLARE i int; b uuid;
+                BEGIN
+                  FOR i IN 1..{depth} LOOP
+                    FOR b IN SELECT bl.id FROM pgmind.block bl JOIN pgmind.note n ON n.id = bl.note_id
+                              WHERE n.path LIKE 'g/patch/%' AND bl.ord = 1 LOOP
+                      PERFORM knowledge.update_block(b, ('edit ' || i)::markdown);
+                    END LOOP;
+                  END LOOP;
+                END $$;""")
+        elif shape == "doc":
+            c.psql("pgmind_growth", f"""
+                DO $$
+                DECLARE i int; p text;
+                BEGIN
+                  FOR i IN 1..{depth} LOOP
+                    FOR p IN SELECT path FROM pgmind.note WHERE path LIKE 'g/doc/%' LOOP
+                      PERFORM knowledge.write(p, (knowledge.read(p)::text ||
+                              E'\n\nrevision ' || i || E'\n')::markdown);
+                    END LOOP;
+                  END LOOP;
+                END $$;""")
+        else:
+            c.psql("pgmind_growth", f"""
+                DO $$
+                DECLARE i int; p text; b uuid;
+                BEGIN
+                  FOR i IN 1..{depth} LOOP
+                    FOR p, b IN SELECT n.path, (SELECT bl.id FROM pgmind.block bl
+                                                 WHERE bl.note_id = n.id ORDER BY bl.ord LIMIT 1)
+                                  FROM pgmind.note n WHERE n.path LIKE 'g/structural/%' LOOP
+                      PERFORM knowledge.insert_blocks(p, ('top ' || i)::markdown, before => b);
+                    END LOOP;
+                  END LOOP;
+                END $$;""")
+        timings[shape] = round((time.monotonic() - t0) * 1000 / (notes * depth), 3)
+
+    # The number every storage claim in D9 is linear in.
+    histogram = json.loads(c.psql("pgmind_growth", """
+        SELECT json_object_agg(verb, json_build_object(
+                 'revisions', revisions, 'effect_rows_total', rows_total,
+                 'effect_rows_per_revision', round(rows_total::numeric / revisions, 3)))
+          FROM (SELECT r.verb, count(*) AS revisions,
+                       coalesce(sum((SELECT count(*) FROM pgmind.block_revision br
+                                      WHERE br.note_id = r.note_id AND br.seq = r.seq)), 0) AS rows_total
+                  FROM pgmind.revision r GROUP BY r.verb) x;""", tuples_only=True).strip())
+
+    sizes = json.loads(c.psql("pgmind_growth", """
+        SELECT json_object_agg(t.relname, pg_total_relation_size(t.oid))
+          FROM (SELECT c.oid, c.relname FROM pg_class c
+                  JOIN pg_namespace n ON n.oid = c.relnamespace
+                 WHERE n.nspname = 'pgmind' AND c.relkind = 'r') t;""", tuples_only=True).strip())
+    history_tables = ("note_revision", "block_revision", "note_frame")
+    history_bytes = sum(v for k, v in sizes.items() if k in history_tables)
+    current_bytes = sum(v for k, v in sizes.items() if k not in history_tables)
+    # The full-copy denominator: what storing every revision in full would cost,
+    # approximated as current-state bytes x revisions-per-note.
+    revs_per_note = float(c.psql("pgmind_growth",
+        "SELECT count(*)::numeric / count(DISTINCT note_id) FROM pgmind.revision;",
+        tuples_only=True).strip())
+
+    lat = json.loads(c.psql("pgmind_growth", """
+        CREATE TEMP TABLE lat (fn text, ms double precision);
+        DO $$
+        DECLARE t0 timestamptz; p text; s bigint;
+        BEGIN
+          FOR p IN SELECT path FROM pgmind.note WHERE path LIKE 'g/patch/%' LIMIT 30 LOOP
+            SELECT history_floor INTO s FROM pgmind.note WHERE path = p;
+            t0 := clock_timestamp();
+            PERFORM knowledge.read(p);
+            INSERT INTO lat VALUES ('read', extract(epoch FROM clock_timestamp() - t0) * 1000);
+            t0 := clock_timestamp();
+            PERFORM knowledge.read_as_of(p, s);
+            INSERT INTO lat VALUES ('as_of_deep', extract(epoch FROM clock_timestamp() - t0) * 1000);
+            t0 := clock_timestamp();
+            PERFORM count(*) FROM knowledge.blame(p);
+            INSERT INTO lat VALUES ('blame', extract(epoch FROM clock_timestamp() - t0) * 1000);
+          END LOOP;
+        END $$;
+        SELECT json_object_agg(fn, p95) FROM (
+          SELECT fn, percentile_cont(0.95) WITHIN GROUP (ORDER BY ms) AS p95
+            FROM lat GROUP BY fn) x;""", tuples_only=True).strip().splitlines()[-1])
+
+    violations = int(c.psql("pgmind_growth", """
+        SELECT count(*) FROM pgmind.note n CROSS JOIN LATERAL pgmind.verify_history(n.id) v;""",
+        tuples_only=True).strip())
+
+    report = {
+        "corpus": {"notes_per_shape": notes, "revisions_per_note": depth,
+                   "frame_every": 50, "blocks_per_note": 23},
+        "effect_rows_per_revision_by_verb": histogram,
+        "ms_per_revision_by_shape": timings,
+        "bytes": sizes,
+        "history_bytes_over_current_state_bytes": round(history_bytes / max(current_bytes, 1), 3),
+        "history_bytes_over_full_copy_per_revision_bytes":
+            round(history_bytes / max(current_bytes * revs_per_note, 1), 4),
+        "latency_p95_ms": lat,
+        "verify_history_violations": violations,
+    }
+
+    # Failable clauses. Everything else is an honest number.
+    problems = []
+    for key in ("history_bytes_over_current_state_bytes",
+                "history_bytes_over_full_copy_per_revision_bytes"):
+        if key not in report:
+            problems.append(f"missing ratio {key}")
+    if not histogram:
+        problems.append("no effect-rows-per-revision histogram")
+    if violations:
+        problems.append(f"{violations} verify_history violations")
+    # The claim this design is sold on: a structural insert must NOT cost a row
+    # per block. 23 blocks per note, so anything near that is the pathology.
+    ins = histogram.get("insert_blocks", {}).get("effect_rows_per_revision")
+    if ins is not None and float(ins) > 3:
+        problems.append(f"structural insert wrote {ins} effect rows per revision (expected ~1)")
+    deep = lat.get("as_of_deep", 0.0)
+    shallow = max(lat.get("read", 0.001), 0.001)
+    report["as_of_over_read_ratio"] = round(deep / shallow, 2)
+    if deep / shallow > 25:
+        problems.append(f"deep as_of is {report['as_of_over_read_ratio']}x a head read (limit 25)")
+    report["status"] = "fail" if problems else "ok"
+    if problems:
+        report["reason"] = "; ".join(problems)
+    (published_dir() / "capacity-model-v2.json").write_text(json.dumps(report, indent=2) + "\n")
+    return report
+
+
 SUITES = {
     "commonmark-conformance": suite_commonmark_conformance,
     "round-trip": suite_round_trip,
@@ -1026,6 +1189,7 @@ SUITES = {
     # Phase 3 (RFC-005 §5)
     "history-fidelity": suite_history_fidelity,
     "concurrency": suite_concurrency,
+    "storage-growth": suite_storage_growth,
     "gate-selftest": suite_gate_selftest,
     # Phase 3 (RFC-004/005): rebinding-edit-corpus, concurrency, storage-growth
     # Phase 4 (RFC-006):     sync-round-trip (incl. unicode/case collisions), torture

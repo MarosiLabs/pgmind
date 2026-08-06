@@ -1,0 +1,53 @@
+{
+  "corpus": {
+    "notes_per_shape": 40,
+    "revisions_per_note": 25,
+    "frame_every": 50,
+    "blocks_per_note": 23
+  },
+  "effect_rows_per_revision_by_verb": {
+    "insert_blocks": {
+      "revisions": 1000,
+      "effect_rows_total": 1000,
+      "effect_rows_per_revision": 1.0
+    },
+    "update_block": {
+      "revisions": 1000,
+      "effect_rows_total": 1000,
+      "effect_rows_per_revision": 1.0
+    },
+    "write": {
+      "revisions": 1120,
+      "effect_rows_total": 3760,
+      "effect_rows_per_revision": 3.357
+    }
+  },
+  "ms_per_revision_by_shape": {
+    "patch": 2.007,
+    "doc": 2.587,
+    "structural": 5.666
+  },
+  "bytes": {
+    "note": 573440,
+    "revision": 1630208,
+    "tile": 3031040,
+    "block": 12402688,
+    "edge": 237568,
+    "tag": 180224,
+    "note_revision": 2007040,
+    "block_revision": 1409024,
+    "note_frame": 327680,
+    "excision_log": 16384,
+    "excision_replay": 16384
+  },
+  "history_bytes_over_current_state_bytes": 0.207,
+  "history_bytes_over_full_copy_per_revision_bytes": 0.008,
+  "latency_p95_ms": {
+    "as_of_deep": 0.5602,
+    "blame": 1.9631999999999998,
+    "read": 0.32865
+  },
+  "verify_history_violations": 0,
+  "as_of_over_read_ratio": 1.7,
+  "status": "ok"
+}
