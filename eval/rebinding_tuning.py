@@ -14,6 +14,14 @@ something the draft leaves open, the choice is named in a comment.
 Nothing here runs inside Postgres and nothing here is shipped. It reads the
 same before/after block lists the gate observes, reconstructs the residual that
 passes 1-2 hand to Part B, and scores what the stages would have done with it.
+
+**Historical as of 2026-08-06.** Part B is implemented, so the residual this
+module reconstructs from a live engine already has Part B applied to it, and
+re-running against the current build would simulate the pipeline on top of
+itself. `eval/published/rebinding-tuning-v1.json` is the frozen record of how
+tau and tau_split were chosen; reproducing it means checking out f762620, the
+last commit before the rebinder existed. Kept because a threshold whose
+derivation has been deleted is a magic number.
 """
 
 from __future__ import annotations
@@ -245,6 +253,14 @@ def simulate(obs: dict, tau: float, tau_split: float, order: str = "1-2") -> set
                     anchors=anchors if order in ("monotone", "both") else frozenset(),
                     tau_split=tau_split if order in ("split-aware", "both") else None)
         s2 = []
+    elif order == "split-aware+merge":
+        # As `split-aware`, plus the drafted merge stage on the leftovers --
+        # to find out whether a separate merge stage earns its place once
+        # stage 1 handles splits. Stage 1 already binds a merge whenever the
+        # dominant source dominates, which is what "dominant" means.
+        s1 = stage1(old, new, tau, tau_split=tau_split)
+        s2, _, _ = stage2([o for o in old if o[0] not in {b for b, _, _ in s1}],
+                          [x for x in new if x[0] not in {a for _, a, _ in s1}], tau_split)
     else:
         s1 = stage1(old, new, tau)
         s2, _, _ = stage2([o for o in old if o[0] not in {b for b, _, _ in s1}],

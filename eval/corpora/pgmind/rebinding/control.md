@@ -132,7 +132,9 @@ Alpha paragraph, rewritten. ^a
 
 ## case: marker-collision
 
-**why:** two blocks claim one marker — dirty imports do this. A3 pass 1 resolves by document order: the lowest-ord claimant wins and the other falls through to mint.
+**why:** two blocks claim one marker — dirty imports do this. A3 pass 1 resolves by document order: the lowest-ord claimant wins the marked block's ID and the loser falls through.
+
+This case was authored asserting the loser *mints*, which was the deterministic engine's behaviour and not the ground truth: "Beta." → "Beta, edited." is plainly the same block edited, and it carries once rebinding exists. The corpus was encoding a limitation as an answer — exactly what its own README says not to do. What the case is actually for survives the fix: the second claimant must not get the *marked* block's ID.
 
 ### before
 
@@ -152,7 +154,8 @@ Beta, edited. ^dup
 
 ### same
 
-- before[0] => after[0]
+- before[0] => after[0]   # the marker's lowest-ord claimant
+- before[1] => after[1]   # not the marker's; an ordinary edit in place
 
 ### index
 

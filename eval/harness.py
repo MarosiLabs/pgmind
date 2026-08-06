@@ -27,7 +27,6 @@ import urllib.request
 from pathlib import Path
 
 import rebinding
-import rebinding_tuning
 
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
@@ -314,7 +313,15 @@ def repo_docs() -> list[tuple[str, str]]:
 PGRX_TEST_SUITES = {
     "identity-semantics": [
         "idempotent_write_returns_head_no_new_revision",
-        "edited_paragraph_mints_untouched_carry",
+        # Was `edited_paragraph_mints_untouched_carry`, which pinned Phase 2's
+        # behaviour so Phase 3 would have to change it deliberately. It did.
+        "edited_paragraph_rebinds_with_confidence",
+        "deterministic_carries_record_no_confidence",
+        "total_rewrite_carries_nothing",
+        "features_put_short_and_long_content_on_one_scale",
+        "bigrams_keep_word_order_mattering",
+        "containment_is_asymmetric",
+        "split_run_requires_containment_in_both_directions",
         "pure_reorder_carries_all",
         "duplicate_content_pairs_kth_to_kth",
         "ref_claim_beats_hash_and_collisions_resolve",
@@ -1077,66 +1084,13 @@ beta
     return out
 
 
-def _publish_tuning_study(observations, baseline):
-    """RFC-004 Part B's thresholds are to be "set ... after corpus tuning, not
-    invented today". This is the tuning: a simulation of the drafted pipeline
-    swept over the corpus, published as a grid so the RFC revision can point at
-    a measured operating point and at what that point costs.
-
-    It is a STUDY, not a gate. Nothing here runs in Postgres, no threshold in
-    it is normative until the RFC revision is accepted, and the suite does not
-    pass or fail on its numbers -- reporting them as a result would be claiming
-    an acceptance the owner has not given.
-    """
-    taus = [round(0.1 * i, 2) for i in range(2, 10)]
-    splits = [round(0.1 * i, 2) for i in range(3, 10)]
-    grid = rebinding_tuning.sweep(observations, taus, splits)
-    # The frontier a reader actually needs: each reachable (inferred recall,
-    # precision) pair once, at the HIGHEST thresholds that reach it. Reporting
-    # the lowest would advertise a permissive setting that buys nothing.
-    seen, frontier = {}, []
-    for row in sorted(grid, key=lambda r: (r["recall_inferred"] or 0, r["precision"] or 0,
-                                           r["tau"], r["tau_split"])):
-        seen[(row["recall_inferred"], row["precision"])] = row
-    for row in sorted(seen.values(), key=lambda r: -(r["recall_inferred"] or 0)):
-        if not frontier or row["precision"] > frontier[-1]["precision"]:
-            frontier.append(row)
-    # Stage 2 alone. The grid is flat in τ_split wherever stage 1 is enabled,
-    # which is a claim about the drafted stage ORDER, not about the corpus --
-    # so measure the stage on its own rather than inferring it from flatness.
-    stage2_only = rebinding_tuning.sweep(observations, [rebinding_tuning.STAGE1_OFF], splits)
-    publish("rebinding-tuning-v1.json", {
-        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "status": "study — not a gate, not normative until RFC-004 Part B is accepted",
-        "simulates": "RFC-004 Part B over the residual left by A3 passes 1-2: the drafted "
-                     "pipeline (stage 1 similarity alignment, then stage 2 containment "
-                     "split/merge) and the variants of B2-B5",
-        "baseline_no_part_b": {
-            "recall": baseline["*all*"]["recall"],
-            "precision": baseline["*all*"]["precision"],
-            "recall_inferred": baseline["*all*"]["recall_inferred"]["recall"],
-            "inferred_bindings": baseline["*all*"]["recall_inferred"]["expected"],
-        },
-        "frontier": frontier,
-        "candidate_points": [rebinding_tuning.evaluate(observations, t, 0.6)
-                             for t in (0.5, 0.8, 0.9)],
-        "stage2_only": stage2_only,
-        # Four pipelines at the same thresholds. `1-2` is the draft; `2-1`
-        # reverses its stages (the intuitive repair for stage 1 overriding
-        # A2's first-keeps — measures worse, kept as the refutation);
-        # `split-aware` folds split detection into the aligner as a candidate
-        # filter; `monotone` extends order-monotonicity to bindings the
-        # deterministic passes already made.
-        "variants": [rebinding_tuning.evaluate(observations, t, 0.6, order)
-                     for order in ("1-2", "2-1", "split-aware", "monotone", "both")
-                     for t in (0.5, 0.6)],
-        # τ_split does not discriminate on this corpus in any variant: what
-        # decides a split is the bidirectional containment TEST, not where its
-        # threshold sits. Swept so that claim is checkable rather than asserted.
-        "tau_split_sweep": [rebinding_tuning.evaluate(observations, 0.5, s, "split-aware")
-                            for s in splits],
-        "grid": grid,
-    })
+# The Part B threshold study lived here until Part B shipped. It is not run
+# any more and must not be: it replays the residual the ENGINE left, and the
+# engine now has Part B in it, so re-running would simulate the pipeline on top
+# of itself and quietly report nonsense. `eval/published/rebinding-tuning-v1.json`
+# is frozen as the record of how tau was chosen; `eval/rebinding_tuning.py`
+# still holds the simulator, and reproducing it means checking out f762620,
+# the last commit before the rebinder existed.
 
 
 def suite_rebinding_corpus():
@@ -1145,13 +1099,25 @@ def suite_rebinding_corpus():
     tracked, not that it clears a threshold nobody has earned the right to set
     yet (thresholds come from this measurement, per the RFC's own sequencing).
 
-    So this suite fails on three things only, none of them a score:
+    So this suite fails on four things, only one of them a score:
       - the corpus does not parse, or its ground truth is not 1:1;
       - a case's `### index` is stale -- ground truth read against a document
         that no longer parses that way is ground truth about nothing;
-      - the CONTROL category is not perfect. Those cases are deterministic by
-        construction (RFC-004 A3 passes 1-2); a regression there is a Part A
-        regression wearing a Part B costume.
+      - the CONTROL category is not perfect. Those cases turn on Part A's
+        mechanisms (`^id` claims, exact match, the short-circuit); a regression
+        there is a Part A regression wearing a Part B costume. Part B may also
+        bind in them, and the ground truth says so where it does -- "control"
+        means the deterministic answer is known, not that nothing else happens;
+      - any MIS-BINDING lands in a case not marked `ambiguous`. This is the one
+        invariant the project actually holds: identity that churns is annoying,
+        identity that moves to the wrong block is corrosive, because history,
+        citations and embeddings follow the ID silently and nothing downstream
+        can tell. It is deliberately not a precision ratio -- a ratio falls
+        when someone contributes a hard case, so a ratio gate quietly asks the
+        corpus to stop growing. Missing a new case costs recall and passes;
+        MIS-binding one fails until it is fixed or the case is marked
+        `ambiguous` with a stated reason, which is a decision someone has to
+        write down.
     """
     c = cluster()
     c.createdb("pgmind_rebind")
@@ -1163,19 +1129,30 @@ def suite_rebinding_corpus():
     summary = rebinding.aggregate(rows)
     control = summary.get("control", {})
     control_ok = control.get("fp") == 0 and control.get("fn") == 0
+    bad_misbinds = [{"case": r["case"], "bindings": r["misbound"]}
+                    for r in rows if r["misbound"] and not r["ambiguous"]]
+    precision = summary["*all*"]["precision"]
+    baseline = json.loads((published_dir() / "rebinding-baseline-v1.json").read_text())
+    floor = baseline["summary"]["*all*"]["precision"]
 
     report = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "engine": "deterministic only (RFC-004 A3 passes 1-3; Part B not implemented)",
+        "engine": "RFC-004 A3 passes 1-2, Part B, pass 3",
+        "precision": {"measured": precision, "pre_part_b": floor,
+                      "note": "RFC-004 B5 accepts trading precision for inferred recall; "
+                              "the GATE is on mis-bindings outside `ambiguous` cases, "
+                              "not on this ratio"},
+        "misbindings_outside_ambiguous_cases": bad_misbinds,
         "corpus": {"cases": len(rows), "categories": sorted({r["category"] for r in rows}),
                    "expected_bindings": summary["*all*"]["expected_bindings"]},
         "summary": summary,
         "cases": [{k: v for k, v in r.items() if k != "index"} for r in rows],
     }
-    publish("rebinding-baseline-v1.json", report)
-    _publish_tuning_study(observations, summary)
+    # v1 is the record of the engine BEFORE Part B and is never rewritten: it
+    # is the floor, and a floor that republishes itself is not one.
+    publish("rebinding-v2.json", report)
 
-    ok = not stale and control_ok
+    ok = not stale and control_ok and not bad_misbinds
     everything = summary["*all*"]
     out = {"status": "ok" if ok else "fail",
            "cases": len(rows),
@@ -1186,15 +1163,21 @@ def suite_rebinding_corpus():
            "inferred_bindings": everything["recall_inferred"]["expected"],
            "perfect_cases": everything["perfect_cases"],
            "misbound_bindings": sum(len(r["misbound"]) for r in rows),
+           "precision_pre_part_b": floor,
+           "misbindings_outside_ambiguous_cases": len(bad_misbinds),
            "by_category": {k: {"recall": v["recall"], "precision": v["precision"],
                                "recall_inferred": v["recall_inferred"]["recall"],
                                "perfect_cases": f"{v['perfect_cases']}/{v['cases']}"}
                            for k, v in summary.items()},
-           "published": "eval/published/rebinding-baseline-v1.json"}
+           "published": "eval/published/rebinding-v2.json"}
     if stale:
         out["reason"] = "stale `### index` (run `make reindex-corpus`): " + ", ".join(stale)
     elif not control_ok:
         out["reason"] = "the deterministic control cases regressed"
+    elif bad_misbinds:
+        out["reason"] = ("identity carried onto the wrong block in a case that is not "
+                         "marked ambiguous: "
+                         + ", ".join(b["case"] for b in bad_misbinds))
     return out
 
 

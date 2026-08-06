@@ -1,0 +1,1546 @@
+{
+  "generated_at": "2026-08-06T05:07:18Z",
+  "engine": "RFC-004 A3 passes 1-2, Part B, pass 3",
+  "precision": {
+    "measured": 0.9796,
+    "pre_part_b": 0.9872,
+    "note": "RFC-004 B5 accepts trading precision for inferred recall; the GATE is on mis-bindings outside `ambiguous` cases, not on this ratio"
+  },
+  "misbindings_outside_ambiguous_cases": [],
+  "corpus": {
+    "cases": 42,
+    "categories": [
+      "control",
+      "edit-in-place",
+      "merge",
+      "move-edit",
+      "near-duplicate",
+      "rewrite",
+      "split",
+      "structural"
+    ],
+    "expected_bindings": 101
+  },
+  "summary": {
+    "control": {
+      "cases": 4,
+      "perfect_cases": 4,
+      "expected_bindings": 11,
+      "tp": 11,
+      "fp": 0,
+      "fn": 0,
+      "recall": 1.0,
+      "precision": 1.0,
+      "recall_identical": {
+        "expected": 6,
+        "carried": 6,
+        "recall": 1.0
+      },
+      "recall_marked": {
+        "expected": 4,
+        "carried": 4,
+        "recall": 1.0
+      },
+      "recall_inferred": {
+        "expected": 1,
+        "carried": 1,
+        "recall": 1.0
+      }
+    },
+    "edit-in-place": {
+      "cases": 6,
+      "perfect_cases": 4,
+      "expected_bindings": 12,
+      "tp": 10,
+      "fp": 0,
+      "fn": 2,
+      "recall": 0.8333,
+      "precision": 1.0,
+      "recall_identical": {
+        "expected": 7,
+        "carried": 7,
+        "recall": 1.0
+      },
+      "recall_marked": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      },
+      "recall_inferred": {
+        "expected": 5,
+        "carried": 3,
+        "recall": 0.6
+      }
+    },
+    "merge": {
+      "cases": 5,
+      "perfect_cases": 5,
+      "expected_bindings": 6,
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "recall": 1.0,
+      "precision": 1.0,
+      "recall_identical": {
+        "expected": 1,
+        "carried": 1,
+        "recall": 1.0
+      },
+      "recall_marked": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      },
+      "recall_inferred": {
+        "expected": 5,
+        "carried": 5,
+        "recall": 1.0
+      }
+    },
+    "move-edit": {
+      "cases": 5,
+      "perfect_cases": 4,
+      "expected_bindings": 19,
+      "tp": 18,
+      "fp": 0,
+      "fn": 1,
+      "recall": 0.9474,
+      "precision": 1.0,
+      "recall_identical": {
+        "expected": 14,
+        "carried": 14,
+        "recall": 1.0
+      },
+      "recall_marked": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      },
+      "recall_inferred": {
+        "expected": 5,
+        "carried": 4,
+        "recall": 0.8
+      }
+    },
+    "near-duplicate": {
+      "cases": 5,
+      "perfect_cases": 4,
+      "expected_bindings": 14,
+      "tp": 12,
+      "fp": 2,
+      "fn": 2,
+      "recall": 0.8571,
+      "precision": 0.8571,
+      "recall_identical": {
+        "expected": 13,
+        "carried": 12,
+        "recall": 0.9231
+      },
+      "recall_marked": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      },
+      "recall_inferred": {
+        "expected": 1,
+        "carried": 0,
+        "recall": 0.0
+      }
+    },
+    "rewrite": {
+      "cases": 5,
+      "perfect_cases": 5,
+      "expected_bindings": 9,
+      "tp": 9,
+      "fp": 0,
+      "fn": 0,
+      "recall": 1.0,
+      "precision": 1.0,
+      "recall_identical": {
+        "expected": 9,
+        "carried": 9,
+        "recall": 1.0
+      },
+      "recall_marked": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      },
+      "recall_inferred": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      }
+    },
+    "split": {
+      "cases": 6,
+      "perfect_cases": 6,
+      "expected_bindings": 14,
+      "tp": 14,
+      "fp": 0,
+      "fn": 0,
+      "recall": 1.0,
+      "precision": 1.0,
+      "recall_identical": {
+        "expected": 7,
+        "carried": 7,
+        "recall": 1.0
+      },
+      "recall_marked": {
+        "expected": 1,
+        "carried": 1,
+        "recall": 1.0
+      },
+      "recall_inferred": {
+        "expected": 6,
+        "carried": 6,
+        "recall": 1.0
+      }
+    },
+    "structural": {
+      "cases": 6,
+      "perfect_cases": 6,
+      "expected_bindings": 16,
+      "tp": 16,
+      "fp": 0,
+      "fn": 0,
+      "recall": 1.0,
+      "precision": 1.0,
+      "recall_identical": {
+        "expected": 16,
+        "carried": 16,
+        "recall": 1.0
+      },
+      "recall_marked": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      },
+      "recall_inferred": {
+        "expected": 0,
+        "carried": 0,
+        "recall": null
+      }
+    },
+    "*all*": {
+      "cases": 42,
+      "perfect_cases": 38,
+      "expected_bindings": 101,
+      "tp": 96,
+      "fp": 2,
+      "fn": 5,
+      "recall": 0.9505,
+      "precision": 0.9796,
+      "recall_identical": {
+        "expected": 73,
+        "carried": 72,
+        "recall": 0.9863
+      },
+      "recall_marked": {
+        "expected": 5,
+        "carried": 5,
+        "recall": 1.0
+      },
+      "recall_inferred": {
+        "expected": 23,
+        "carried": 19,
+        "recall": 0.8261
+      }
+    }
+  },
+  "cases": [
+    {
+      "case": "control/identical",
+      "category": "control",
+      "why": "byte-identical input. RFC-003 D6 short-circuits before the carry runs at all, so this must be perfect and free.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 3,
+      "carried": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "control/blank-lines-added",
+      "category": "control",
+      "why": "whitespace between blocks changes, block text does not. The document's bytes differ, so the short-circuit does not fire and the carry has to do the work.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 3,
+      "carried": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "control/all-marked-rewrite",
+      "category": "control",
+      "why": "the escape hatch, working as intended \u2014 every block is rewritten *and* reordered, and identity is still exact because the text asserts it. This is what a sync client that cares about identity is supposed to emit.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 3,
+      "carried": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 3,
+          "carried": 3
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "control/marker-collision",
+      "category": "control",
+      "why": "two blocks claim one marker \u2014 dirty imports do this. A3 pass 1 resolves by document order: the lowest-ord claimant wins the marked block's ID and the loser falls through.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 1,
+          "carried": 1
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "edit-in-place/typo-fix",
+      "category": "edit-in-place",
+      "why": "one character. The cheapest possible edit, and the one users notice losing identity over.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "edit-in-place/heading-word-added",
+      "category": "edit-in-place",
+      "why": "a heading gains two words. Every descendant's `heading_path` changes with it, so a rebinder that folds `heading_path` into its similarity signal has to not double-count the same edit.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [
+        [
+          0,
+          0
+        ]
+      ],
+      "spurious": [],
+      "perfect": false
+    },
+    {
+      "case": "edit-in-place/checkbox-toggle",
+      "category": "edit-in-place",
+      "why": "a task is ticked. The document's bytes change, so nothing short-circuits \u2014 but the checkbox state lives in `attrs`, not in the block's content, so the content hash does not move and identity survives without any heuristic at all. Recorded because it looks like the hardest edit shape there is and is in fact free.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 4,
+      "carried": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 4,
+          "carried": 4
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "edit-in-place/code-one-line-changed",
+      "category": "edit-in-place",
+      "why": "one line of four inside a fenced block. Code is far more self-similar than prose, so the same threshold means something different here.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "edit-in-place/sentence-deleted",
+      "category": "edit-in-place",
+      "why": "a long paragraph loses one sentence of four. Similarity is high, length changed by a quarter \u2014 a shape a containment metric can mistake for a merge remnant.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "edit-in-place/tiny-block-one-word",
+      "category": "edit-in-place",
+      "why": "two-word blocks, one word changed. Token bigrams have almost no signal at this length, so a \u03c4 that passes the long-paragraph cases will either miss this or start accepting noise \u2014 the case that makes the threshold choice a trade-off rather than a free parameter.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [
+        [
+          0,
+          0
+        ]
+      ],
+      "spurious": [],
+      "perfect": false
+    },
+    {
+      "case": "merge/merge-two-paragraphs",
+      "category": "merge",
+      "why": "the plain shape: two paragraphs joined, the longer one first, convention and intuition agreeing.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "merge/merge-equal-halves",
+      "category": "merge",
+      "why": "neither source dominates.",
+      "tension": null,
+      "ambiguous": "the two sources are the same size, so \"dominant source\" decides nothing; the convention falls back to document order.",
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "merge/merge-three-last-dominant",
+      "category": "merge",
+      "why": "three sources into one, and the dominant source is the **last** \u2014 a rule that means \"first\" gets this wrong while still reporting a carry.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "merge/merge-tiny-prefix",
+      "category": "merge",
+      "why": "a two-word block absorbed into a long one. Dominance is unambiguous; document order points the other way.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "merge/merge-across-heading",
+      "category": "merge",
+      "why": "the merge crosses a section boundary and dissolves the second heading, so the surviving block changes `heading_path` as well as content.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "move-edit/move-unedited",
+      "category": "move-edit",
+      "why": "control \u2014 a pure reorder with no edits. Exact content match carries all of it with no heuristic involved, and a rebinder that scores badly *here* is broken rather than merely imprecise.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 4,
+      "carried": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 4,
+          "carried": 4
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "move-edit/move-edit-cross-section",
+      "category": "move-edit",
+      "why": "one paragraph moves to another section and is edited in the same write; a new paragraph takes its old position, which is exactly the bait for a positional aligner.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 4,
+      "carried": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "move-edit/swap-and-edit",
+      "category": "move-edit",
+      "why": "two blocks swap *and* both are edited. Any binding here is a crossing match, so an order-monotonic aligner cannot make both \u2014 it must choose one and drop the other, or drop both.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 1,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 2,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [
+        [
+          1,
+          0
+        ]
+      ],
+      "spurious": [],
+      "perfect": false
+    },
+    {
+      "case": "move-edit/section-move-with-inner-edit",
+      "category": "move-edit",
+      "why": "a whole section moves and one paragraph inside it changes. The unedited half carries deterministically; the edited half is the measurement.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 4,
+      "carried": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "move-edit/move-edit-one-word",
+      "category": "move-edit",
+      "why": "the last block moves to the front with a single word changed. Similarity is overwhelming and position is maximally wrong \u2014 the cleanest single measurement of whether identity survives a move.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 5,
+      "carried": 5,
+      "tp": 5,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 4,
+          "carried": 4
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "near-duplicate/dup-edit-first-of-two",
+      "category": "near-duplicate",
+      "why": "two byte-identical paragraphs; the **first** is edited. The survivor's hash now matches two old blocks, and k-th \u2194 k-th pairs it with the wrong one \u2014 a mis-binding the engine reports as a successful carry.",
+      "tension": null,
+      "ambiguous": "nothing in the content distinguishes the two originals, so no content-based rule can know which one survived unedited. Both readings are defensible and the engine picks the wrong one; it is marked ambiguous because it is unfixable at this layer, not because it does not matter. It is the only case in the corpus where identity lands on the wrong block, and RFC-004 B5 prices it explicitly.",
+      "expected": 3,
+      "carried": 3,
+      "tp": 1,
+      "fp": 2,
+      "fn": 2,
+      "by_class": {
+        "identical": {
+          "expected": 2,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 0
+        }
+      },
+      "misbound": [
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "missed": [
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "spurious": [],
+      "perfect": false
+    },
+    {
+      "case": "near-duplicate/dup-remove-middle",
+      "category": "near-duplicate",
+      "why": "three identical items, the middle one removed.",
+      "tension": null,
+      "ambiguous": "the items are byte-identical, so *which* one was removed is unobservable; the convention (k-th \u2194 k-th) makes it the last, and the ground truth follows the convention rather than the author's intent. Each item is two blocks (`list_item` plus its paragraph), so the convention has to hold at both levels or the survivor's item and its text disagree about who they are.",
+      "expected": 4,
+      "carried": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 4,
+          "carried": 4
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "near-duplicate/dup-swap-differing-number",
+      "category": "near-duplicate",
+      "why": "two paragraphs that differ in one token, swapped. Content says one thing and position says the opposite; content must win.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 2,
+          "carried": 2
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "near-duplicate/dup-boilerplate-section-removed",
+      "category": "near-duplicate",
+      "why": "the same one-line boilerplate under three headings, and the middle section is deleted. The hashes cannot tell the three apart; the headings can. This case was authored expecting k-th \u2194 k-th to bind the survivor to section B's line \u2014 the engine binds it to C's, because A3 pass 2 is **section-first**: equal-hash candidates are paired within a `heading_path` before they are paired by document order. The corpus was wrong and the accepted rule was right, which is what a corpus is for. It also settles half of a Part B open question in advance: locality is already a signal on the deterministic path, so a heuristic stage that ignores `heading_path` would be *less* discriminating than the pass above it.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 4,
+      "carried": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 4,
+          "carried": 4
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "near-duplicate/dup-kind-change",
+      "category": "near-duplicate",
+      "why": "the same text, reclassified. Kind is inside the content hash (RFC-002 D7), so a paragraph and a list item of the same words are different blocks by construction \u2014 but a list item *contains* a paragraph in this model, and that inner paragraph has the same kind and the same words. So the question this case actually asks is which of the two readings the storage model commits to: the text survived inside a new wrapper, or the block became something else. The ground truth takes the model at its word \u2014 the paragraph continues, the `list_item` is new.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "rewrite/rewrite-total",
+      "category": "rewrite",
+      "why": "identical structure, no shared content. Every binding a rebinder makes here is a false one, and history, citations and embeddings would follow each of them onto text that is not theirs.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 0,
+      "carried": 0,
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "rewrite/rewrite-keep-one",
+      "category": "rewrite",
+      "why": "one paragraph survives verbatim inside a document that is otherwise entirely new. Exact match must find it and nothing else.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "rewrite/rewrite-bodies-not-headings",
+      "category": "rewrite",
+      "why": "the skeleton survives and the flesh does not \u2014 the shape a re-import of a regenerated document usually has. Headings carry; bodies must not.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 2,
+          "carried": 2
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "rewrite/rewrite-truncate",
+      "category": "rewrite",
+      "why": "the tail of the document is dropped. Nothing that survives has changed, so any missed binding is pure loss.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 3,
+      "carried": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "rewrite/rewrite-document-doubled",
+      "category": "rewrite",
+      "why": "the document is appended to itself \u2014 the classic bad sync. Every block now has two equal-hash candidates.",
+      "tension": null,
+      "ambiguous": "the copies are byte-identical, so nothing can distinguish them; document order decides which occurrence continues the original.",
+      "expected": 3,
+      "carried": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "split/split-sentence",
+      "category": "split",
+      "why": "a paragraph split at a sentence boundary \u2014 the canonical shape.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "split/split-three-fragments",
+      "category": "split",
+      "why": "three fragments, and the bulk of the text lands in the middle one.",
+      "tension": "first-keeps hands the ID to the shortest fragment; a reader asked \"which one is the original paragraph?\" would point at the middle.",
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "split/split-decoy-lead-in",
+      "category": "split",
+      "why": "looks exactly like a split to a containment heuristic \u2014 one old block, two new neighbours that between them contain it \u2014 but it is an insert plus an edit-in-place, and first-keeps would put the identity on text the author had never written before.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "split/split-list-item",
+      "category": "split",
+      "why": "a split inside a list, where every following item's ord shifts too. A list item is two blocks in this model \u2014 the `list_item` and the paragraph inside it \u2014 so one visible split is two, and the ground truth has to hold for both.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 6,
+      "carried": 6,
+      "tp": 6,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 4,
+          "carried": 4
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 2,
+          "carried": 2
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "split/split-code-block",
+      "category": "split",
+      "why": "same-kind split where the fragments are not natural language \u2014 token bigrams over SQL keywords are far more self-similar than prose, so any threshold tuned on paragraphs is being asked a different question here.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 1,
+      "carried": 1,
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 0,
+          "carried": 0
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 1,
+          "carried": 1
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "split/split-marked-fragment",
+      "category": "split",
+      "why": "the author pinned identity on the *second* fragment with an `^id` marker. A user assertion carried in the text beats the first-keeps convention, and it does so deterministically \u2014 no threshold involved.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 1,
+          "carried": 1
+        },
+        "marked": {
+          "expected": 1,
+          "carried": 1
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "structural/insert-middle",
+      "category": "structural",
+      "why": "everything after the insertion point shifts by one ord. If any of that churns, the engine is treating position as identity.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 3,
+      "carried": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "structural/delete-middle",
+      "category": "structural",
+      "why": "the mirror image \u2014 everything after shifts back by one.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 3,
+      "carried": 3,
+      "tp": 3,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 3,
+          "carried": 3
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "structural/wrap-in-section",
+      "category": "structural",
+      "why": "a heading is added above untouched prose. Content is identical, `heading_path` changes for every block, and the heading itself is new.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 2,
+          "carried": 2
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "structural/frontmatter-added",
+      "category": "structural",
+      "why": "frontmatter is preamble, not a block \u2014 but it moves every span in the document. Identity must not notice.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 2,
+          "carried": 2
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "structural/paras-to-list",
+      "category": "structural",
+      "why": "every block is reclassified at once, text unchanged \u2014 and because a list item holds a paragraph, the paragraphs survive under new wrappers rather than changing kind. The two `list_item` blocks are genuinely new; the prose is not.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 2,
+      "carried": 2,
+      "tp": 2,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 2,
+          "carried": 2
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    },
+    {
+      "case": "structural/list-flattened",
+      "category": "structural",
+      "why": "a nested item is promoted to the top level. The text is untouched and so are the ords; only `parent_block` moves \u2014 which is a positional fact, recomputed on every write, so every ID here must survive it.",
+      "tension": null,
+      "ambiguous": null,
+      "expected": 4,
+      "carried": 4,
+      "tp": 4,
+      "fp": 0,
+      "fn": 0,
+      "by_class": {
+        "identical": {
+          "expected": 4,
+          "carried": 4
+        },
+        "marked": {
+          "expected": 0,
+          "carried": 0
+        },
+        "inferred": {
+          "expected": 0,
+          "carried": 0
+        }
+      },
+      "misbound": [],
+      "missed": [],
+      "spurious": [],
+      "perfect": true
+    }
+  ]
+}

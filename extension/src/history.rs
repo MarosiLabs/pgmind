@@ -84,6 +84,8 @@ struct Effect {
     existed: bool,
     prev: Option<BlockPre>,
     bind: &'static str,
+    /// RFC-004 Part B: `Some` iff this binding was inferred, never certain.
+    confidence: Option<f32>,
 }
 
 /// Everything one revision must record, computed before the lanes are mutated.
@@ -104,6 +106,10 @@ pub struct PreImage {
 pub struct NewState<'a> {
     pub parsed: &'a ParsedNote,
     pub ids: &'a [Uuid],
+    /// Per new block, parallel to `ids`: the confidence of an inferred
+    /// binding, or `None` when identity was certain. Empty for callers that
+    /// cannot rebind (the block ops), which read as `None` throughout.
+    pub confidence: &'a [Option<f32>],
 }
 
 fn triple(b: &BlockRow) -> [i32; 3] {
@@ -177,6 +183,7 @@ pub fn capture(
                 existed: false,
                 prev: None,
                 bind: "mint",
+                confidence: None,
             });
         }
     }
@@ -196,6 +203,7 @@ pub fn capture(
         match new_pos.get(ob.id.as_bytes()) {
             Some(&n) => {
                 let nb = &new_blocks[n];
+                let conf = new.confidence.get(n).copied().flatten();
                 let parent_new = nb.parent.map(|p| new.ids[p as usize]);
                 let changed = ob.kind != nb.kind.tag()
                     || ob.content != nb.normalized_content
@@ -208,7 +216,8 @@ pub fn capture(
                         block_id: ob.id,
                         existed: true,
                         prev: Some(pre),
-                        bind: "carry",
+                        bind: if conf.is_some() { "rebind" } else { "carry" },
+                        confidence: conf,
                     });
                 }
             }
@@ -217,6 +226,7 @@ pub fn capture(
                 existed: true,
                 prev: Some(pre),
                 bind: "remove",
+                confidence: None,
             }),
         }
     }
@@ -300,6 +310,7 @@ pub fn record(vault: Uuid, note_id: Uuid, revision: Uuid, seq: i64, pre: &PreIma
                 "block_id": e.block_id.to_string(),
                 "existed": e.existed,
                 "bind": e.bind,
+                "confidence": e.confidence,
                 "prev_kind": e.prev.as_ref().map(|p| p.kind.clone()),
                 "prev_content_hash": e.prev.as_ref().map(|_| hex),
                 "prev_block_ref_id": e.prev.as_ref().and_then(|p| p.block_ref_id.clone()),
@@ -330,15 +341,17 @@ pub fn record(vault: Uuid, note_id: Uuid, revision: Uuid, seq: i64, pre: &PreIma
             .collect();
         Spi::run_with_args(
             "INSERT INTO pgmind.block_revision
-               (note_id, block_id, seq, vault_id, existed, bind, prev_kind, prev_content,
-                prev_content_hash, prev_block_ref_id, prev_attrs, prev_parent_block)
-             SELECT $1, r.block_id, $2, $3, r.existed, r.bind,
+               (note_id, block_id, seq, vault_id, existed, bind, confidence, prev_kind,
+                prev_content, prev_content_hash, prev_block_ref_id, prev_attrs,
+                prev_parent_block)
+             SELECT $1, r.block_id, $2, $3, r.existed, r.bind, r.confidence,
                     r.prev_kind::pgmind.block_kind,
                     CASE WHEN r.prev_kind IS NULL THEN NULL ELSE c.content END,
                     decode(r.prev_content_hash, 'hex'), r.prev_block_ref_id,
                     r.prev_attrs, r.prev_parent_block
                FROM jsonb_to_recordset($4::jsonb) AS r(
-                      i int8, block_id uuid, existed boolean, bind text, prev_kind text,
+                      i int8, block_id uuid, existed boolean, bind text, confidence real,
+                      prev_kind text,
                       prev_content_hash text, prev_block_ref_id text, prev_attrs jsonb,
                       prev_parent_block uuid)
                JOIN unnest($5::text[]) WITH ORDINALITY AS c(content, i) ON c.i = r.i",

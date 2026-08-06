@@ -105,22 +105,126 @@ mod tests {
         assert_eq!(ids1, block_ids("idem"), "IDs stable across no-op writes");
     }
 
-    // ---------- A3 carry ----------
+    // ---------- RFC-004 Part B primitives ----------
+    //
+    // These test the rebinder's building blocks directly. They live here rather
+    // than beside the code because pgrx's test runner resolves every `#[pg_test]`
+    // in the SQL schema `tests`, and only one `#[pg_schema] mod tests` may exist.
 
     #[pg_test]
-    fn edited_paragraph_mints_untouched_carry() {
-        write("carry", "# H\n\nalpha\n\nbeta\n");
+    fn features_put_short_and_long_content_on_one_scale() {
+        use crate::rebind::{containment, features};
+        // With bigrams alone a one-word fragment has an empty feature set and
+        // cannot be shown to come from anything -- which made a list item split
+        // into "beta" / "and its consequences" unsolvable by construction.
+        let beta = features("beta");
+        let whole = features("beta and its consequences");
+        assert!(!beta.is_empty(), "a one-token block must have features");
+        assert_eq!(containment(&beta, &whole), 1.0);
+    }
+
+    #[pg_test]
+    fn bigrams_keep_word_order_mattering() {
+        use crate::rebind::{dice, features};
+        // Same tokens, opposite order: unigrams match, bigrams must not.
+        let a = features("locks first reads later");
+        let b = features("later reads first locks");
+        assert!(dice(&a, &b) < 1.0, "word order has to cost something");
+        assert_eq!(dice(&a, &a), 1.0);
+    }
+
+    #[pg_test]
+    fn containment_is_asymmetric() {
+        use crate::rebind::{containment, features};
+        let part = features("alpha beta");
+        let whole = features("alpha beta gamma delta epsilon");
+        assert_eq!(containment(&part, &whole), 1.0);
+        assert!(containment(&whole, &part) < 0.5);
+    }
+
+    #[pg_test]
+    fn split_run_requires_containment_in_both_directions() {
+        use crate::rebind::{features, split_run};
+        let o = features("alignment must be order monotonic crossing matches invent a move");
+        let frag_a = features("alignment must be order monotonic");
+        let frag_b = features("crossing matches invent a move");
+        let unrelated = features("two rules govern alignment");
+        // A genuine split: the run covers `o` and both fragments come from it.
+        let peers = [(0usize, frag_a.as_slice()), (1, frag_b.as_slice())];
+        assert!(split_run(&o, &peers).is_some());
+        // The decoy: the run covers `o`, but the first fragment is not from it.
+        // A one-way test calls this a split and hands the ID to the lead-in.
+        let decoy = [(0usize, unrelated.as_slice()), (1, o.as_slice())];
+        assert!(split_run(&o, &decoy).is_none());
+    }
+
+    // ---------- A3 carry ----------
+
+    /// Phase 2 pinned the opposite of this: an edited paragraph MINTED, and the
+    /// test asserted it so that Phase 3 would have to change it on purpose
+    /// rather than by accident. RFC-004 Part B was accepted 2026-08-06 and this
+    /// is that conscious change — the edited paragraph now keeps its ID, with a
+    /// confidence recorded to say the binding was inferred rather than certain.
+    #[pg_test]
+    fn edited_paragraph_rebinds_with_confidence() {
+        write("carry", "# H\n\nalpha and some more words\n\nbeta\n");
         let before = block_ids("carry");
-        write("carry", "# H\n\nalpha CHANGED\n\nbeta\n");
+        write("carry", "# H\n\nalpha and some other words\n\nbeta\n");
         let after = block_ids("carry");
-        // heading + beta carried, alpha minted
         assert_eq!(before[0].1, after[0].1, "heading carried");
         assert_eq!(before[2].1, after[2].1, "beta carried");
-        assert_ne!(
-            before[1].1, after[1].1,
-            "edited paragraph mints (Phase 2 pinned behavior)"
+        assert_eq!(before[1].1, after[1].1, "edited paragraph rebinds (Part B)");
+        // Inferred identity must be visibly inferred (RFC-005 H2).
+        let conf: Option<f32> = Spi::get_one_with_args(
+            "SELECT confidence FROM pgmind.block_revision WHERE block_id = $1 AND bind = 'rebind'",
+            &[crate::store::arg(after[1].1)],
+        )
+        .unwrap();
+        let conf = conf.expect("a rebound block records its confidence");
+        assert!(
+            (0.5..=1.0).contains(&conf),
+            "confidence {conf} must be the score, at or above tau"
         );
         verify_clean("carry");
+    }
+
+    /// The other half of the same contract: identity that was carried for a
+    /// deterministic reason must NOT be labelled inferred. If everything gets a
+    /// confidence, confidence stops meaning anything.
+    #[pg_test]
+    fn deterministic_carries_record_no_confidence() {
+        write("det", "# H\n\nalpha\n\nbeta\n");
+        write("det", "# H\n\nalpha\n\nbeta\n\ngamma\n");
+        let rebinds: i64 = Spi::get_one(
+            "SELECT count(*) FROM pgmind.block_revision WHERE bind = 'rebind'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(rebinds, 0, "an append rebinds nothing");
+        let confident: i64 = Spi::get_one(
+            "SELECT count(*) FROM pgmind.block_revision WHERE confidence IS NOT NULL",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(confident, 0, "no confidence without an inference");
+    }
+
+    /// A rewrite that shares no wording must carry nothing. This is the
+    /// precision half of Part B, and the case a similarity aligner gets wrong
+    /// by binding on position.
+    #[pg_test]
+    fn total_rewrite_carries_nothing() {
+        write("rw", "# Storage\n\nTiles hold bytes in fixed-size runs.\n");
+        let before = block_ids("rw");
+        write("rw", "# Layout\n\nFragments keep raw text inside bounded chunks.\n");
+        let after = block_ids("rw");
+        for (_, id) in &before {
+            assert!(
+                !after.iter().any(|(_, a)| a == id),
+                "no ID may survive a rewrite that shares no content"
+            );
+        }
+        verify_clean("rw");
     }
 
     #[pg_test]

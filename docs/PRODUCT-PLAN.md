@@ -245,12 +245,14 @@ This section is the core "why not files" payoff — files give none of these.
 
 Identity is minted by the write path (Law 4). When a whole document arrives from outside (import, sync, `write` without block ops), the **rebinding pipeline** matches new content to existing block IDs:
 
-- **Stage 0 — exact:** content hash + same note ⇒ same ID (also catches moves within the note). Confidence 1.0.
-- **Stage 1 — modified-in-place:** unmatched old/new blocks aligned by position + similarity (token-bigram Dice, threshold configurable, default from benchmark tuning) ⇒ ID carried, confidence = score.
-- **Stage 2 — split/merge:** containment heuristics; split ⇒ first fragment keeps the ID, others get new IDs linked by provenance; merge ⇒ dominant-source ID survives, others retire with pointers. (These policies are RFC-004's heart.)
-- **Stage 3 — everything else:** new IDs; unmatched old blocks tombstone.
+*Shipped 2026-08-06; the stage list below is what RFC-004 Part B accepted after corpus tuning, which is shorter than the four stages this section originally sketched.*
 
-Every rebind records confidence and `source='rebind'` provenance — downstream consumers (blame, citations, the embedding queue) can see exactly where identity is inferred rather than known. The adversarial edit corpus (eval/) publishes the match-rate honestly, tracked over time. Optional escape hatch: serialized `^block-id` markers for users who want deterministic round-trips through external editors.
+- **Stage 0 — deterministic (RFC-004 A3):** `^id` claims, then exact content match, section-first then by document order. No threshold, no score, no confidence recorded.
+- **Stage 1 — the heuristic, all of it:** unmatched old/new blocks aligned by similarity (Dice over unigrams ∪ bigrams, same-kind, order-monotonic, τ = 0.5) ⇒ ID carried, confidence = score. Split detection is a *candidate filter inside this stage*, not a stage after it: a fragment resembles its parent, so an aligner left to itself gives the ID to whichever fragment scores highest instead of the first one, which is what A2 says gets it.
+- ~~Split/merge as a separate stage~~ — **dropped, measured.** Splits moved into stage 1 (above); merges needed nothing, because a merged block is overwhelmingly similar to its dominant source and stage 1 already binds it.
+- **Stage 2 — everything else:** new IDs; unmatched old blocks tombstone. Also the fallback when the residual exceeds the alignment budget.
+
+Every rebind records confidence and `bind='rebind'` — downstream consumers (blame, citations, the embedding queue) can see exactly where identity is inferred rather than known. The adversarial edit corpus (eval/) publishes the match-rate honestly, tracked over time. Optional escape hatch: serialized `^block-id` markers for users who want deterministic round-trips through external editors.
 
 ## 12. Sync bridge (normative home: RFC-006)
 

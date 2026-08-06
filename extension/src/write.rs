@@ -73,6 +73,10 @@ pub struct Carry {
     pub removed: Vec<Uuid>,
     pub carried_ref: usize,
     pub carried_hash: usize,
+    pub carried_rebind: usize,
+    /// Per new block, parallel to `ids`: `Some(score)` iff Part B inferred it.
+    pub confidence: Vec<Option<f32>>,
+    pub over_budget: Option<usize>,
 }
 
 /// One carry candidate, as RFC-004 A3 sees it — the same view whether it came
@@ -82,6 +86,9 @@ pub struct CarrySrc<'a> {
     pub block_ref_id: Option<&'a str>,
     pub content_hash: &'a [u8],
     pub heading_path: &'a [String],
+    /// Part B reads these two; the deterministic passes never do.
+    pub kind: &'a str,
+    pub content: &'a str,
 }
 
 impl<'a> CarrySrc<'a> {
@@ -90,6 +97,8 @@ impl<'a> CarrySrc<'a> {
             block_ref_id: b.block_ref_id.as_deref(),
             content_hash: b.content_hash.as_slice(),
             heading_path: &b.heading_path,
+            kind: &b.kind,
+            content: &b.content,
         }
     }
     pub fn from_block(b: &'a pgmind_core::Block) -> Self {
@@ -97,6 +106,8 @@ impl<'a> CarrySrc<'a> {
             block_ref_id: b.block_ref_id.as_deref(),
             content_hash: &b.content_hash,
             heading_path: &b.heading_path,
+            kind: b.kind.tag(),
+            content: &b.normalized_content,
         }
     }
 }
@@ -105,6 +116,7 @@ impl<'a> CarrySrc<'a> {
 pub struct CarryTally {
     pub carried_ref: usize,
     pub carried_hash: usize,
+    pub carried_rebind: usize,
 }
 
 /// The immutable candidate view the A3 passes read.
@@ -121,6 +133,12 @@ pub struct CarryState {
     pub assign: Vec<Option<Uuid>>,
     pub old_used: Vec<bool>,
     pub tally: CarryTally,
+    /// Per new block: the confidence of an *inferred* binding. `None` means
+    /// deterministic (or minted) — RFC-005 H2 stores exactly this distinction,
+    /// so an inferred identity is never indistinguishable from a certain one.
+    pub confidence: Vec<Option<f32>>,
+    /// Set when Part B declined to run because the residual blew its budget.
+    pub over_budget: Option<usize>,
 }
 
 impl CarryState {
@@ -129,6 +147,8 @@ impl CarryState {
             assign: vec![None; new_len],
             old_used: vec![false; old_len],
             tally: CarryTally::default(),
+            confidence: vec![None; new_len],
+            over_budget: None,
         }
     }
 }
@@ -223,6 +243,8 @@ pub fn finish_carry(input: &CarryInput, state: CarryState) -> Carry {
         assign,
         old_used,
         tally,
+        confidence,
+        over_budget,
     } = state;
     let mut minted = Vec::new();
     let ids: Vec<Uuid> = assign
@@ -248,6 +270,9 @@ pub fn finish_carry(input: &CarryInput, state: CarryState) -> Carry {
         removed,
         carried_ref: tally.carried_ref,
         carried_hash: tally.carried_hash,
+        carried_rebind: tally.carried_rebind,
+        confidence,
+        over_budget,
     }
 }
 
@@ -265,6 +290,20 @@ pub fn carry(old: &[BlockRow], new: &[pgmind_core::Block]) -> Carry {
 
     let mut state = CarryState::new(old.len(), new.len());
     carry_scope(&input, &all_old, &all_new, &mut state);
+    // RFC-004 Part B, whole-document path only. The block ops call
+    // `carry_scope` directly and never arrive here: they carry explicit intent,
+    // and guessing for a caller who said what they meant is strictly worse.
+    match crate::rebind::rebind(&input, &state) {
+        crate::rebind::Outcome::Ran(bindings) => {
+            for b in bindings {
+                state.assign[b.new_idx] = Some(old_ids[b.old_idx]);
+                state.old_used[b.old_idx] = true;
+                state.confidence[b.new_idx] = Some(b.score);
+                state.tally.carried_rebind += 1;
+            }
+        }
+        crate::rebind::Outcome::OverBudget { cells } => state.over_budget = Some(cells),
+    }
     finish_carry(&input, state)
 }
 
@@ -278,13 +317,35 @@ fn capped(ids: &[Uuid]) -> serde_json::Value {
     }
 }
 
+/// RFC-004 A4 `rebind` record. Emitted only when Part B did something worth
+/// recording — a binding it inferred, or a note it declined to rebind because
+/// the residual blew the budget. A skipped note churned identity silently
+/// otherwise, and "silently" is the part worth fixing: this is how you find it
+/// later instead of guessing.
+fn rebind_meta(c: &Carry) -> Option<serde_json::Value> {
+    match (c.carried_rebind, c.over_budget) {
+        (0, None) => None,
+        (_, Some(cells)) => Some(json!({ "skipped": "budget", "cells": cells,
+                                         "budget": crate::rebind::CELL_BUDGET })),
+        (n, None) => {
+            let mut scores: Vec<f32> = c.confidence.iter().flatten().copied().collect();
+            scores.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            Some(json!({ "bound": n, "min_confidence": scores.first() }))
+        }
+    }
+}
+
 pub fn write_meta(op: &str, c: &Carry) -> serde_json::Value {
-    json!({
+    let mut m = json!({
         "op": op,
         "minted": capped(&c.minted),
-        "carried": { "ref": c.carried_ref, "hash": c.carried_hash },
+        "carried": { "ref": c.carried_ref, "hash": c.carried_hash, "rebind": c.carried_rebind },
         "removed": capped(&c.removed),
-    })
+    });
+    if let Some(r) = rebind_meta(c) {
+        m["rebind"] = r;
+    }
+    m
 }
 
 /// Next `seq` for a note (RFC-005 D3): per-note, dense, ascending. Callers
@@ -880,6 +941,7 @@ pub fn write_note(path_raw: &str, source: &str, expected_head: Option<Uuid>) -> 
             let new_state = history::NewState {
                 parsed: &parsed,
                 ids: &c.ids,
+                confidence: &c.confidence,
             };
             let pre = history::capture(
                 &old,
@@ -940,6 +1002,7 @@ pub fn write_note(path_raw: &str, source: &str, expected_head: Option<Uuid>) -> 
             let new_state = history::NewState {
                 parsed: &parsed,
                 ids: &c.ids,
+                confidence: &c.confidence,
             };
             let pre = history::capture(
                 &[],

@@ -513,6 +513,8 @@ fn commit_op(
     let new_state = history::NewState {
         parsed: &new_parsed,
         ids: &carry.ids,
+        // Block ops never rebind: the caller said what they meant (RFC-004 B3).
+        confidence: &[],
     };
     let pre = history::capture(
         &ctx.rows,

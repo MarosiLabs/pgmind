@@ -5,6 +5,7 @@ Documents that repeat themselves. Exact content match pairs equal-hash blocks *k
 ## case: dup-edit-first-of-two
 
 **why:** two byte-identical paragraphs; the **first** is edited. The survivor's hash now matches two old blocks, and k-th ↔ k-th pairs it with the wrong one — a mis-binding the engine reports as a successful carry.
+**ambiguous:** nothing in the content distinguishes the two originals, so no content-based rule can know which one survived unedited. Both readings are defensible and the engine picks the wrong one; it is marked ambiguous because it is unfixable at this layer, not because it does not matter. It is the only case in the corpus where identity lands on the wrong block, and RFC-004 B5 prices it explicitly.
 
 ### before
 

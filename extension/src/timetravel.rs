@@ -813,6 +813,7 @@ pub mod knowledge {
             &crate::history::NewState {
                 parsed: &empty,
                 ids: &[],
+                confidence: &[],
             },
         );
         for stmt in [
@@ -946,6 +947,7 @@ pub mod knowledge {
             &crate::history::NewState {
                 parsed: &parsed,
                 ids: &ids,
+                confidence: &[],
             },
         );
         Spi::run_with_args(

@@ -16,6 +16,7 @@ pub mod history;
 pub mod ids;
 pub mod ops;
 pub mod read;
+pub mod rebind;
 pub mod schema;
 pub mod store;
 mod tests_phase2;
