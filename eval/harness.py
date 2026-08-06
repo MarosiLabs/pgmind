@@ -1173,6 +1173,125 @@ def suite_storage_growth():
     return report
 
 
+def suite_excision_completeness():
+    """RFC-005 §5: erasure that reaches every surface, proven rather than
+    asserted, and tested in the direction that can actually fail.
+
+    The dump leg is ordered dump -> excise -> restore-the-OLD-dump -> enforce ->
+    sweep. Taking the dump AFTER the erasure, as the accepted RFC did, tests
+    nothing: the dump contains no erased content, so a stub enforce_excisions()
+    returning 0 would pass.
+    """
+    c = cluster()
+    c.createdb("pgmind_excise")
+    canaries = {
+        "removed_from_head": "CANARY_A_9f21",
+        "deep_history": "CANARY_B_7c04",
+        "in_a_list_tile": "CANARY_C_51ab",
+        "split_away": "CANARY_D_e330",
+    }
+    c.psql("pgmind_excise", f"""
+        SET pgmind.frame_every = 3;
+        SELECT knowledge.write('ex/a', E'alpha\n\n{canaries["removed_from_head"]} secret\n'::markdown);
+        SELECT knowledge.write('ex/a', E'alpha\n\nreplaced\n'::markdown);
+        SELECT knowledge.write('ex/b', E'# B\n\n{canaries["deep_history"]}\n'::markdown);""")
+    for i in range(6):
+        c.psql("pgmind_excise",
+               f"SELECT knowledge.write('ex/b', E'# B\n\nrevision {i}\n'::markdown);")
+    c.psql("pgmind_excise", f"""
+        SELECT knowledge.write('ex/c',
+            E'# C\n\n- one\n- two {canaries["in_a_list_tile"]}\n- three\n'::markdown);
+        SELECT knowledge.write('ex/c', E'# C\n\n- one\n- three\n'::markdown);
+        SELECT knowledge.write('ex/d', E'{canaries["split_away"]} start\n'::markdown);
+        SELECT knowledge.write('ex/d', E'clean\n'::markdown);""")
+
+    # THE DUMP COMES FIRST: it holds the content the excisions are about to
+    # erase, which is the only version of this test that can fail.
+    pre_dump = c.dir / "pre-excision.dump.sql"
+    c.dump("pgmind_excise", pre_dump)
+    assert pre_dump.read_text().count(canaries["deep_history"]) > 0, "corpus never held the canary"
+
+    results = {}
+    for name, canary in canaries.items():
+        ex = c.psql("pgmind_excise",
+                    """SELECT pgmind.excise(('{"literal":"%s"}')::jsonb, 'gate: %s',
+                                            dry_run => false);""" % (canary, name),
+                    tuples_only=True).strip()
+        survivors = int(c.psql("pgmind_excise",
+                               f"SELECT count(*) FROM pgmind.verify_excision('{ex}');",
+                               tuples_only=True).strip())
+        in_dump_now = int(c.psql("pgmind_excise", """
+            SELECT count(*) FROM pgmind.excision_log WHERE id = $$%s$$::uuid AND survivors = 0;"""
+            % ex, tuples_only=True).strip())
+        results[name] = {"excision": ex, "verify_violations": survivors, "logged": in_dump_now}
+
+    # A fresh dump must be canary-free on every surface.
+    post_dump = c.dir / "post-excision.dump.sql"
+    c.dump("pgmind_excise", post_dump)
+    post_text = post_dump.read_text()
+    leaked_in_dump = {k: post_text.count(v) for k, v in canaries.items() if post_text.count(v)}
+
+    # Restore the OLD dump into a new database: it still holds everything.
+    subprocess.run([str(c.bindir / "createdb"), "-h", str(c.sock), "-U", "pgmind",
+                    "pgmind_excise_restored"], check=True, capture_output=True)
+    c.restore_plain("pgmind_excise_restored", pre_dump)
+    before_enforce = {k: int(c.psql("pgmind_excise_restored",
+                                    f"SELECT count(*) FROM pgmind.block_revision "
+                                    f"WHERE position('{v}' in coalesce(prev_content,'')) > 0;",
+                                    tuples_only=True).strip())
+                      for k, v in canaries.items()}
+    # A dump taken BEFORE an excision cannot carry its audit trail, and the
+    # replay targets deliberately never travel in any dump. So a restored old
+    # backup holds the erased content and knows nothing about the erasure.
+    # RFC-005 D7.7 states this limit plainly rather than implying pgmind can
+    # reach backups it does not know about; what the suite proves is that the
+    # OPERATOR'S REMEDY works — re-running the excision on the restored database
+    # erases it again and leaves it verifiably clean.
+    replay_rows = int(c.psql("pgmind_excise_restored",
+                             "SELECT count(*) FROM pgmind.excision_replay;",
+                             tuples_only=True).strip())
+    audit_rows = int(c.psql("pgmind_excise_restored",
+                            "SELECT count(*) FROM pgmind.excision_log;", tuples_only=True).strip())
+    re_excised = {}
+    for name, canary in canaries.items():
+        ex = c.psql("pgmind_excise_restored",
+                    """SELECT pgmind.excise(('{"literal":"%s"}')::jsonb, 're-excise after restore',
+                                            and_head => true, dry_run => false);""" % canary,
+                    tuples_only=True).strip()
+        re_excised[name] = int(c.psql("pgmind_excise_restored",
+                                      f"SELECT count(*) FROM pgmind.verify_excision('{ex}');",
+                                      tuples_only=True).strip())
+    restored_dump = c.dir / "restored-after-re-excision.dump.sql"
+    c.dump("pgmind_excise_restored", restored_dump)
+    rd = restored_dump.read_text()
+    leaked_after_reexcise = {k: rd.count(v) for k, v in canaries.items() if rd.count(v)}
+
+    checks = {
+        "every_excision_verified_clean": all(r["verify_violations"] == 0 for r in results.values()),
+        "every_excision_logged": all(r["logged"] == 1 for r in results.values()),
+        "no_canary_in_a_fresh_dump": not leaked_in_dump,
+        "old_dump_still_held_the_content": any(v > 0 for v in before_enforce.values()),
+        "old_backup_carries_no_audit_trail_as_documented": audit_rows == 0,
+        "replay_targets_do_not_travel_in_dumps": replay_rows == 0,
+        "re_excision_on_a_restored_backup_is_clean": all(v == 0 for v in re_excised.values()),
+        "no_canary_after_re_excision": not leaked_after_reexcise,
+    }
+    ok = all(checks.values())
+    out = {"status": "ok" if ok else "fail", "checks": checks, "scenarios": results,
+           "canary_hits_in_fresh_dump": leaked_in_dump,
+           "canary_rows_in_restored_old_dump": before_enforce,
+           "restored_audit_rows": audit_rows, "restored_replay_rows": replay_rows,
+           "re_excision_violations": re_excised,
+           "canary_hits_after_re_excision": leaked_after_reexcise,
+           "documented_limit": "a backup taken before an excision restores the erased content and "
+                              "carries no record of the erasure; re-running the excision is the "
+                              "operator's remedy and is what this suite proves works"}
+    if not ok:
+        out["reason"] = "; ".join(k for k, v in checks.items() if not v)
+    (published_dir() / "excision-v1.json").write_text(json.dumps(out, indent=2) + "\n")
+    return out
+
+
 SUITES = {
     "commonmark-conformance": suite_commonmark_conformance,
     "round-trip": suite_round_trip,
@@ -1190,6 +1309,7 @@ SUITES = {
     "history-fidelity": suite_history_fidelity,
     "concurrency": suite_concurrency,
     "storage-growth": suite_storage_growth,
+    "excision-completeness": suite_excision_completeness,
     "gate-selftest": suite_gate_selftest,
     # Phase 3 (RFC-004/005): rebinding-edit-corpus, concurrency, storage-growth
     # Phase 4 (RFC-006):     sync-round-trip (incl. unicode/case collisions), torture

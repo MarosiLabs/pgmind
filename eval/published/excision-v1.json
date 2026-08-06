@@ -1,0 +1,52 @@
+{
+  "status": "ok",
+  "checks": {
+    "every_excision_verified_clean": true,
+    "every_excision_logged": true,
+    "no_canary_in_a_fresh_dump": true,
+    "old_dump_still_held_the_content": true,
+    "old_backup_carries_no_audit_trail_as_documented": true,
+    "replay_targets_do_not_travel_in_dumps": true,
+    "re_excision_on_a_restored_backup_is_clean": true,
+    "no_canary_after_re_excision": true
+  },
+  "scenarios": {
+    "removed_from_head": {
+      "excision": "019fd513-a4b4-763b-a38a-1e68661847e6",
+      "verify_violations": 0,
+      "logged": 1
+    },
+    "deep_history": {
+      "excision": "019fd513-a4fa-7d06-a977-61c560ed51ee",
+      "verify_violations": 0,
+      "logged": 1
+    },
+    "in_a_list_tile": {
+      "excision": "019fd513-a540-7fec-b7e7-3af2a4982b3a",
+      "verify_violations": 0,
+      "logged": 1
+    },
+    "split_away": {
+      "excision": "019fd513-a587-70a7-bf0c-1982fafb2600",
+      "verify_violations": 0,
+      "logged": 1
+    }
+  },
+  "canary_hits_in_fresh_dump": {},
+  "canary_rows_in_restored_old_dump": {
+    "removed_from_head": 1,
+    "deep_history": 1,
+    "in_a_list_tile": 2,
+    "split_away": 1
+  },
+  "restored_audit_rows": 0,
+  "restored_replay_rows": 0,
+  "re_excision_violations": {
+    "removed_from_head": 0,
+    "deep_history": 0,
+    "in_a_list_tile": 0,
+    "split_away": 0
+  },
+  "canary_hits_after_re_excision": {},
+  "documented_limit": "a backup taken before an excision restores the erased content and carries no record of the erasure; re-running the excision is the operator's remedy and is what this suite proves works"
+}
