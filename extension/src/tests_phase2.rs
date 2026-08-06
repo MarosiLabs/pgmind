@@ -195,17 +195,15 @@ mod tests {
     fn deterministic_carries_record_no_confidence() {
         write("det", "# H\n\nalpha\n\nbeta\n");
         write("det", "# H\n\nalpha\n\nbeta\n\ngamma\n");
-        let rebinds: i64 = Spi::get_one(
-            "SELECT count(*) FROM pgmind.block_revision WHERE bind = 'rebind'",
-        )
-        .unwrap()
-        .unwrap();
+        let rebinds: i64 =
+            Spi::get_one("SELECT count(*) FROM pgmind.block_revision WHERE bind = 'rebind'")
+                .unwrap()
+                .unwrap();
         assert_eq!(rebinds, 0, "an append rebinds nothing");
-        let confident: i64 = Spi::get_one(
-            "SELECT count(*) FROM pgmind.block_revision WHERE confidence IS NOT NULL",
-        )
-        .unwrap()
-        .unwrap();
+        let confident: i64 =
+            Spi::get_one("SELECT count(*) FROM pgmind.block_revision WHERE confidence IS NOT NULL")
+                .unwrap()
+                .unwrap();
         assert_eq!(confident, 0, "no confidence without an inference");
     }
 
@@ -216,7 +214,10 @@ mod tests {
     fn total_rewrite_carries_nothing() {
         write("rw", "# Storage\n\nTiles hold bytes in fixed-size runs.\n");
         let before = block_ids("rw");
-        write("rw", "# Layout\n\nFragments keep raw text inside bounded chunks.\n");
+        write(
+            "rw",
+            "# Layout\n\nFragments keep raw text inside bounded chunks.\n",
+        );
         let after = block_ids("rw");
         for (_, id) in &before {
             assert!(

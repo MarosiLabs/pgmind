@@ -126,7 +126,9 @@ pub struct Rebound {
 pub enum Outcome {
     Ran(Vec<Rebound>),
     /// Residual too large; every unmatched block mints (B3's declared fallback).
-    OverBudget { cells: usize },
+    OverBudget {
+        cells: usize,
+    },
 }
 
 /// Detect whether `o` was split, and if so which fragment must keep its ID.
@@ -148,10 +150,7 @@ pub(crate) fn split_run(o_feats: &[u64], peers: &[(usize, &[u64])]) -> Option<(u
     for s in 0..peers.len() {
         for e in (s + 2)..=(s + MAX_RUN).min(peers.len()) {
             let run = &peers[s..e];
-            if run
-                .iter()
-                .any(|(_, f)| containment(f, o_feats) < TAU_SPLIT)
-            {
+            if run.iter().any(|(_, f)| containment(f, o_feats) < TAU_SPLIT) {
                 continue; // some fragment is not made of `o`
             }
             let mut joined: Vec<u64> = run.iter().flat_map(|(_, f)| f.iter().copied()).collect();
@@ -175,7 +174,9 @@ pub(crate) fn split_run(o_feats: &[u64], peers: &[(usize, &[u64])]) -> Option<(u
 /// every one of them a move. A rebinder that cannot follow a block across a
 /// document is refusing the case it is most needed for.
 pub fn rebind(input: &CarryInput, state: &CarryState) -> Outcome {
-    let old_idxs: Vec<usize> = (0..input.old.len()).filter(|&i| !state.old_used[i]).collect();
+    let old_idxs: Vec<usize> = (0..input.old.len())
+        .filter(|&i| !state.old_used[i])
+        .collect();
     let new_idxs: Vec<usize> = (0..input.new.len())
         .filter(|&i| state.assign[i].is_none())
         .collect();
