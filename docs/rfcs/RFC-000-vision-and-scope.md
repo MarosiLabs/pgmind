@@ -9,9 +9,9 @@
 
 The de facto knowledge substrate for AI agents in 2026 is markdown files on a filesystem (Claude Code memory, agent memory directories, Obsidian vaults). This works for a local, single-user program and fails structurally in server backends: no transactions across concurrent writers, no queries (backlinks, tags, history), no multi-tenancy, and a growing pile of sync glue. The teams hitting this pain already run PostgreSQL.
 
-An evidence audit of this project's original vision ([AUDIT.md](../../AUDIT.md)) established two decisive facts. First, the layer pgmind targets is empty: no extension or framework offers a markdown vault model in a database — stable block identity, block-level revisions, backlinks/tags in SQL, deterministic budgeted context assembly. Second, every precedent that put AI *inside* a Postgres extension died or retreated in 2025-26 (Neon pgrag: archived; PostgresML/Korvus: bust; TigerData pgai: forced out of the extension, then archived), while deterministic primitives (pgvector, PostGIS) thrive.
+An evidence audit of this project's original vision ([AUDIT.md](../archive/AUDIT.md)) established two decisive facts. First, the layer pgmind targets is empty: no extension or framework offers a markdown vault model in a database — stable block identity, block-level revisions, backlinks/tags in SQL, deterministic budgeted context assembly. Second, every precedent that put AI *inside* a Postgres extension died or retreated in 2025-26 (Neon pgrag: archived; PostgresML/Korvus: bust; TigerData pgai: forced out of the extension, then archived), while deterministic primitives (pgvector, PostGIS) thrive.
 
-This RFC condenses the [handbook](../../PGMIND.md) §1-5 into the accepted, normative baseline that all later RFCs build on. The [product plan](../PRODUCT-PLAN.md) elaborates the system design and delivery phases.
+This RFC condenses the [handbook](../PGMIND.md) §1-5 into the accepted, normative baseline that all later RFCs build on. The [product plan](../PRODUCT-PLAN.md) elaborates the system design and delivery phases.
 
 ## 2. Decision
 

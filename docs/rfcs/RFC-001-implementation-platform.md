@@ -7,7 +7,7 @@
 
 ## 1. Context
 
-The audit faulted the original handbook for starting a "documentation drives code" project with zero foundational technology decisions: no language, no parser, no markdown flavor, no tokenizer, no version matrix (finding M8) — and no license (finding C5). The [handbook](../../PGMIND.md) §7 subsequently made these decisions as revisitable defaults; this RFC ratifies them as the accepted platform with the evidence and the accepted costs on record, so no later phase relitigates them casually.
+The audit faulted the original handbook for starting a "documentation drives code" project with zero foundational technology decisions: no language, no parser, no markdown flavor, no tokenizer, no version matrix (finding M8) — and no license (finding C5). The [handbook](../PGMIND.md) §7 subsequently made these decisions as revisitable defaults; this RFC ratifies them as the accepted platform with the evidence and the accepted costs on record, so no later phase relitigates them casually.
 
 ## 2. Decision
 

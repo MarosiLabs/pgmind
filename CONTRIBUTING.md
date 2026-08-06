@@ -1,6 +1,6 @@
 # Contributing to pgmind
 
-Process and roles live here, out of the product handbook ([PGMIND.md](PGMIND.md)). The handbook defines *what* is being built; this document defines *how work is organized*.
+Process and roles live here, out of the product handbook ([PGMIND.md](docs/PGMIND.md)). The handbook defines *what* is being built; this document defines *how work is organized*.
 
 ## Governance
 

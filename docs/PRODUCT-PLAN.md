@@ -2,7 +2,7 @@
 
 Version: 1.0
 Date: 2026-08-04
-Status: living document — the operating blueprint for implementation. The [handbook](../PGMIND.md) is the constitution (vision, laws, philosophy); the [audit](../AUDIT.md) is the evidence base; this plan is *how the product works and how we build it*. Per-phase **RFCs are written and accepted before implementation of each phase begins** — this plan defines what each RFC must decide, not the decisions themselves (except where the handbook already made them).
+Status: living document — the operating blueprint for implementation. The [handbook](PGMIND.md) is the constitution (vision, laws, philosophy); the [audit](archive/AUDIT.md) is the evidence base; this plan is *how the product works and how we build it*. Per-phase **RFCs are written and accepted before implementation of each phase begins** — this plan defines what each RFC must decide, not the decisions themselves (except where the handbook already made them).
 
 ---
 

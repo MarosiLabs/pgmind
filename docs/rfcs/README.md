@@ -1,6 +1,6 @@
 # pgmind RFC Index
 
-Canonical index — mirrors [handbook §12](../../PGMIND.md) and the [product plan Part III](../PRODUCT-PLAN.md), which defines what each RFC must decide. RFCs follow [TEMPLATE.md](TEMPLATE.md); lifecycle is *living during phase, frozen at phase exit*. An RFC is accepted only when its benchmark gate is defined.
+Canonical index — mirrors [handbook §12](../PGMIND.md) and the [product plan Part III](../PRODUCT-PLAN.md), which defines what each RFC must decide. RFCs follow [TEMPLATE.md](TEMPLATE.md); lifecycle is *living during phase, frozen at phase exit*. An RFC is accepted only when its benchmark gate is defined.
 
 | RFC | Title | Phase | Status |
 |---|---|---|---|
