@@ -1274,6 +1274,57 @@ mod tests {
         verify_clean("cas/log");
     }
 
+    /// A section ending in a list is the commonest shape a vault has, and the
+    /// anchor for it is the last TOP-LEVEL list item — not the paragraph nested
+    /// inside it (never anchorable) and not a nested item (which would capture
+    /// the append one level too deep).
+    #[pg_test]
+    fn append_to_section_anchors_past_a_trailing_list() {
+        write("cas/list", "# Note\n\n## Log\n\n- first\n  - nested\n");
+        Spi::run(
+            "SELECT knowledge.append_to_section(
+               'cas/list', ARRAY['Note','Log'], '- second'::markdown)",
+        )
+        .expect("append to a list-ending section failed");
+        let body = read("cas/list");
+        assert!(body.contains("- second"), "the append landed: {body:?}");
+        assert!(
+            body.find("- nested").unwrap() < body.find("- second").unwrap(),
+            "it lands after the whole list: {body:?}"
+        );
+        assert!(
+            !body.contains("  - second"),
+            "at the outer level, not inside the nested list: {body:?}"
+        );
+        verify_clean("cas/list");
+    }
+
+    /// The section exists but nothing in it can carry an insert: a multi-block
+    /// blockquote is one tile whose inner paragraphs are neither list items nor
+    /// top-level blocks. Same SQLSTATE as before, but the message no longer
+    /// blames the anchor the caller never chose.
+    ///
+    /// A single-paragraph quote is NOT this case — its paragraph spans the
+    /// whole tile, so it anchors, and the append lands after the quote.
+    #[pg_test]
+    fn append_to_an_unanchorable_section_says_so() {
+        write("cas/quote", "# Note\n\n## Log\n\n> a\n>\n> b\n");
+        assert_eq!(
+            sqlstate_of(
+                "SELECT knowledge.append_to_section('cas/quote', ARRAY['Note','Log'], 'x'::markdown)"
+            ),
+            "PM005"
+        );
+
+        write("cas/quote1", "# Note\n\n## Log\n\n> quoted\n");
+        Spi::run(
+            "SELECT knowledge.append_to_section('cas/quote1', ARRAY['Note','Log'], 'x'::markdown)",
+        )
+        .expect("a single-paragraph quote anchors");
+        assert_eq!(read("cas/quote1"), "# Note\n\n## Log\n\n> quoted\n\nx\n");
+        verify_clean("cas/quote1");
+    }
+
     // ---------- note lifecycle (RFC-005 D6) ----------
 
     /// Delete is a tombstone plus a revision; the live lanes are cleared but
