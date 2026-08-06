@@ -54,6 +54,22 @@ def published_dir() -> Path:
     return d
 
 
+def publish(name: str, obj):
+    """Write a gate deliverable. Always to results/ (gitignored); to
+    published/ only when PGMIND_PUBLISH is set.
+
+    Publishing is an act, not a side effect of running the suite. These files
+    are the numbers as measured at a phase exit; a plain `make eval` on a
+    laptop with a browser open produced p95 latencies 3x the committed ones,
+    and overwriting the record with that is how a published number quietly
+    becomes a worse one. Re-publish deliberately: PGMIND_PUBLISH=1 make eval.
+    """
+    text = json.dumps(obj, indent=2) + "\n"
+    (results_dir() / name).write_text(text)
+    if os.environ.get("PGMIND_PUBLISH"):
+        (published_dir() / name).write_text(text)
+
+
 def eval_bin():
     """Build (once) and return the pgmind-eval binary path."""
     subprocess.run(
@@ -702,7 +718,7 @@ def suite_capacity_model():
         }
     # RFC-003 §5 gate 5 names this file as the published deliverable;
     # eval/results/ is gitignored and cannot serve that role.
-    (published_dir() / "capacity-model-v1.json").write_text(json.dumps(report, indent=2) + "\n")
+    publish("capacity-model-v1.json", report)
     (results_dir() / "capacity-model.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
 
@@ -1089,11 +1105,12 @@ def _publish_tuning_study(observations, baseline):
     # which is a claim about the drafted stage ORDER, not about the corpus --
     # so measure the stage on its own rather than inferring it from flatness.
     stage2_only = rebinding_tuning.sweep(observations, [rebinding_tuning.STAGE1_OFF], splits)
-    (published_dir() / "rebinding-tuning-v1.json").write_text(json.dumps({
+    publish("rebinding-tuning-v1.json", {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "status": "study — not a gate, not normative until RFC-004 Part B is accepted",
-        "simulates": "RFC-004 Part B stage 1 (bigram Dice, same-kind, order-monotonic) "
-                     "and stage 2 (containment split/merge) over the residual left by A3 passes 1-2",
+        "simulates": "RFC-004 Part B over the residual left by A3 passes 1-2: the drafted "
+                     "pipeline (stage 1 similarity alignment, then stage 2 containment "
+                     "split/merge) and the variants of B2-B5",
         "baseline_no_part_b": {
             "recall": baseline["*all*"]["recall"],
             "precision": baseline["*all*"]["precision"],
@@ -1119,7 +1136,7 @@ def _publish_tuning_study(observations, baseline):
         "tau_split_sweep": [rebinding_tuning.evaluate(observations, 0.5, s, "split-aware")
                             for s in splits],
         "grid": grid,
-    }, indent=2) + "\n")
+    })
 
 
 def suite_rebinding_corpus():
@@ -1155,8 +1172,7 @@ def suite_rebinding_corpus():
         "summary": summary,
         "cases": [{k: v for k, v in r.items() if k != "index"} for r in rows],
     }
-    (published_dir() / "rebinding-baseline-v1.json").write_text(
-        json.dumps(report, indent=2) + "\n")
+    publish("rebinding-baseline-v1.json", report)
     _publish_tuning_study(observations, summary)
 
     ok = not stale and control_ok
@@ -1339,7 +1355,7 @@ def suite_storage_growth():
     report["status"] = "fail" if problems else "ok"
     if problems:
         report["reason"] = "; ".join(problems)
-    (published_dir() / "capacity-model-v2.json").write_text(json.dumps(report, indent=2) + "\n")
+    publish("capacity-model-v2.json", report)
     return report
 
 
@@ -1458,7 +1474,7 @@ def suite_excision_completeness():
                               "operator's remedy and is what this suite proves works"}
     if not ok:
         out["reason"] = "; ".join(k for k, v in checks.items() if not v)
-    (published_dir() / "excision-v1.json").write_text(json.dumps(out, indent=2) + "\n")
+    publish("excision-v1.json", out)
     return out
 
 

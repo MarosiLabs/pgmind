@@ -96,10 +96,6 @@ jobs:
         if: always()   # the failure report is the one you need most
         with:
           name: eval-report
-          path: |
-            eval/results/latest.json
-            eval/results/capacity-model.json
-            eval/published/capacity-model-v2.json
-            eval/published/excision-v1.json
-            eval/published/rebinding-baseline-v1.json
-            eval/published/rebinding-tuning-v1.json
+          # results/, not published/: publishing is opt-in (PGMIND_PUBLISH),
+          # so a CI run measures the deliverables without rewriting the record.
+          path: eval/results/

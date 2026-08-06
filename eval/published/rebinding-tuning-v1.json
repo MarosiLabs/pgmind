@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-08-06T04:28:25Z",
+  "generated_at": "2026-08-06T04:37:39Z",
   "status": "study \u2014 not a gate, not normative until RFC-004 Part B is accepted",
-  "simulates": "RFC-004 Part B stage 1 (bigram Dice, same-kind, order-monotonic) and stage 2 (containment split/merge) over the residual left by A3 passes 1-2",
+  "simulates": "RFC-004 Part B over the residual left by A3 passes 1-2: the drafted pipeline (stage 1 similarity alignment, then stage 2 containment split/merge) and the variants of B2-B5",
   "baseline_no_part_b": {
     "recall": 0.77,
     "precision": 0.9872,
