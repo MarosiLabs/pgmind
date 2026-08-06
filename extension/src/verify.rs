@@ -18,6 +18,12 @@ mod pgmind {
     fn verify_note(note_id: Uuid) -> SetOfIterator<'static, String> {
         super::verify_note_impl(note_id)
     }
+
+    /// RFC-005 D8: the history lane's invariant checker. Empty = healthy.
+    #[pg_extern]
+    fn verify_history(note_id: Uuid) -> SetOfIterator<'static, String> {
+        super::verify_history_impl(note_id)
+    }
 }
 
 fn verify_note_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
@@ -227,4 +233,149 @@ fn verify_note_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
     }
 
     SetOfIterator::new(v)
+}
+
+/// RFC-005 D8's post-conditions, which the review rewrote after finding all
+/// three of the accepted ones unsatisfiable, vacuous, or both.
+///
+/// The vacuous one is worth naming: `read_as_of(head) = read()` proves nothing,
+/// because reconstruction at head applies no scripts and reads current state by
+/// definition. Reconstruction is therefore checked where it can actually fail —
+/// at the floor, at the newest frame, and at sampled revisions in between.
+fn verify_history_impl(note_id: Uuid) -> SetOfIterator<'static, String> {
+    let mut v: Vec<String> = Vec::new();
+    let Some(note) = store::note_by_id(note_id) else {
+        return SetOfIterator::new(vec![format!("note {note_id} does not exist")]);
+    };
+
+    let (head_seq, floor): (i64, i64) = Spi::connect(|client| {
+        client
+            .select(
+                "SELECT (SELECT seq FROM pgmind.revision WHERE id = n.head_revision),
+                        n.history_floor FROM pgmind.note n WHERE n.id = $1",
+                None,
+                &[arg(note_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in verify_history: {e}"))
+            .map(|r| {
+                (
+                    r.get::<i64>(1).unwrap().unwrap_or(-1),
+                    r.get::<i64>(2).unwrap().unwrap_or(0),
+                )
+            })
+            .next()
+            .unwrap_or((-1, 0))
+    });
+    if head_seq < 0 {
+        v.push("head revision has no seq".into());
+        return SetOfIterator::new(v);
+    }
+
+    // (2) seq is dense and gapless above the floor, and every revision above it
+    // has exactly one note_revision row. The second half is what catches a
+    // history lane that silently stopped being written -- including a dump that
+    // restored the revisions and lost their pre-images.
+    let (revs, hist): (i64, i64) = Spi::connect(|client| {
+        client
+            .select(
+                "SELECT (SELECT count(*) FROM pgmind.revision
+                          WHERE note_id = $1 AND seq >= $2),
+                        (SELECT count(*) FROM pgmind.note_revision
+                          WHERE note_id = $1 AND seq >= $2)",
+                None,
+                &[arg(note_id), floor.into()],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in verify_history: {e}"))
+            .map(|r| {
+                (
+                    r.get::<i64>(1).unwrap().unwrap_or(0),
+                    r.get::<i64>(2).unwrap().unwrap_or(0),
+                )
+            })
+            .next()
+            .unwrap_or((0, 0))
+    });
+    if revs != head_seq - floor + 1 {
+        v.push(format!(
+            "seq is not dense above the floor: {revs} revisions for seqs {floor}..{head_seq}"
+        ));
+    }
+    if hist != revs {
+        v.push(format!(
+            "{revs} revisions above the floor but {hist} note_revision rows — history is missing"
+        ));
+    }
+
+    // (1) The floor frame is the anchor retention leaves behind. Absent, every
+    // read at the floor walks to head and compaction has silently orphaned the
+    // oldest reconstructable point.
+    if floor > 0 {
+        let framed: Option<i64> = Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.note_frame WHERE note_id = $1 AND seq = $2",
+            &[arg(note_id), floor.into()],
+        )
+        .unwrap_or(Some(0));
+        if framed != Some(1) {
+            v.push(format!("no note_frame at the history floor (seq {floor})"));
+        }
+    }
+
+    // (3) Reconstruction, checked where it can fail. Deterministic sampling so
+    // a failure is reproducible rather than flaky.
+    let mut probes: Vec<i64> = vec![floor, head_seq];
+    if let Some(f) = newest_frame_below(note_id, head_seq) {
+        probes.push(f);
+    }
+    let span = head_seq - floor;
+    if span > 0 {
+        let step = (span / 20).max(1);
+        let mut s = floor;
+        while s < head_seq {
+            probes.push(s);
+            s += step;
+        }
+    }
+    probes.sort_unstable();
+    probes.dedup();
+    for seq in probes {
+        let st = crate::timetravel::state_at(&note, seq);
+        let src = st.source();
+        if st.ids.len() != st.place.len() || st.ids.len() != st.heads.len() {
+            v.push(format!(
+                "seq {seq}: vectors disagree ({} ids, {} placements, {} heading paths)",
+                st.ids.len(),
+                st.place.len(),
+                st.heads.len()
+            ));
+            continue;
+        }
+        // X2 forbids parsing to RECONSTRUCT; parsing to CHECK is exactly what an
+        // invariant checker is for.
+        let parsed = pgmind_core::parse(&src);
+        if parsed.blocks.len() != st.ids.len() {
+            v.push(format!(
+                "seq {seq}: reconstructed bytes parse to {} blocks but the id vector holds {}",
+                parsed.blocks.len(),
+                st.ids.len()
+            ));
+        }
+        for (i, (t, s0, e)) in st.place.iter().enumerate() {
+            let ti = *t as usize;
+            if ti >= st.tiles.len() || *s0 < 0 || *e < *s0 || (*e as usize) > st.tiles[ti].len() {
+                v.push(format!(
+                    "seq {seq}: block {i} span ({t},{s0},{e}) is outside its tile"
+                ));
+                break;
+            }
+        }
+    }
+    SetOfIterator::new(v)
+}
+
+fn newest_frame_below(note_id: Uuid, head_seq: i64) -> Option<i64> {
+    Spi::get_one_with_args(
+        "SELECT max(seq) FROM pgmind.note_frame WHERE note_id = $1 AND seq <= $2",
+        &[arg(note_id), head_seq.into()],
+    )
+    .unwrap_or(None)
 }

@@ -338,6 +338,13 @@ PGRX_TEST_SUITES = {
         "structural_edits_do_not_write_a_row_per_block",
         "history_records_the_pre_image_of_both_lanes",
         "frames_are_written_at_the_configured_cadence",
+        # RFC-005 D3/D8: reconstruction, the error contract, and an invariant
+        # checker that can actually fail.
+        "every_revision_reconstructs_byte_exactly",
+        "blocks_as_of_returns_past_structure",
+        "history_errors_distinguish_missing_from_compacted",
+        "history_and_diff_report_what_changed",
+        "verify_history_catches_a_missing_pre_image",
         "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [

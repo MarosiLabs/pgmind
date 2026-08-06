@@ -18,6 +18,7 @@ pub mod read;
 pub mod schema;
 pub mod store;
 mod tests_phase2;
+pub mod timetravel;
 pub mod verify;
 pub mod write;
 

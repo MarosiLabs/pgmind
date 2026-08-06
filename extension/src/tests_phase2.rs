@@ -855,6 +855,228 @@ mod tests {
         .unwrap()
     }
 
+    // ---------- time travel (RFC-005 D3) ----------
+
+    /// The property the whole version engine exists for: every revision of a
+    /// note reconstructs to the exact bytes that were written, at every depth,
+    /// through frames and across structural edits.
+    #[pg_test]
+    fn every_revision_reconstructs_byte_exactly() {
+        Spi::run("SET pgmind.frame_every = 3").unwrap();
+        let versions = [
+            "# Doc\n\nalpha\n",
+            "# Doc\n\nalpha\n\nbeta\n",
+            "# Doc\n\nALPHA\n\nbeta\n",
+            "# Doc\n\nbeta\n\nALPHA\n",
+            "---\ntitle: T\n---\n\n# Doc\n\nbeta\n\nALPHA\n\n- item\n",
+            "# Renamed\n\nbeta\n",
+            "# Renamed\n\nbeta\n\ngamma [[link]] #tag\n",
+        ];
+        for v in versions {
+            write("tt/doc", v);
+        }
+        for (seq, expected) in versions.iter().enumerate() {
+            let got: String = Spi::get_one_with_args(
+                "SELECT knowledge.read_as_of('tt/doc', $1::bigint)::text",
+                &[(seq as i64).into()],
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(&got, expected, "reconstruction at seq {seq}");
+        }
+        Spi::run("RESET pgmind.frame_every").unwrap();
+    }
+
+    /// Structure at a past revision comes from the stored vectors, never from
+    /// re-parsing (X2) — so ids, order and heading_path must all come back.
+    #[pg_test]
+    fn blocks_as_of_returns_past_structure() {
+        write("tt/blocks", "# A\n\none\n\n# B\n\ntwo\n");
+        let before = block_ids("tt/blocks");
+        write("tt/blocks", "# A\n\none\n");
+        let rows: Vec<(i32, Uuid, String, Vec<String>)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT ord, block_id, content, heading_path
+                       FROM knowledge.blocks_as_of('tt/blocks', 0::bigint) ORDER BY ord",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| {
+                    (
+                        r.get::<i32>(1).unwrap().unwrap(),
+                        r.get::<Uuid>(2).unwrap().unwrap(),
+                        r.get::<String>(3).unwrap().unwrap(),
+                        r.get::<Vec<String>>(4).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(rows.len(), 4, "the deleted section is back");
+        assert_eq!(rows[3].2, "two");
+        assert_eq!(rows[3].3, vec!["B".to_string()], "heading_path is restored");
+        assert_eq!(rows[0].1, before[0].1, "identity is preserved across time");
+    }
+
+    /// PM011 and PM010 mean opposite things and are never interchanged.
+    #[pg_test]
+    fn history_errors_distinguish_missing_from_compacted() {
+        write("tt/err", "one\n");
+        write("tt/err", "two\n");
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read_as_of('tt/err', 99::bigint)"),
+            "PM010",
+            "a seq the note never had is a client bug"
+        );
+        // Simulate retention having moved the floor.
+        Spi::run("UPDATE pgmind.note SET history_floor = 1 WHERE path = 'tt/err'").unwrap();
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read_as_of('tt/err', 0::bigint)"),
+            "PM011",
+            "below the floor is 'no longer reconstructable', not 'no such revision'"
+        );
+    }
+
+    /// history() and diff() read the ledger without reconstructing anything
+    /// they do not need.
+    ///
+    /// Note what "changed" means here: pgmind mints on edit, so a whole-document
+    /// rewrite of a paragraph is remove + add, not a change. `changed` appears
+    /// only where identity was ASSERTED — an `update_block`, or an `^id` claim.
+    /// That is RFC-004 A1 showing through the diff, and it is the honest
+    /// rendering: the engine will not claim two blocks are the same block
+    /// because their text looks similar.
+    #[pg_test]
+    fn history_and_diff_report_what_changed() {
+        write("tt/diff", "alpha\n\nbeta\n");
+        let beta = block_ids("tt/diff")[1].1;
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, 'BETA'::markdown)",
+            &[beta.into()],
+        )
+        .expect("update failed");
+        write("tt/diff", "alpha\n\nBETA\n\ngamma\n");
+
+        let rows: Vec<(i64, String)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT seq, verb FROM knowledge.history('tt/diff') ORDER BY seq",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| {
+                    (
+                        r.get::<i64>(1).unwrap().unwrap(),
+                        r.get::<String>(2).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(
+            rows,
+            vec![
+                (0, "write".to_string()),
+                (1, "update_block".to_string()),
+                (2, "write".to_string()),
+            ]
+        );
+
+        let revs: Vec<Uuid> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT revision FROM knowledge.history('tt/diff') ORDER BY seq",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| r.get::<Uuid>(1).unwrap().unwrap())
+                .collect()
+        });
+
+        // seq 0 -> 1: identity asserted, so this is a change, not a churn.
+        let changes: Vec<(String, Option<String>, Option<String>)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT change, before, after FROM knowledge.diff('tt/diff', $1, $2)",
+                    None,
+                    &[revs[0].into(), revs[1].into()],
+                )
+                .unwrap()
+                .map(|r| {
+                    (
+                        r.get::<String>(1).unwrap().unwrap(),
+                        r.get::<String>(2).unwrap(),
+                        r.get::<String>(3).unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(
+            changes,
+            vec![(
+                "changed".to_string(),
+                Some("beta".to_string()),
+                Some("BETA".to_string())
+            )],
+            "update_block keeps the id, so the diff reports one changed block"
+        );
+
+        // seq 1 -> 2: one block appended, nothing else touched.
+        let added: Vec<String> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT change FROM knowledge.diff('tt/diff', $1, $2)",
+                    None,
+                    &[revs[1].into(), revs[2].into()],
+                )
+                .unwrap()
+                .map(|r| r.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert_eq!(added, vec!["added".to_string()]);
+    }
+
+    /// RFC-005 D8: verify_history must be able to FAIL. The accepted RFC's
+    /// only reconstruction clause was `read_as_of(head) = read()`, which is a
+    /// tautology — reconstruction at head applies no scripts by definition.
+    #[pg_test]
+    fn verify_history_catches_a_missing_pre_image() {
+        Spi::run("SET pgmind.frame_every = 2").unwrap();
+        for i in 0..6 {
+            write("tt/verify", &format!("body {i}\n"));
+        }
+        assert_eq!(
+            history_violations("tt/verify"),
+            0,
+            "healthy history verifies clean"
+        );
+
+        // Delete one revision's pre-image, exactly as a lost dump registration
+        // or a half-written lane would.
+        Spi::run(
+            "DELETE FROM pgmind.note_revision nr USING pgmind.note n
+              WHERE n.id = nr.note_id AND n.path = 'tt/verify' AND nr.seq = 3",
+        )
+        .unwrap();
+        assert!(
+            history_violations("tt/verify") > 0,
+            "a missing note_revision row must be reported, not silently reconstructed around"
+        );
+        Spi::run("RESET pgmind.frame_every").unwrap();
+    }
+
+    fn history_violations(path: &str) -> i64 {
+        Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.verify_history(
+               (SELECT id FROM pgmind.note WHERE path = $1 AND tombstoned_at IS NULL))",
+            &[path.into()],
+        )
+        .expect("verify_history failed")
+        .unwrap()
+    }
+
     // ---------- tenant isolation (RFC-003 D1 / §5 gate 4) ----------
 
     #[pg_test]
