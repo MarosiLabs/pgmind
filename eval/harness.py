@@ -334,6 +334,10 @@ PGRX_TEST_SUITES = {
         "extraction_dedups_and_covers_all_link_kinds",
         "lane_batching_survives_chunk_boundaries",
         "revisions_carry_dense_seq_and_verb",
+        # RFC-005 D3/D4: what history records, and what it refuses to record.
+        "structural_edits_do_not_write_a_row_per_block",
+        "history_records_the_pre_image_of_both_lanes",
+        "frames_are_written_at_the_configured_cadence",
         "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [

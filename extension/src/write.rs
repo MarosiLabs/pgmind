@@ -7,6 +7,7 @@ use pgrx::{JsonB, Uuid};
 use serde_json::json;
 
 use crate::errors::{pm_error, Pm};
+use crate::history;
 use crate::ids;
 use crate::store::{self, arg, BlockRow};
 
@@ -297,6 +298,16 @@ pub fn next_seq(note: Uuid) -> i64 {
     .unwrap_or(0)
 }
 
+/// The `seq` a revision was assigned, for the history rows that mirror it.
+pub fn seq_of(revision: Uuid) -> i64 {
+    Spi::get_one_with_args(
+        "SELECT seq FROM pgmind.revision WHERE id = $1",
+        &[arg(revision)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure reading seq: {e}"))
+    .unwrap_or(0)
+}
+
 /// Insert the revision row and swap the note head. Returns the revision id.
 pub fn new_revision(
     vault: Uuid,
@@ -343,7 +354,7 @@ pub fn new_revision(
 /// `raw`, block `content`) travel as `text[]`, which has no per-element
 /// ceiling, and every lane flushes in chunks of this many rows — which also
 /// bounds how much of a note one statement holds in backend memory.
-const LANE_CHUNK_ROWS: usize = 2048;
+pub const LANE_CHUNK_ROWS: usize = 2048;
 
 /// The `jsonb_to_recordset` column list shared by the batched block INSERT and
 /// UPDATE, so the two can never disagree about the row shape. `content` is not
@@ -845,16 +856,35 @@ pub fn write_note(path_raw: &str, source: &str) -> Uuid {
         Some(note) => {
             let old = store::blocks_of(note.id);
             let c = carry(&old, &parsed.doc.blocks);
+            // The pre-image is captured BEFORE reconcile mutates the lanes —
+            // afterwards the bytes it records are gone (RFC-005 D4).
+            let new_state = history::NewState {
+                parsed: &parsed,
+                ids: &c.ids,
+            };
+            let pre = history::capture(
+                &old,
+                &old_tiles,
+                &note.preamble,
+                &store::properties_of(note.id),
+                Some(&path),
+                &path,
+                &new_state,
+            );
             // reconcile() owns the note row's preamble/properties now.
             reconcile(vault, note.id, &parsed, &old, &old_tiles, &c);
-            new_revision(
+            let rev = new_revision(
                 vault,
                 note.id,
                 Some(note.head_revision),
                 "api",
                 "write",
                 &write_meta("write", &c),
-            )
+            );
+            let seq = seq_of(rev);
+            history::record(vault, note.id, rev, seq, &pre);
+            history::maybe_frame(vault, note.id, seq, &path, &new_state);
+            rev
         }
         None => {
             let note_id = ids::mint();
@@ -885,6 +915,24 @@ pub fn write_note(path_raw: &str, source: &str) -> Uuid {
                 ],
             )
             .unwrap_or_else(|e| pgrx::error!("pgmind: SPI revision insert: {e}"));
+            // A creation's pre-image is the empty note: every block gets an
+            // `existed = false` effect row, which is what makes blame's
+            // first_revision knowable for a block that was never edited.
+            let new_state = history::NewState {
+                parsed: &parsed,
+                ids: &c.ids,
+            };
+            let pre = history::capture(
+                &[],
+                &[],
+                "",
+                &serde_json::Value::Object(Default::default()),
+                None,
+                &path,
+                &new_state,
+            );
+            history::record(vault, note_id, rev_id, 0, &pre);
+            history::maybe_frame(vault, note_id, 0, &path, &new_state);
             // Repair other notes' edges now that this path exists (RFC-003 D5).
             store::repair_edges_on_creation(vault, &path);
             rev_id

@@ -7,6 +7,7 @@ use pgrx::{heap_tuple::PgHeapTuple, Uuid};
 use serde_json::json;
 
 use crate::errors::{pm_error, Pm};
+use crate::history;
 use crate::store::{self, arg, BlockRow};
 use crate::write::{self, parse_note, CarryInput, CarrySrc, CarryState, ParsedNote};
 use crate::Markdown;
@@ -35,6 +36,10 @@ struct NoteCtx {
     tiles: Vec<String>,
     rows: Vec<BlockRow>,
     parsed: ParsedNote,
+    /// Note-lane pre-image inputs (RFC-005 D4): both are what the history row
+    /// records when a splice moves the preamble boundary or the note is moved.
+    preamble: String,
+    path: String,
 }
 
 impl NoteCtx {
@@ -98,6 +103,8 @@ fn load_ctx_by_block(block_id: Uuid) -> (NoteCtx, usize) {
         tiles,
         rows,
         parsed,
+        preamble: note.preamble.clone(),
+        path: store::path_of(note_id),
     };
     (ctx, idx)
 }
@@ -496,6 +503,22 @@ fn commit_op(
     }
     let carry = write::finish_carry(&input, state);
     let ids = &carry.ids;
+    // Pre-image first: reconcile is about to overwrite the bytes it records
+    // (RFC-005 D4). The five block ops go through the same recorder as
+    // knowledge.write, so history cannot drift between the two write paths.
+    let new_state = history::NewState {
+        parsed: &new_parsed,
+        ids: &carry.ids,
+    };
+    let pre = history::capture(
+        &ctx.rows,
+        &ctx.tiles,
+        &ctx.preamble,
+        &store::properties_of(ctx.note_id),
+        Some(&ctx.path),
+        &ctx.path,
+        &new_state,
+    );
     write::reconcile(
         ctx.vault,
         ctx.note_id,
@@ -545,6 +568,9 @@ fn commit_op(
         other => pgrx::error!("pgmind: unknown op {other}"),
     };
     let revision = write::new_revision(ctx.vault, ctx.note_id, Some(ctx.head), "api", verb, &meta);
+    let seq = write::seq_of(revision);
+    history::record(ctx.vault, ctx.note_id, revision, seq, &pre);
+    history::maybe_frame(ctx.vault, ctx.note_id, seq, &ctx.path, &new_state);
     op_result(revision, block_ids)
 }
 
@@ -670,6 +696,8 @@ mod knowledge {
             tiles,
             rows,
             parsed,
+            preamble: note.preamble.clone(),
+            path: path.to_string(),
         };
 
         let anchor = before.or(after);

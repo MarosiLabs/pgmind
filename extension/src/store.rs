@@ -539,3 +539,21 @@ pub fn update_edge_resolution(edge_id: i64, r: Resolution) {
     )
     .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure updating edge resolution: {e}"));
 }
+
+/// The note row's stored `properties`, for the history lane's pre-image.
+pub fn properties_of(note: Uuid) -> serde_json::Value {
+    Spi::get_one_with_args::<JsonB>(
+        "SELECT properties FROM pgmind.note WHERE id = $1",
+        &[arg(note)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure reading properties: {e}"))
+    .map(|j| j.0)
+    .unwrap_or_else(|| serde_json::Value::Object(Default::default()))
+}
+
+/// The note's current path, for history rows that record it.
+pub fn path_of(note: Uuid) -> String {
+    Spi::get_one_with_args("SELECT path FROM pgmind.note WHERE id = $1", &[arg(note)])
+        .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure reading path: {e}"))
+        .unwrap_or_default()
+}

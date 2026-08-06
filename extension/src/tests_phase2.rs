@@ -727,6 +727,134 @@ mod tests {
         );
     }
 
+    /// RFC-005 D4: a structural insert costs ONE effect row, not one per block
+    /// after it. This is the rule the whole storage model rests on — position
+    /// (ord, spans) and heading_path ride the per-revision vectors, so only
+    /// content-visible change produces a `block_revision` row.
+    ///
+    /// The design this replaced wrote a full history row per shifted block,
+    /// which is 2x current state on patch traffic and ~65x on the structural
+    /// traffic Phase 4's importer generates.
+    #[pg_test]
+    fn structural_edits_do_not_write_a_row_per_block() {
+        let mut md = String::from("# Top\n\n");
+        for i in 0..40 {
+            md.push_str(&format!("para {i}\n\n"));
+        }
+        write("hist/churn", &md);
+        let effects_after_create: i64 = effect_rows("hist/churn");
+        assert_eq!(
+            effects_after_create, 41,
+            "creation mints every block: one existed=false row each"
+        );
+
+        // Insert at the very top: every following block's ord shifts, and the
+        // heading_path of nothing changes. One content-visible change ⇒ 1 row.
+        let first = block_ids("hist/churn")[1].1;
+        Spi::run_with_args(
+            "SELECT knowledge.insert_blocks('hist/churn', 'inserted'::markdown, before => $1)",
+            &[first.into()],
+        )
+        .expect("insert failed");
+        assert_eq!(
+            effect_rows("hist/churn") - effects_after_create,
+            1,
+            "a structural insert writes exactly one effect row (the minted block)"
+        );
+
+        // Rename the heading: heading_path changes for all 40 blocks beneath
+        // it, and that is positional too — only the heading's own content is
+        // content-visible.
+        let heading = block_ids("hist/churn")[0].1;
+        let before = effect_rows("hist/churn");
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, '# Renamed'::markdown)",
+            &[heading.into()],
+        )
+        .expect("update failed");
+        assert_eq!(
+            effect_rows("hist/churn") - before,
+            1,
+            "a heading rename writes one effect row, not one per block in the section"
+        );
+        verify_clean("hist/churn");
+    }
+
+    /// RFC-005 D4: the pre-image is the bytes as they were, and it is captured
+    /// before reconcile overwrites them.
+    #[pg_test]
+    fn history_records_the_pre_image_of_both_lanes() {
+        write("hist/pre", "alpha\n\nbeta\n");
+        let beta = block_ids("hist/pre")[1].1;
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, 'BETA'::markdown)",
+            &[beta.into()],
+        )
+        .expect("update failed");
+
+        let prev: Option<String> = Spi::get_one_with_args(
+            "SELECT prev_content FROM pgmind.block_revision WHERE block_id = $1 AND existed
+              ORDER BY seq DESC LIMIT 1",
+            &[beta.into()],
+        )
+        .unwrap();
+        assert_eq!(
+            prev.as_deref(),
+            Some("beta"),
+            "the effect row holds what the block said BEFORE the edit"
+        );
+
+        // The byte lane's script carries the old tile literally (X1: no history
+        // row defines its bytes by reference to another).
+        let payload: Option<Vec<Option<String>>> = Spi::get_one(
+            "SELECT nr.tile_payload FROM pgmind.note_revision nr
+               JOIN pgmind.note n ON n.id = nr.note_id
+              WHERE n.path = 'hist/pre' ORDER BY nr.seq DESC LIMIT 1",
+        )
+        .unwrap();
+        let payload = payload.expect("no note_revision row");
+        assert!(
+            payload.iter().flatten().any(|t| t.contains("beta")),
+            "tile pre-image must hold the replaced bytes literally, got {payload:?}"
+        );
+    }
+
+    /// RFC-005 D3: frames are written at cadence by the WRITE path. Without a
+    /// cadence writer the only frame would be compaction's, at the floor, where
+    /// reconstruction (which anchors at or above its target) cannot use it.
+    #[pg_test]
+    fn frames_are_written_at_the_configured_cadence() {
+        Spi::run("SET pgmind.frame_every = 3").unwrap();
+        for i in 0..7 {
+            write("hist/frames", &format!("body {i}\n"));
+        }
+        let seqs: Vec<i64> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT f.seq FROM pgmind.note_frame f
+                       JOIN pgmind.note n ON n.id = f.note_id
+                      WHERE n.path = 'hist/frames' ORDER BY f.seq",
+                    None,
+                    &[],
+                )
+                .expect("frame query failed")
+                .map(|row| row.get::<i64>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert_eq!(seqs, vec![0, 3, 6], "a frame every 3 revisions");
+        Spi::run("RESET pgmind.frame_every").unwrap();
+    }
+
+    fn effect_rows(path: &str) -> i64 {
+        Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.block_revision br
+               JOIN pgmind.note n ON n.id = br.note_id WHERE n.path = $1",
+            &[path.into()],
+        )
+        .unwrap()
+        .unwrap()
+    }
+
     // ---------- tenant isolation (RFC-003 D1 / §5 gate 4) ----------
 
     #[pg_test]

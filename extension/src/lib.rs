@@ -11,6 +11,7 @@ use pgrx::{InOutFuncs, StringInfo};
 use serde::{Deserialize, Serialize};
 
 pub mod errors;
+pub mod history;
 pub mod ids;
 pub mod ops;
 pub mod read;
@@ -24,6 +25,12 @@ pub mod write;
 
 /// RFC-002 D9: default 8 MiB per document.
 static MAX_DOCUMENT_BYTES: GucSetting<i32> = GucSetting::<i32>::new(8 * 1024 * 1024);
+
+/// RFC-005 D3: write an absolute `note_frame` every N revisions, so deep
+/// `as_of` is bounded by the cadence rather than by the note's total depth.
+/// The knob trades storage (a frame is a full copy of both lanes) against
+/// deep-read latency; the storage-growth gate measures both ends of it.
+pub static FRAME_EVERY: GucSetting<i32> = GucSetting::<i32>::new(50);
 
 /// RFC-003 D1: the current vault. Userset by design — vault *scoping*; the
 /// tenant *boundary* story is the documented RLS patterns, not this GUC.
@@ -39,6 +46,16 @@ pub extern "C-unwind" fn _PG_init() {
         &MAX_DOCUMENT_BYTES,
         1024,
         i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+    GucRegistry::define_int_guc(
+        c"pgmind.frame_every",
+        c"Revisions between absolute history frames (RFC-005 D3).",
+        c"Lower bounds deep as_of latency; higher stores less history. 0 or 1 frames every revision.",
+        &FRAME_EVERY,
+        1,
+        1_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );
