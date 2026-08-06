@@ -103,9 +103,7 @@ def suite_round_trip():
     """RFC-002 gate 2: byte-identical tiling on repo docs + 100k fuzz documents."""
     corpus = run_eval(
         "roundtrip",
-        str(REPO / "docs"),
-        str(REPO / "PGMIND.md"),
-        str(REPO / "AUDIT.md"),
+        str(REPO / "docs"),  # recursive: the handbook and the archive live here
         str(REPO / "README.md"),
         str(REPO / "CONTRIBUTING.md"),
     )
@@ -293,8 +291,8 @@ _REPO_DOCS: "list[tuple[str, str]] | None" = None
 def repo_docs() -> list[tuple[str, str]]:
     global _REPO_DOCS
     if _REPO_DOCS is None:
-        files = [REPO / "PGMIND.md", REPO / "AUDIT.md", REPO / "README.md", REPO / "CONTRIBUTING.md"]
-        files += sorted((REPO / "docs").rglob("*.md"))
+        files = [REPO / "README.md", REPO / "CONTRIBUTING.md"]
+        files += sorted((REPO / "docs").rglob("*.md"))  # handbook + archive + RFCs
         docs = []
         for i, f in enumerate(files):
             text = f.read_text()

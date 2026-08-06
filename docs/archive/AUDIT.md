@@ -1,9 +1,9 @@
 # Audit of the pgmind Product Handbook (v0.1)
 
-**Audited document:** [`docs/archive/PGMIND-v0.1.md`](docs/archive/PGMIND-v0.1.md) ("Knowledge Extension for PostgreSQL — Project Handbook, Version 0.1")
+**Audited document:** [`PGMIND-v0.1.md`](PGMIND-v0.1.md) ("Knowledge Extension for PostgreSQL — Project Handbook, Version 0.1")
 **Audit date:** 2026-08-04
 **Method:** 8-agent deep-research workflow — five sourced research streams (PostgreSQL AI-extension landscape; RAG/knowledge-framework competition; extension-engineering feasibility; block-identity & versioning prior art; market validation) followed by three independent adversarial critique passes (architecture, product, adoption). Every factual claim below carries at least one source; the full research corpus with all URLs is preserved in the session research output.
-**Companion document:** [`PGMIND.md`](PGMIND.md) — the revised handbook that resolves or explicitly tracks every Critical and Major finding here. (v0.2 was the direct post-audit revision; v0.3 sharpened the vision per author direction — agent-brain-first, strictly AI-free core — which *strengthens* every resolution below, since the audit's central recommendation was exactly "keep AI out of the core.")
+**Companion document:** [`PGMIND.md`](../PGMIND.md) — the revised handbook that resolves or explicitly tracks every Critical and Major finding here. (v0.2 was the direct post-audit revision; v0.3 sharpened the vision per author direction — agent-brain-first, strictly AI-free core — which *strengthens* every resolution below, since the audit's central recommendation was exactly "keep AI out of the core.")
 
 ---
 

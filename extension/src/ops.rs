@@ -774,13 +774,48 @@ mod knowledge {
         // The anchor is resolved AFTER the lock, so a concurrent append that
         // already extended the section is visible and this one lands after it.
         let rows = store::blocks_of(note.id);
-        let last = rows
+
+        // The section's LAST row is frequently not a legal anchor. A bulleted
+        // section ends with the paragraph nested INSIDE its final list item,
+        // and `insert_blocks` anchors only on a list item or a top-level block
+        // — so taking the last row outright failed every append to a section
+        // ending in a list (PM invalid_anchor), which is the commonest shape a
+        // vault has. Walk back to the last row that can actually carry the
+        // insert, and require `parent.is_none()` on the list-item branch so a
+        // nested item never captures an append meant for the outer level.
+        //
+        // "Top-level" is a property of the parse, not of the stored row (a
+        // paragraph inside a top-level blockquote has no parent either, and is
+        // still not anchorable), hence the reload here.
+        let tiles = store::tiles_of(note.id);
+        let source = store::source_of(&note, &tiles);
+        let parsed = parse_note(&source);
+        if parsed.doc.blocks.len() != rows.len() {
+            pgrx::error!("pgmind: stored blocks disagree with parse — run pgmind.verify_note");
+        }
+        let in_section = |r: &store::BlockRow| r.heading_path == heading_path;
+        let anchor = rows
             .iter()
-            .filter(|r| r.heading_path == heading_path)
-            .map(|r| r.id)
-            .next_back();
-        match last {
+            .enumerate()
+            .filter(|(_, r)| in_section(r))
+            .rev()
+            .find(|(i, _)| {
+                let b = &parsed.doc.blocks[*i];
+                b.parent.is_none()
+                    && (b.kind == pgmind_core::BlockKind::ListItem
+                        || is_top_level_child(&parsed, *i))
+            })
+            .map(|(_, r)| r.id);
+        match anchor {
             Some(anchor) => insert_blocks(path, fragment, None, Some(anchor), Some(locked_head)),
+            // The section exists but ends in something nothing can anchor to
+            // (a bare blockquote, say). Saying "no such section" here would
+            // send the caller looking for a heading that is right there.
+            None if rows.iter().any(in_section) => pm_error(
+                Pm::InvalidAnchor,
+                "section has no block an append can anchor to",
+                &format!("{heading_path:?} in {path:?}"),
+            ),
             None => pm_error(
                 Pm::SectionNotFound,
                 "no section with that heading path",

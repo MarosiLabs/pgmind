@@ -716,10 +716,19 @@ pub mod knowledge {
 
     /// Who last changed each block, and when it first appeared.
     ///
+    /// A block_revision row exists at exactly the revisions where the block
+    /// changed, so the newest one IS the last change — including the mint,
+    /// which is a change like any other. Filtering these to `existed` (the
+    /// pre-image flag: false ⇒ minted here) instead reported NULL author for
+    /// every block nobody had edited since writing it, which is most of a
+    /// vault and made the whole view useless.
+    ///
     /// `first_revision` is NULL when the block's `existed = false` row was
     /// compacted away — the oldest and most-cited blocks are exactly the ones
     /// retention blinds, so the API reports the floor rather than returning it
-    /// as though it were an origin (RFC-005 D8).
+    /// as though it were an origin (RFC-005 D8). For the same reason the
+    /// attribution columns go NULL once retention has taken every row for a
+    /// block: unknown is reported as unknown, never as the wrong author.
     #[allow(clippy::type_complexity)]
     #[pg_extern]
     fn blame(
@@ -754,7 +763,7 @@ pub mod knowledge {
                             SELECT r.id, r.author, r.source, br.confidence, r.created_at
                               FROM pgmind.block_revision br
                               JOIN pgmind.revision r ON r.note_id = br.note_id AND r.seq = br.seq
-                             WHERE br.block_id = b.id AND br.existed
+                             WHERE br.block_id = b.id
                              ORDER BY br.seq DESC LIMIT 1) lc ON true
                       WHERE b.note_id = $1 ORDER BY b.ord",
                     None,

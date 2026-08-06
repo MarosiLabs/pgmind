@@ -4,7 +4,7 @@
 Version: 0.3
 Status: working document — decisions marked **[DECIDED]** are revisitable defaults with rationale; items marked **[OPEN]** need resolution in the named RFC.
 
-> v0.1 ([archived](docs/archive/PGMIND-v0.1.md)) was audited against 2025-26 evidence — see [AUDIT.md](AUDIT.md). v0.2 resolved the audit findings. **v0.3 sharpens the vision per the author's direction: pgmind is the knowledge base and memory substrate — the brain — for AI agents in server backends, replacing markdown-files-on-the-filesystem. The core is strictly AI-free.** This direction *strengthens* every audit resolution: the audit's central finding was that deterministic cores survive and in-database AI dies.
+> v0.1 ([archived](archive/PGMIND-v0.1.md)) was audited against 2025-26 evidence — see [AUDIT.md](archive/AUDIT.md). v0.2 resolved the audit findings. **v0.3 sharpens the vision per the author's direction: pgmind is the knowledge base and memory substrate — the brain — for AI agents in server backends, replacing markdown-files-on-the-filesystem. The core is strictly AI-free.** This direction *strengthens* every audit resolution: the audit's central finding was that deterministic cores survive and in-database AI dies.
 
 ---
 
@@ -27,7 +27,7 @@ Meanwhile the team almost certainly already runs PostgreSQL. **pgmind teaches th
 
 **No AI is in the middle. Ever.** pgmind never calls a model, never embeds, never summarizes. It is a deterministic knowledge substrate that AI *consumes*. Vectorization for RAG stays where it already lives — pgvector, populated by the user however they like — as an **optional lane** pgmind's retrieval can use when present, never a dependency and never the point.
 
-This is not just the author's taste; it is the strongest finding of the audit: every project that put AI inside the Postgres extension died or retreated (pgrag archived, PostgresML/Korvus bust, pgai forced out of the extension — [AUDIT.md §4](AUDIT.md)). Deterministic primitives are what survive.
+This is not just the author's taste; it is the strongest finding of the audit: every project that put AI inside the Postgres extension died or retreated (pgrag archived, PostgresML/Korvus bust, pgai forced out of the extension — [AUDIT.md §4](archive/AUDIT.md)). Deterministic primitives are what survive.
 
 ## The one-line goal
 
@@ -276,7 +276,7 @@ This project is currently exploration/learning; this section keeps reality in vi
 | **Rebinding quality plateaus** (heuristic identity matching too lossy under external edits) | Experimental track with public corpus from Phase 3; the write API remains the deterministic path; sync bridge minimizes full-document replaces; optional serialized `^id` mode as escape hatch |
 | **"Why not just files + SQLite/git?"** (the low end fights back) | Be honest in positioning: single-writer local use should stay on files; pgmind starts winning at *concurrent agents, server backends, multi-tenancy* — lead with those |
 | **Row-count economics of per-block revisions** | Capacity model as a Phase 2 deliverable (RFC-003), revalidated under Phase 3 revision load; partitioning + keyframes + excision from the start |
-| **Precedent mortality pattern** (pgrag/Korvus/pgai) | Law 1 removes the fault line entirely; the "why we survive" argument ([AUDIT.md §4](AUDIT.md)) reviewed at every phase gate |
+| **Precedent mortality pattern** (pgrag/Korvus/pgai) | Law 1 removes the fault line entirely; the "why we survive" argument ([AUDIT.md §4](archive/AUDIT.md)) reviewed at every phase gate |
 | **Scope gravity toward AI features** | Laws 1-2; Future Work quarantine; RFC titles must declare law violations |
 | **pgrx pre-1.0 churn** | Pin versions; budget upgrade time per release |
 | **Naming/trademark (MindsDB adjacency)** | Decide before first public release; register names early |
@@ -287,7 +287,7 @@ This project is currently exploration/learning; this section keeps reality in vi
 
 # 12. Process (right-sized)
 
-**Documents:** this handbook (the constitution), the [product plan](docs/PRODUCT-PLAN.md) (the operating blueprint: system design detail + per-phase delivery plan), [AUDIT.md](AUDIT.md) (the evidence base), [CONTRIBUTING.md](CONTRIBUTING.md) (roles & governance), and RFCs written *per phase* before implementation ([index](docs/rfcs/README.md), [template](docs/rfcs/TEMPLATE.md)). ([PLAN.md](PLAN.md) is the working plan from the audit session, kept for provenance.) Precedence: handbook laws > accepted RFCs > product plan > code. (v0.1's 15-document list is retired; its two contradictory RFC lists are replaced by this single canonical index.)
+**Documents:** this handbook (the constitution), the [product plan](PRODUCT-PLAN.md) (the operating blueprint: system design detail + per-phase delivery plan), [AUDIT.md](archive/AUDIT.md) (the evidence base), [CONTRIBUTING.md](../CONTRIBUTING.md) (roles & governance), and RFCs written *per phase* before implementation ([index](rfcs/README.md), [template](rfcs/TEMPLATE.md)). ([PLAN.md](archive/PLAN.md) is the working plan from the audit session, kept for provenance.) Precedence: handbook laws > accepted RFCs > product plan > code. (v0.1's 15-document list is retired; its two contradictory RFC lists are replaced by this single canonical index.)
 
 **RFC lifecycle:** *living during its phase, frozen at phase exit.* Amendments after freeze get a new RFC.
 
@@ -317,7 +317,7 @@ eval/          benchmark corpora, harnesses, published results
 tests/         extension + integration tests
 ```
 
-**Governance:** one human owner (currently: the project author) accepts RFCs and phase exits — see [CONTRIBUTING.md](CONTRIBUTING.md).
+**Governance:** one human owner (currently: the project author) accepts RFCs and phase exits — see [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ---
 
