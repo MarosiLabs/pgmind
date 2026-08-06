@@ -99,3 +99,5 @@ jobs:
           path: |
             eval/results/latest.json
             eval/results/capacity-model.json
+            eval/published/capacity-model-v2.json
+            eval/published/excision-v1.json
