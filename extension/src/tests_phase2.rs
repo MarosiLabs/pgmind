@@ -1290,6 +1290,94 @@ mod tests {
         );
     }
 
+    /// RFC-005 D5.11: block-granular CAS. The point of the whole parameter is
+    /// the SECOND half of this test — that the same interleaving with the
+    /// note-level guard fails. Without that comparison "block CAS avoids false
+    /// conflicts" is a claim in an RFC rather than a measured difference.
+    #[pg_test]
+    fn disjoint_patches_both_land_with_block_cas() {
+        write("cas/disjoint", "alpha one\n\nbeta two\n");
+        let blocks = block_ids("cas/disjoint");
+        let (a, b) = (blocks[0].1, blocks[1].1);
+        let hash_of = |id: Uuid| -> Vec<u8> {
+            Spi::get_one_with_args(
+                "SELECT content_hash FROM pgmind.block WHERE id = $1",
+                &[crate::store::arg(id)],
+            )
+            .unwrap()
+            .unwrap()
+        };
+        let (ha, hb) = (hash_of(a), hash_of(b));
+
+        // Both writers read the same state, then patch different blocks,
+        // each asserting only its own block. Neither is rejected.
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, 'alpha edited'::markdown, NULL, $2)",
+            &[crate::store::arg(a), (&ha[..]).into()],
+        )
+        .expect("first disjoint patch");
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, 'beta edited'::markdown, NULL, $2)",
+            &[crate::store::arg(b), (&hb[..]).into()],
+        )
+        .expect("second disjoint patch must not conflict with the first");
+        let after = block_ids("cas/disjoint");
+        assert_eq!(after[0].0, "alpha edited");
+        assert_eq!(after[1].0, "beta edited");
+
+        // The same interleaving with the NOTE-level guard: the second writer
+        // is rejected although nothing it touched changed. This is the false
+        // conflict D5.11 exists to remove, pinned so the difference is a fact.
+        write("cas/head", "alpha one\n\nbeta two\n");
+        let head: Uuid =
+            Spi::get_one("SELECT head_revision FROM pgmind.note WHERE path = 'cas/head'")
+                .unwrap()
+                .unwrap();
+        let hb2 = block_ids("cas/head")[1].1;
+        let ha2 = block_ids("cas/head")[0].1;
+        Spi::run_with_args(
+            "SELECT knowledge.update_block($1, 'alpha edited'::markdown, $2)",
+            &[crate::store::arg(ha2), crate::store::arg(head)],
+        )
+        .expect("first writer with the note guard");
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.update_block('{hb2}'::uuid, 'beta edited'::markdown, '{head}'::uuid)"
+            )),
+            "PM009",
+            "note-level CAS rejects a disjoint edit — the cost block CAS removes"
+        );
+    }
+
+    #[pg_test]
+    fn stale_block_hash_is_pm016_and_head_is_checked_first() {
+        write("cas/stale", "alpha one\n\nbeta two\n");
+        let id = block_ids("cas/stale")[0].1;
+        let stale_hash: Vec<u8> = Spi::get_one("SELECT decode(repeat('00', 32), 'hex')")
+            .unwrap()
+            .unwrap();
+        let hex: String = stale_hash.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.update_block('{id}'::uuid, 'x'::markdown, NULL, \
+                 decode('{hex}', 'hex'))"
+            )),
+            "PM016"
+        );
+        // Both guards stale: the coarser one answers, because "someone changed
+        // the note" is what the caller has to act on first.
+        let stale_head = write("cas/stale2", "alpha one\n\nbeta two\n");
+        write("cas/stale2", "alpha one\n\nbeta three\n");
+        let id2 = block_ids("cas/stale2")[0].1;
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.update_block('{id2}'::uuid, 'x'::markdown, '{stale_head}'::uuid, \
+                 decode('{hex}', 'hex'))"
+            )),
+            "PM009"
+        );
+    }
+
     /// Two appends to the same section both survive, in order — the property
     /// that makes append an operation rather than a read-modify-write.
     #[pg_test]

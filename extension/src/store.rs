@@ -625,6 +625,39 @@ pub fn cas_check(expected: Option<Uuid>, observed: Uuid, path: &str) {
     }
 }
 
+/// RFC-005 D5.11: compare-and-swap at block granularity, against the hash
+/// observed under the note row lock.
+///
+/// This is the guard that lets two agents edit different paragraphs of one
+/// note without either being rejected. They still serialize on the note row —
+/// block CAS removes the *failure*, not the serialization. With only
+/// `expected_head`, the second writer is told its head moved even though
+/// nothing it touched changed, and its only escape is asserting nothing at all.
+pub fn block_cas_check(expected: Option<&[u8]>, observed: &[u8], block: Uuid) {
+    if let Some(e) = expected {
+        if e != observed {
+            pm_error(
+                Pm::StaleBlock,
+                "expected_hash is not the block's current content hash",
+                &format!(
+                    "block {block}: expected {}, current is {}",
+                    hex(e),
+                    hex(observed)
+                ),
+            );
+        }
+    }
+}
+
+fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
 /// Path occupancy is a different lock domain from the note row: the row lock
 /// protects a ROW, and a create or a rename contends for a NAME. Without this
 /// a `move_note` into a path another session is creating gets a bare 23505 out

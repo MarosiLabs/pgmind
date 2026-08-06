@@ -377,6 +377,9 @@ PGRX_TEST_SUITES = {
         "cas_precedes_the_idempotence_short_circuit",
         "cas_on_a_missing_note_raises_rather_than_creating",
         "block_ops_honour_expected_head",
+        # RFC-005 D5.11 block-granular CAS, and the false conflict it removes.
+        "disjoint_patches_both_land_with_block_cas",
+        "stale_block_hash_is_pm016_and_head_is_checked_first",
         "append_to_section_keeps_both_appends",
         # RFC-005 D6: tombstones, reconstruction-based undelete, rename repair.
         "delete_then_undelete_restores_the_note",
@@ -929,8 +932,42 @@ def suite_concurrency():
              <> (SELECT max(seq) + 1 FROM pgmind.revision r WHERE r.note_id = n.id);""",
         tuples_only=True).strip())
 
+    # RFC-005 D5.11: block CAS under real concurrency. Eight writers patch
+    # eight DIFFERENT blocks of one note at once, each asserting only its own
+    # block's hash. All eight must land -- they serialize on the note row, but
+    # none is rejected. The pg_test pins the same property sequentially; this
+    # is the version where the note row lock is actually contended.
+    c.psql("pgmind_conc",
+           "SELECT knowledge.write('conc/patch', $md$%s$md$::markdown);"
+           % "\n\n".join(f"para {i} original text" for i in range(8)))
+    targets = json.loads(c.psql("pgmind_conc", """
+        SELECT coalesce(json_agg(json_build_array(block_id::text, encode(content_hash,'hex'))
+                                 ORDER BY ord)::text, '[]')
+          FROM knowledge.blocks('conc/patch');""", tuples_only=True).strip())
+    procs = [
+        subprocess.Popen(
+            [str(c.bindir / "psql"), "-X", "-q", "-v", "ON_ERROR_STOP=1", "-h", str(c.sock),
+             "-U", "pgmind", "-d", "pgmind_conc", "-c",
+             f"SELECT knowledge.update_block('{bid}'::uuid, 'para {i} patched'::markdown, "
+             f"NULL, decode('{h}', 'hex'));"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for i, (bid, h) in enumerate(targets)
+    ]
+    patch_failures = [p.communicate()[1] for p in procs if p.wait() != 0]
+    patched_body = c.psql("pgmind_conc", "SELECT knowledge.read('conc/patch')::text;",
+                          tuples_only=True)
+    patched = sum(1 for i in range(8) if f"para {i} patched" in patched_body)
+    # And the guard still bites when the block itself moved.
+    one = targets[0][0]
+    stale_block = sqlstate(c, "pgmind_conc",
+                           f"SELECT knowledge.update_block('{one}'::uuid, 'x'::markdown, "
+                           f"NULL, decode('{targets[0][1]}', 'hex'))")
+
     checks = {
         "stale_head_raises_pm009": stale == "PM009",
+        "disjoint_patches_all_landed": patched == 8,
+        "no_patcher_errored": not patch_failures,
+        "stale_block_hash_raises_pm016": stale_block == "PM016",
         "byte_identical_stale_write_still_raises": identical == "PM009",
         "cas_on_missing_note_raises_pm009": absent == "PM009",
         "move_onto_occupied_path_raises_pm015": taken == "PM015",
@@ -941,12 +978,13 @@ def suite_concurrency():
     }
     ok = all(checks.values())
     out = {"status": "ok" if ok else "fail", "checks": checks,
-           "appends_survived": survived, "observed": {"stale": stale, "identical": identical,
-                                                      "absent": absent, "taken": taken}}
+           "appends_survived": survived, "disjoint_patches_landed": patched,
+           "observed": {"stale": stale, "identical": identical, "absent": absent,
+                        "taken": taken, "stale_block": stale_block}}
     if not ok:
         out["reason"] = "; ".join(k for k, v in checks.items() if not v)
-        if failures:
-            out["writer_errors"] = failures[:3]
+        if failures or patch_failures:
+            out["writer_errors"] = (failures + patch_failures)[:3]
     return out
 
 

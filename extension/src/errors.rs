@@ -46,6 +46,8 @@ pub enum Pm {
     NoteTombstoned,
     /// PM015 pgmind_path_taken
     PathTaken,
+    /// PM016 pgmind_stale_block
+    StaleBlock,
 }
 
 impl Pm {
@@ -66,6 +68,7 @@ impl Pm {
             Pm::ExcisionIncomplete => "PM013",
             Pm::NoteTombstoned => "PM014",
             Pm::PathTaken => "PM015",
+            Pm::StaleBlock => "PM016",
         }
     }
 
@@ -86,6 +89,7 @@ impl Pm {
             Pm::ExcisionIncomplete => "pgmind_excision_incomplete",
             Pm::NoteTombstoned => "pgmind_note_tombstoned",
             Pm::PathTaken => "pgmind_path_taken",
+            Pm::StaleBlock => "pgmind_stale_block",
         }
     }
 }

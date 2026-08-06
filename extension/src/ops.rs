@@ -826,14 +826,30 @@ mod knowledge {
 
     /// RFC-004 A2: ID kept by caller assertion; fragment arity exactly 1;
     /// wholesale subtree replacement with subtree carry.
+    ///
+    /// RFC-005 D5.11 adds `expected_hash`: compare-and-swap on the block rather
+    /// than on the note, so two agents patching different paragraphs of one
+    /// note both succeed instead of the second being told the head moved. This
+    /// is the plan's `patch_block`; a second function differing only in which
+    /// guard it accepted would be two ways to do one thing.
     #[pg_extern(requires = ["pgmind_storage"])]
     fn update_block(
         block_id: Uuid,
         fragment: Markdown,
         expected_head: default!(Option<Uuid>, "NULL"),
+        expected_hash: default!(Option<Vec<u8>>, "NULL"),
     ) -> pgrx::composite_type!('static, "pgmind.op_result") {
         let (ctx, idx) = load_ctx_by_block(block_id);
+        // Coarser guard first: "someone changed the note" is the more
+        // informative failure when the caller asked for both.
         store::cas_check(expected_head, ctx.head, &ctx.path);
+        // Both the hash and the head come from reads taken under the note row
+        // lock (D5.2a) — a hash read before the lock is already stale.
+        store::block_cas_check(
+            expected_hash.as_deref(),
+            &ctx.rows[idx].content_hash,
+            block_id,
+        );
         let (frag, roots) = parse_fragment(&fragment.0);
         if roots.len() != 1 {
             pm_error(
