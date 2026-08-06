@@ -101,3 +101,5 @@ jobs:
             eval/results/capacity-model.json
             eval/published/capacity-model-v2.json
             eval/published/excision-v1.json
+            eval/published/rebinding-baseline-v1.json
+            eval/published/rebinding-tuning-v1.json

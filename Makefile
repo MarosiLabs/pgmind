@@ -10,7 +10,7 @@ export SDKROOT ?= $(shell xcrun --show-sdk-path)
 export PKG_CONFIG_PATH := /opt/homebrew/opt/icu4c/lib/pkgconfig:$(PKG_CONFIG_PATH)
 endif
 
-.PHONY: build test lint fmt eval setup clean
+.PHONY: build test lint fmt eval reindex-corpus setup clean
 
 build:
 	cd extension && cargo build --no-default-features --features pg$(PG)
@@ -32,6 +32,11 @@ fmt:
 
 eval:
 	python3 eval/harness.py
+
+# Stamp each adversarial-edit case with the blocks the parser actually produced.
+# Run after editing any case; the gate fails on a stale index (eval/corpora/pgmind/rebinding/).
+reindex-corpus:
+	python3 eval/rebinding.py
 
 # pgrx-managed Postgres (compiled into ~/.pgrx): self-contained and always writable.
 # System installs are traps on macOS: libpq's pg_config is client-only, and writing

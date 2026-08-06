@@ -1,0 +1,1147 @@
+{
+  "generated_at": "2026-08-06T04:22:20Z",
+  "status": "study \u2014 not a gate, not normative until RFC-004 Part B is accepted",
+  "simulates": "RFC-004 Part B stage 1 (bigram Dice, same-kind, order-monotonic) and stage 2 (containment split/merge) over the residual left by A3 passes 1-2",
+  "baseline_no_part_b": {
+    "recall": 0.77,
+    "precision": 0.9872,
+    "recall_inferred": 0.0,
+    "inferred_bindings": 22
+  },
+  "frontier": [
+    {
+      "tau": 0.5,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 2,
+      "fn": 17,
+      "misbound": 1,
+      "recall": 0.83,
+      "precision": 0.9765,
+      "recall_inferred": 0.2727
+    }
+  ],
+  "candidate_points": [
+    {
+      "tau": 0.5,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "misbound_detail": [
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            2,
+            1
+          ]
+        },
+        {
+          "case": "split/split-three-fragments",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            2,
+            4
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            3,
+            5
+          ]
+        }
+      ],
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "misbound_detail": [
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            2,
+            1
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            2,
+            4
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            3,
+            5
+          ]
+        }
+      ],
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "misbound_detail": [
+        {
+          "case": "move-edit/swap-and-edit",
+          "binding": [
+            0,
+            0
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            1,
+            2
+          ]
+        }
+      ],
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    }
+  ],
+  "stage2_only": [
+    {
+      "tau": 1.01,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 82,
+      "fp": 4,
+      "fn": 18,
+      "misbound": 3,
+      "recall": 0.82,
+      "precision": 0.9535,
+      "recall_inferred": 0.2273
+    },
+    {
+      "tau": 1.01,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 82,
+      "fp": 4,
+      "fn": 18,
+      "misbound": 3,
+      "recall": 0.82,
+      "precision": 0.9535,
+      "recall_inferred": 0.2273
+    },
+    {
+      "tau": 1.01,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 82,
+      "fp": 4,
+      "fn": 18,
+      "misbound": 3,
+      "recall": 0.82,
+      "precision": 0.9535,
+      "recall_inferred": 0.2273
+    },
+    {
+      "tau": 1.01,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 82,
+      "fp": 4,
+      "fn": 18,
+      "misbound": 3,
+      "recall": 0.82,
+      "precision": 0.9535,
+      "recall_inferred": 0.2273
+    },
+    {
+      "tau": 1.01,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 82,
+      "fp": 4,
+      "fn": 18,
+      "misbound": 3,
+      "recall": 0.82,
+      "precision": 0.9535,
+      "recall_inferred": 0.2273
+    },
+    {
+      "tau": 1.01,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 82,
+      "fp": 4,
+      "fn": 18,
+      "misbound": 3,
+      "recall": 0.82,
+      "precision": 0.9535,
+      "recall_inferred": 0.2273
+    },
+    {
+      "tau": 1.01,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 82,
+      "fp": 3,
+      "fn": 18,
+      "misbound": 2,
+      "recall": 0.82,
+      "precision": 0.9647,
+      "recall_inferred": 0.2273
+    }
+  ],
+  "stage_order": [
+    {
+      "tau": 0.5,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "misbound_detail": [
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            2,
+            1
+          ]
+        },
+        {
+          "case": "split/split-three-fragments",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            2,
+            4
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            3,
+            5
+          ]
+        }
+      ],
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "misbound_detail": [
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            2,
+            1
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            2,
+            4
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            3,
+            5
+          ]
+        }
+      ],
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.6,
+      "order": "2-1",
+      "tp": 90,
+      "fp": 7,
+      "fn": 10,
+      "misbound": 6,
+      "misbound_detail": [
+        {
+          "case": "move-edit/swap-and-edit",
+          "binding": [
+            0,
+            0
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            2,
+            1
+          ]
+        },
+        {
+          "case": "split/split-decoy-lead-in",
+          "binding": [
+            0,
+            0
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            2,
+            4
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            3,
+            5
+          ]
+        }
+      ],
+      "recall": 0.9,
+      "precision": 0.9278,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.6,
+      "order": "2-1",
+      "tp": 87,
+      "fp": 7,
+      "fn": 13,
+      "misbound": 6,
+      "misbound_detail": [
+        {
+          "case": "move-edit/swap-and-edit",
+          "binding": [
+            0,
+            0
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            1,
+            2
+          ]
+        },
+        {
+          "case": "near-duplicate/dup-edit-first-of-two",
+          "binding": [
+            2,
+            1
+          ]
+        },
+        {
+          "case": "split/split-decoy-lead-in",
+          "binding": [
+            0,
+            0
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            2,
+            4
+          ]
+        },
+        {
+          "case": "split/split-list-item",
+          "binding": [
+            3,
+            5
+          ]
+        }
+      ],
+      "recall": 0.87,
+      "precision": 0.9255,
+      "recall_inferred": 0.4545
+    }
+  ],
+  "grid": [
+    {
+      "tau": 0.2,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.2,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.2,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.2,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.2,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.2,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.2,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.3,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.3,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.3,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.3,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.3,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.3,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.3,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.4,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.4,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.4,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.4,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.4,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.4,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.4,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.5,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 92,
+      "fp": 5,
+      "fn": 8,
+      "misbound": 5,
+      "recall": 0.92,
+      "precision": 0.9485,
+      "recall_inferred": 0.6818
+    },
+    {
+      "tau": 0.6,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.6,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.6,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.6,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.6,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.6,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.6,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.7,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.7,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.7,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.7,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.7,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.7,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.7,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 91,
+      "fp": 5,
+      "fn": 9,
+      "misbound": 5,
+      "recall": 0.91,
+      "precision": 0.9479,
+      "recall_inferred": 0.6364
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.8,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 90,
+      "fp": 4,
+      "fn": 10,
+      "misbound": 4,
+      "recall": 0.9,
+      "precision": 0.9574,
+      "recall_inferred": 0.5909
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.3,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.4,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.5,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.6,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.7,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.8,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 3,
+      "fn": 17,
+      "misbound": 2,
+      "recall": 0.83,
+      "precision": 0.9651,
+      "recall_inferred": 0.2727
+    },
+    {
+      "tau": 0.9,
+      "tau_split": 0.9,
+      "order": "1-2",
+      "tp": 83,
+      "fp": 2,
+      "fn": 17,
+      "misbound": 1,
+      "recall": 0.83,
+      "precision": 0.9765,
+      "recall_inferred": 0.2727
+    }
+  ]
+}
