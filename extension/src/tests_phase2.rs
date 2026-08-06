@@ -1077,6 +1077,98 @@ mod tests {
         .unwrap()
     }
 
+    // ---------- concurrency contract (RFC-005 D5) ----------
+
+    /// CAS is checked BEFORE the byte-identical short-circuit. The short-circuit
+    /// answers "did anything change"; CAS answers "did you see what you were
+    /// changing" — reordering them lets a stale writer's no-op silently succeed.
+    #[pg_test]
+    fn cas_precedes_the_idempotence_short_circuit() {
+        let head = write("cas/note", "alpha\n");
+        write("cas/note", "beta\n");
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.write('cas/note', 'beta'::markdown, '{head}'::uuid)"
+            )),
+            "PM009",
+            "byte-identical input with a stale head must still raise"
+        );
+        let current: Uuid =
+            Spi::get_one("SELECT head_revision FROM pgmind.note WHERE path = 'cas/note'")
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.write('cas/note', 'gamma'::markdown, '{current}'::uuid)"
+            )),
+            "00000",
+            "the current head is accepted"
+        );
+    }
+
+    /// D5.6: a caller that asserted a head for a path with no live note is not
+    /// creating — it is editing something that is gone, and a silent create
+    /// would make its CAS unenforceable exactly when it matters.
+    #[pg_test]
+    fn cas_on_a_missing_note_raises_rather_than_creating() {
+        let head = write("cas/other", "x\n");
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.write('cas/absent', 'y'::markdown, '{head}'::uuid)"
+            )),
+            "PM009"
+        );
+        let exists: i64 =
+            Spi::get_one("SELECT count(*) FROM pgmind.note WHERE path = 'cas/absent'")
+                .unwrap()
+                .unwrap();
+        assert_eq!(exists, 0, "no note was created");
+    }
+
+    /// CAS reaches the block ops too, with the same code and the same meaning.
+    #[pg_test]
+    fn block_ops_honour_expected_head() {
+        let stale = write("cas/ops", "alpha\n\nbeta\n");
+        write("cas/ops", "alpha\n\ngamma\n");
+        let id = block_ids("cas/ops")[0].1;
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.update_block('{id}'::uuid, 'ALPHA'::markdown, '{stale}'::uuid)"
+            )),
+            "PM009"
+        );
+    }
+
+    /// Two appends to the same section both survive, in order — the property
+    /// that makes append an operation rather than a read-modify-write.
+    #[pg_test]
+    fn append_to_section_keeps_both_appends() {
+        write("cas/log", "# Log\n\nfirst\n");
+        for line in ["second", "third"] {
+            Spi::run_with_args(
+                "SELECT knowledge.append_to_section('cas/log', ARRAY['Log'], $1::markdown)",
+                &[line.into()],
+            )
+            .expect("append failed");
+        }
+        let body = read("cas/log");
+        assert!(
+            body.contains("first") && body.contains("second") && body.contains("third"),
+            "every append survives: {body:?}"
+        );
+        assert!(
+            body.find("second").unwrap() < body.find("third").unwrap(),
+            "appends land in order"
+        );
+        assert_eq!(
+            sqlstate_of(
+                "SELECT knowledge.append_to_section('cas/log', ARRAY['Nope'], 'x'::markdown)"
+            ),
+            "PM007"
+        );
+        verify_clean("cas/log");
+    }
+
     // ---------- tenant isolation (RFC-003 D1 / §5 gate 4) ----------
 
     #[pg_test]

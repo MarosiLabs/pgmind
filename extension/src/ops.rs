@@ -81,6 +81,10 @@ fn load_ctx_by_block(block_id: Uuid) -> (NoteCtx, usize) {
             &format!("id {block_id}"),
         );
     }
+    // RFC-005 D5.2: take the row lock FIRST, then read everything the op
+    // depends on from under it. Reading the pre-image before the lock lets an
+    // op compute it from a state its own lock never covered.
+    let (locked_path, locked_head) = store::lock_note_row(note_id);
     let note = store::note_by_id(note_id)
         .unwrap_or_else(|| pgrx::error!("pgmind: note row vanished mid-operation"));
     let tiles = store::tiles_of(note_id);
@@ -99,12 +103,12 @@ fn load_ctx_by_block(block_id: Uuid) -> (NoteCtx, usize) {
     let ctx = NoteCtx {
         vault,
         note_id,
-        head: note.head_revision,
+        head: locked_head,
         tiles,
         rows,
         parsed,
         preamble: note.preamble.clone(),
-        path: store::path_of(note_id),
+        path: locked_path,
     };
     (ctx, idx)
 }
@@ -664,6 +668,7 @@ mod knowledge {
         fragment: Markdown,
         before: default!(Option<Uuid>, "NULL"),
         after: default!(Option<Uuid>, "NULL"),
+        expected_head: default!(Option<Uuid>, "NULL"),
     ) -> pgrx::composite_type!('static, "pgmind.op_result") {
         if before.is_some() && after.is_some() {
             pm_error(
@@ -689,16 +694,25 @@ mod knowledge {
                 "insert_blocks",
             );
         }
+        let (locked_path, locked_head) = store::lock_note_row(note.id);
+        if locked_path != path {
+            pm_error(
+                Pm::NoteNotFound,
+                "note was renamed by a concurrent transaction",
+                &format!("path {path:?}"),
+            );
+        }
         let ctx = NoteCtx {
             vault,
             note_id: note.id,
-            head: note.head_revision,
+            head: locked_head,
             tiles,
             rows,
             parsed,
             preamble: note.preamble.clone(),
-            path: path.to_string(),
+            path: locked_path,
         };
+        store::cas_check(expected_head, ctx.head, &ctx.path);
 
         let anchor = before.or(after);
         if let Some(anchor_id) = anchor {
@@ -730,14 +744,59 @@ mod knowledge {
         }
     }
 
+    /// Append after the last block of a section (RFC-005 D5.10).
+    ///
+    /// The one operation for which a conflict is not a conflict: two concurrent
+    /// appends serialize on the note row and BOTH survive, in lock-acquisition
+    /// order. That is the whole reason it exists as an operation rather than as
+    /// a client-side read-modify-write, which would make one of the two appends
+    /// disappear with no error.
+    #[pg_extern(requires = ["pgmind_storage"])]
+    fn append_to_section(
+        path: &str,
+        heading_path: Vec<String>,
+        fragment: Markdown,
+        expected_head: default!(Option<Uuid>, "NULL"),
+    ) -> pgrx::composite_type!('static, "pgmind.op_result") {
+        let vault = store::current_vault();
+        let note = store::note_by_path_or_err(vault, path);
+        let (locked_path, locked_head) = store::lock_note_row(note.id);
+        if locked_path != path {
+            pm_error(
+                Pm::NoteNotFound,
+                "note was renamed by a concurrent transaction",
+                &format!("path {path:?}"),
+            );
+        }
+        store::cas_check(expected_head, locked_head, path);
+        // The anchor is resolved AFTER the lock, so a concurrent append that
+        // already extended the section is visible and this one lands after it.
+        let rows = store::blocks_of(note.id);
+        let last = rows
+            .iter()
+            .filter(|r| r.heading_path == heading_path)
+            .map(|r| r.id)
+            .next_back();
+        match last {
+            Some(anchor) => insert_blocks(path, fragment, None, Some(anchor), Some(locked_head)),
+            None => pm_error(
+                Pm::SectionNotFound,
+                "no section with that heading path",
+                &format!("{heading_path:?} in {path:?}"),
+            ),
+        }
+    }
+
     /// RFC-004 A2: ID kept by caller assertion; fragment arity exactly 1;
     /// wholesale subtree replacement with subtree carry.
     #[pg_extern(requires = ["pgmind_storage"])]
     fn update_block(
         block_id: Uuid,
         fragment: Markdown,
+        expected_head: default!(Option<Uuid>, "NULL"),
     ) -> pgrx::composite_type!('static, "pgmind.op_result") {
         let (ctx, idx) = load_ctx_by_block(block_id);
+        store::cas_check(expected_head, ctx.head, &ctx.path);
         let (frag, roots) = parse_fragment(&fragment.0);
         if roots.len() != 1 {
             pm_error(
@@ -817,6 +876,7 @@ mod knowledge {
         block_id: Uuid,
         before: default!(Option<Uuid>, "NULL"),
         after: default!(Option<Uuid>, "NULL"),
+        expected_head: default!(Option<Uuid>, "NULL"),
     ) -> pgrx::composite_type!('static, "pgmind.op_result") {
         if before.is_some() == after.is_some() {
             pm_error(
@@ -826,6 +886,7 @@ mod knowledge {
             );
         }
         let (ctx, idx) = load_ctx_by_block(block_id);
+        store::cas_check(expected_head, ctx.head, &ctx.path);
         let anchor_id = before.or(after).unwrap();
         let ai = ctx
             .rows
@@ -923,8 +984,10 @@ mod knowledge {
     fn split_block(
         block_id: Uuid,
         fragment: Markdown,
+        expected_head: default!(Option<Uuid>, "NULL"),
     ) -> pgrx::composite_type!('static, "pgmind.op_result") {
         let (ctx, idx) = load_ctx_by_block(block_id);
+        store::cas_check(expected_head, ctx.head, &ctx.path);
         let (frag, roots) = parse_fragment(&fragment.0);
         if roots.len() < 2 {
             pm_error(
@@ -1042,6 +1105,7 @@ mod knowledge {
         block_ids: Vec<Uuid>,
         fragment: Markdown,
         keep: default!(Option<Uuid>, "NULL"),
+        expected_head: default!(Option<Uuid>, "NULL"),
     ) -> pgrx::composite_type!('static, "pgmind.op_result") {
         if block_ids.len() < 2 {
             pm_error(
@@ -1051,6 +1115,7 @@ mod knowledge {
             );
         }
         let (ctx, _) = load_ctx_by_block(block_ids[0]);
+        store::cas_check(expected_head, ctx.head, &ctx.path);
         let mut idxs: Vec<usize> = block_ids
             .iter()
             .map(|id| {

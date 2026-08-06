@@ -796,29 +796,18 @@ fn reconcile_extraction(vault: Uuid, note_id: Uuid, parsed: &ParsedNote, c: &Car
     }
 }
 
-/// Serialize writers to one `(vault, path)` for the rest of the transaction.
-///
-/// Without it, two sessions both read the pre-image and the second reconciles
-/// against a stale `old`: block rows the first session already deleted compare
-/// equal on every stored column, so `reconcile`'s `if unchanged { continue }`
-/// emits no SQL for them and they stay deleted — the byte lane advances while
-/// the semantic lane silently loses rows, breaking RFC-003 D2's mirror
-/// invariant with no error raised. For a path that does not exist yet it also
-/// turns a racing pair of INSERTs into a wait instead of a bare 23505 out of
-/// the `note_live_path` partial unique index.
-///
-/// Transaction-scoped, so it is released at commit or abort with no unlock
-/// path to get wrong. Distinct paths hash to distinct keys and do not contend.
-fn lock_path(vault: Uuid, path: &str) {
-    Spi::run_with_args(
-        "SELECT pg_advisory_xact_lock(hashtextextended($1::text || '/' || $2, 0))",
-        &[arg(vault), path.into()],
-    )
-    .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure taking the write lock: {e}"));
-}
-
 /// `knowledge.write` (RFC-003 D6): upsert a whole note deterministically.
-pub fn write_note(path_raw: &str, source: &str) -> Uuid {
+///
+/// Serialization is two locks with different jobs (RFC-005 D5). The advisory
+/// lock on `(vault, path)` guards the NAME — it is what turns a racing pair of
+/// creations into a wait instead of a bare 23505 out of `note_live_path`. The
+/// note row's `FOR NO KEY UPDATE` guards the ROW, and every read the write
+/// depends on is taken from under it: without that, two sessions both read the
+/// pre-image and the second reconciles against a stale `old`, where rows the
+/// first session already deleted compare equal on every stored column, emit no
+/// SQL, and stay deleted — the byte lane advancing while the semantic lane
+/// silently loses rows, with no error raised.
+pub fn write_note(path_raw: &str, source: &str, expected_head: Option<Uuid>) -> Uuid {
     let vault = store::current_vault();
     let path = pgmind_core::path::path_normalize(path_raw);
     if !pgmind_core::path::path_is_valid(&path) {
@@ -829,9 +818,39 @@ pub fn write_note(path_raw: &str, source: &str) -> Uuid {
         );
     }
 
-    lock_path(vault, &path);
+    store::lock_path_name(vault, &path);
 
-    let existing = store::note_by_path(vault, &path);
+    let mut existing = store::note_by_path(vault, &path);
+    if let Some(note) = existing.as_mut() {
+        // Everything the write depends on is re-read from under the row lock
+        // (RFC-005 D5.2). The path re-check catches a concurrent rename: the
+        // row we located by path may no longer answer to it.
+        let (locked_path, head) = store::lock_note_row(note.id);
+        if locked_path != path {
+            pm_error(
+                Pm::NoteNotFound,
+                "note was renamed by a concurrent transaction",
+                &format!("path {path:?} now names nothing"),
+            );
+        }
+        note.head_revision = head;
+        // CAS BEFORE idempotence (D5.5). The short-circuit answers "did
+        // anything change"; CAS answers "did you see what you were changing" —
+        // reordering them lets a stale writer's byte-identical no-op silently
+        // succeed.
+        store::cas_check(expected_head, head, &path);
+    } else if expected_head.is_some() {
+        // D5.6: a caller that asserted a head for a path with no live note is
+        // not creating, it is editing something that is gone. Answering with a
+        // silent create would make its CAS unenforceable exactly when it
+        // matters — racing a concurrent delete.
+        pm_error(
+            Pm::StaleHead,
+            "expected_head given for a path with no live note",
+            &format!("path {path:?}"),
+        );
+    }
+
     let old_tiles: Vec<String> = match existing {
         Some(ref note) => {
             let tiles = store::tiles_of(note.id);

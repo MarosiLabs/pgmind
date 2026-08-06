@@ -345,6 +345,12 @@ PGRX_TEST_SUITES = {
         "history_errors_distinguish_missing_from_compacted",
         "history_and_diff_report_what_changed",
         "verify_history_catches_a_missing_pre_image",
+        # RFC-005 D5: the concurrency contract's single-session half. The
+        # interleaving half is the concurrency-isolation suite.
+        "cas_precedes_the_idempotence_short_circuit",
+        "cas_on_a_missing_note_raises_rather_than_creating",
+        "block_ops_honour_expected_head",
+        "append_to_section_keeps_both_appends",
         "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [

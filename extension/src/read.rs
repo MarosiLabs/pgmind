@@ -33,9 +33,13 @@ mod knowledge {
 
     /// Upsert a whole note (RFC-003 D6). Returns the revision ID; byte-identical
     /// input returns the current head with no new revision.
+    ///
+    /// `expected_head` is RFC-005 D5's compare-and-swap: pass the revision you
+    /// read and the write raises PM009 if someone else moved the note first.
+    /// Omitting it is last-writer-wins, explicitly and by the caller's choice.
     #[pg_extern]
-    fn write(path: &str, doc: Markdown) -> Uuid {
-        write_path::write_note(path, &doc.0)
+    fn write(path: &str, doc: Markdown, expected_head: default!(Option<Uuid>, "NULL")) -> Uuid {
+        write_path::write_note(path, &doc.0, expected_head)
     }
 
     /// Byte-faithful read: preamble ‖ tiles (RFC-003 D2).

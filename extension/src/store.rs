@@ -440,6 +440,12 @@ pub fn repair_edges_on_creation(vault: Uuid, new_path: &str) {
     }
     let resolved = resolve_targets(vault, &targets);
     for target in &targets {
+        // RFC-005 D5.9: repair is a MULTI-NOTE operation — it rewrites edges
+        // belonging to other notes — so it takes their row locks, in ascending
+        // note.id order, before touching them. Two creations repairing the same
+        // linking note then serialize instead of racing, and the ordering is
+        // what keeps them from deadlocking against each other.
+        lock_linking_notes(vault, target);
         let r = resolved.get(target).copied().unwrap_or(Resolution::Missing);
         update_edge_resolution_by_path(vault, target, r);
     }
@@ -556,4 +562,104 @@ pub fn path_of(note: Uuid) -> String {
     Spi::get_one_with_args("SELECT path FROM pgmind.note WHERE id = $1", &[arg(note)])
         .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure reading path: {e}"))
         .unwrap_or_default()
+}
+
+/// RFC-005 D5.1: take the note row's write lock and re-read what the operation
+/// depends on FROM UNDER IT. Returns `(path, head_revision)` as they are once
+/// the lock is held.
+///
+/// `FOR NO KEY UPDATE` blocks other writers and other `FOR SHARE`/`FOR NO KEY
+/// UPDATE` waiters while leaving plain readers alone, and it makes the wait
+/// visible in `pg_blocking_pids()` — which is what lets the concurrency gate
+/// test interleavings without sleeping.
+///
+/// Reading these values BEFORE the lock is the bug this function exists to
+/// prevent: an operation would otherwise compute a pre-image from a state its
+/// own lock never covered. The lock protects the note ROW and nothing else —
+/// it does not block another session inserting that note's tiles or blocks —
+/// so every mutating path must take it, not merely the ones that race.
+pub fn lock_note_row(note_id: Uuid) -> (String, Uuid) {
+    // `connect_mut` + `update`, not `select`: pgrx runs SPI read-only whenever
+    // the transaction has no XID yet, and `FOR NO KEY UPDATE` in a read-only
+    // context is rejected outright (25006). The first mutating op in a
+    // transaction is exactly the case that hits it.
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "SELECT path, head_revision FROM pgmind.note
+                  WHERE id = $1 AND tombstoned_at IS NULL FOR NO KEY UPDATE",
+                Some(1),
+                &[arg(note_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure locking note: {e}"))
+            .map(|r| {
+                (
+                    r.get::<String>(1).unwrap().unwrap(),
+                    r.get::<Uuid>(2).unwrap().unwrap(),
+                )
+            })
+            .next()
+            .unwrap_or_else(|| {
+                pm_error(
+                    Pm::NoteTombstoned,
+                    "note was deleted by a concurrent transaction",
+                    &format!("note {note_id}"),
+                )
+            })
+    })
+}
+
+/// RFC-005 D5.5/D5.6: compare-and-swap against the head observed under the
+/// lock. Raises PM009 with the observed head in the detail so a client can
+/// re-read and retry deterministically — never 40001, which belongs to
+/// Postgres and to the caller's own retry loop.
+pub fn cas_check(expected: Option<Uuid>, observed: Uuid, path: &str) {
+    if let Some(e) = expected {
+        if e != observed {
+            pm_error(
+                Pm::StaleHead,
+                "expected_head is not the note's current head",
+                &format!("note {path}: expected {e}, head is {observed}"),
+            );
+        }
+    }
+}
+
+/// Path occupancy is a different lock domain from the note row: the row lock
+/// protects a ROW, and a create or a rename contends for a NAME. Without this
+/// a `move_note` into a path another session is creating gets a bare 23505 out
+/// of `note_live_path`, which is not an error a caller can act on.
+pub fn lock_path_name(vault: Uuid, path: &str) {
+    Spi::run_with_args(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1::text || '/' || $2, 0))",
+        &[arg(vault), path.into()],
+    )
+    .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure taking the path lock: {e}"));
+}
+
+/// Raise PM015 if a live note already occupies `path`.
+pub fn assert_path_free(vault: Uuid, path: &str) {
+    if note_by_path(vault, path).is_some() {
+        pm_error(
+            Pm::PathTaken,
+            "a live note already occupies that path",
+            &format!("path {path:?}"),
+        );
+    }
+}
+
+/// Lock every note whose edges name `target`, in ascending id order.
+fn lock_linking_notes(vault: Uuid, target: &str) {
+    Spi::connect_mut(|client| {
+        client
+            .update(
+                "SELECT id FROM pgmind.note
+                  WHERE id IN (SELECT src_note FROM pgmind.edge
+                                WHERE vault_id = $1 AND dst_path = $2)
+                  ORDER BY id FOR NO KEY UPDATE",
+                None,
+                &[arg(vault), target.into()],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure locking linking notes: {e}"));
+    });
 }
