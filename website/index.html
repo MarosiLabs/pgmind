@@ -162,7 +162,7 @@ $md$, expected_head => $1);
 -- Add one line under a heading, without reading or rewriting the note.
 SELECT knowledge.append_to_section(
     'projects/auth',
-    ARRAY['Decisions'],
+    ARRAY['Auth','Decisions'],
     $md$- Rotate refresh tokens every 24h #decision$md$
 );</code></pre>
           <p class="note"><span class="badge ok">In main</span> There are finer-grained edits too (<code>update_block</code>, <code>move_block</code>, <code>split_block</code>, <code>merge_blocks</code>), so two agents working on different paragraphs of the same note never collide.</p>
@@ -171,11 +171,11 @@ SELECT knowledge.append_to_section(
         <div class="panel" role="tabpanel" id="panel-query" aria-labelledby="tab-query" tabindex="0" hidden>
 <pre><code class="sql">-- Table of contents. Headings are already rows, so nothing is re-read.
 SELECT attrs->>'level' AS level, attrs->>'text' AS heading
-FROM   knowledge.blocks_by_path('projects/auth')
+FROM   knowledge.blocks('projects/auth')
 WHERE  kind = 'heading';
 
 -- Then read back just one section
-SELECT knowledge.read_section('projects/auth', ARRAY['Decisions']);
+SELECT knowledge.read_section('projects/auth', ARRAY['Auth','Decisions']);
 
 -- What links to this note, and from which paragraph
 SELECT src_path, kind, excerpt
@@ -203,7 +203,7 @@ SELECT ord, author, changed_at
 FROM   knowledge.blame('projects/auth');
 
 -- The note as it looked a week ago
-SELECT knowledge.read_as_of_time('projects/auth', now() - interval '7 days');</code></pre>
+SELECT knowledge.read_as_of('projects/auth', now() - interval '7 days');</code></pre>
           <p class="note"><span class="badge ok">In main</span> Versions are stored as deltas, so keeping all of them is cheap. <code>source</code> tells you whether a change came from your app or from a folder sync, and blame is honest about the rare cases where a paragraph was matched up by guesswork rather than tracked.</p>
         </div>
 
@@ -241,12 +241,12 @@ SELECT knowledge.context(
 
 -- What the paragraph said at the moment the agent read it
 SELECT heading_path, content
-FROM   knowledge.blocks_as_of_rev('projects/auth', $2)
+FROM   knowledge.blocks_as_of('projects/auth', $2)
 WHERE  block_id = $1;
 
 -- Where it sits in the note today, so your UI can scroll to it
 SELECT heading_path, span_start, span_end
-FROM   knowledge.blocks_by_path('projects/auth')
+FROM   knowledge.blocks('projects/auth')
 WHERE  block_id = $1;
 
 -- And who put it there
@@ -351,13 +351,13 @@ make build   # PG=18 by default; make build PG=16
 make test    # runs inside a real Postgres</code></pre>
         <p class="start-more">
           If you would rather read first, the documents have a precedence order:
-          the <a href="https://github.com/MarosiLabs/pgmind/blob/main/PGMIND.md">handbook</a>
+          the <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">handbook</a>
           holds the architecture laws, the
           <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PRODUCT-PLAN.md">product plan</a>
           is the operating blueprint, an
           <a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">RFC</a>
           decides each phase before it is implemented, and the
-          <a href="https://github.com/MarosiLabs/pgmind/blob/main/AUDIT.md">audit</a>
+          <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/archive/AUDIT.md">audit</a>
           is the evidence the whole thing was argued against.
         </p>
       </div>
@@ -390,7 +390,7 @@ make test    # runs inside a real Postgres</code></pre>
     <p><b>pgmind</b>: files hold notes, PostgreSQL holds the brain.</p>
     <p class="foot-links">
       <a href="https://github.com/MarosiLabs/pgmind">Repository</a>
-      <a href="https://github.com/MarosiLabs/pgmind/blob/main/PGMIND.md">Handbook</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a>
       <a href="https://github.com/MarosiLabs/pgmind/blob/main/LICENSE">PostgreSQL License</a>
     </p>
   </div>
