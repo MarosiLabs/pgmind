@@ -1104,15 +1104,20 @@ def _publish_tuning_study(observations, baseline):
         "candidate_points": [rebinding_tuning.evaluate(observations, t, 0.6)
                              for t in (0.5, 0.8, 0.9)],
         "stage2_only": stage2_only,
-        # Stage order is a design question the draft settles by listing rather
-        # than by measurement. Stage 1 does break A2's first-keeps convention
-        # (it binds a split parent to whichever fragment scores best), and
-        # running split detection first — the obvious repair — measures WORSE
-        # on both axes. Published so the revision argues from this, not from
-        # the intuition it refutes.
-        "stage_order": [rebinding_tuning.evaluate(observations, t, s, order)
-                        for order in ("1-2", "2-1")
-                        for t, s in ((0.5, 0.6), (0.8, 0.6))],
+        # Four pipelines at the same thresholds. `1-2` is the draft; `2-1`
+        # reverses its stages (the intuitive repair for stage 1 overriding
+        # A2's first-keeps — measures worse, kept as the refutation);
+        # `split-aware` folds split detection into the aligner as a candidate
+        # filter; `monotone` extends order-monotonicity to bindings the
+        # deterministic passes already made.
+        "variants": [rebinding_tuning.evaluate(observations, t, 0.6, order)
+                     for order in ("1-2", "2-1", "split-aware", "monotone", "both")
+                     for t in (0.5, 0.6)],
+        # τ_split does not discriminate on this corpus in any variant: what
+        # decides a split is the bidirectional containment TEST, not where its
+        # threshold sits. Swept so that claim is checkable rather than asserted.
+        "tau_split_sweep": [rebinding_tuning.evaluate(observations, 0.5, s, "split-aware")
+                            for s in splits],
         "grid": grid,
     }, indent=2) + "\n")
 

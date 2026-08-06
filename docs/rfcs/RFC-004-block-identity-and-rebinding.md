@@ -1,15 +1,15 @@
 # RFC-004: Block Identity & Rebinding Semantics
 
-- **Status:** Living — **Part A (write-path identity) accepted 2026-08-05 for Phase 2; Part B (heuristic rebinding) remains draft until Phase 3 acceptance** (per plan §16: "accepted (living)" split). Amended same day after adversarial review: fragment arity (parentless counting), subtree carry, op return contract, container-children constraints, PM008, marker/ID divergence. Amended again after Phase-2 code review: A3 pass 2 is section-first (two tiers), A4 `marker_to` is a uuid inside the split/merge object and `carried` is emitted for every carrying op. **Those post-review amendments were accepted by the owner 2026-08-05** — Part A stands re-accepted as amended; Part B is untouched by the review and stays draft until its Phase-3 gate (adversarial edit corpus) has results.
+- **Status:** Living — **Part A (write-path identity) accepted 2026-08-05 for Phase 2; Part B revised 2026-08-06 from corpus measurement and PROPOSED FOR ACCEPTANCE — not yet accepted, and not implemented.** (per plan §16: "accepted (living)" split). Amended same day after adversarial review: fragment arity (parentless counting), subtree carry, op return contract, container-children constraints, PM008, marker/ID divergence. Amended again after Phase-2 code review: A3 pass 2 is section-first (two tiers), A4 `marker_to` is a uuid inside the split/merge object and `carried` is emitted for every carrying op. **Those post-review amendments were accepted by the owner 2026-08-05** — Part A stands re-accepted as amended; Part B is untouched by the review and stays draft until its Phase-3 gate (adversarial edit corpus) has results.
 - **Phase:** 2-3
 - **Owner:** project author
-- **Created:** 2026-08-05 · **Accepted:** 2026-08-05 (Part A; amendments re-accepted the same day) · **Frozen:** —
+- **Created:** 2026-08-05 · **Accepted:** 2026-08-05 (Part A; amendments re-accepted the same day) · **Part B revised:** 2026-08-06, awaiting acceptance · **Frozen:** —
 
 ## 1. Context
 
 The audit's #1 finding (C1) is that stable block identity cannot come from a parser: every system that ships it — Notion, Yjs, ProseMirror — mints identity on the **write path**, and every attempt to recover identity from plain-text diffing is heuristic (GumTree/XyDiff literature). The handbook made this Law 4; the plan made it this RFC. Identity is what makes a block citable across edits (`path#^block @ revision`), what `blame` and `patch_block` address, and what keys the embedding hooks so users never re-embed unchanged content (Law 5).
 
-This RFC has two parts with different maturity by design. **Part A** — what each write operation does to IDs, including the *deterministic* carry rules when a whole document is rewritten — is normative for Phase 2 and proposed for acceptance now. **Part B** — the heuristic rebinding pipeline for external whole-document replacement (sync, re-import) — is the project's #1 research problem; it stays a structured draft here and hardens against the adversarial edit corpus for Phase 3 acceptance. Splitting maturity this way keeps Phase 2 purely deterministic: nothing accepted today involves a threshold or a similarity score.
+This RFC has two parts with different maturity by design. **Part A** — what each write operation does to IDs, including the *deterministic* carry rules when a whole document is rewritten — is normative for Phase 2 and proposed for acceptance now. **Part B** — the heuristic rebinding pipeline for external whole-document replacement (sync, re-import) — is the project's #1 research problem. It was a structured draft with two invented thresholds; as of 2026-08-06 it has been rewritten from measurement against the adversarial edit corpus and is proposed for acceptance. Splitting maturity this way kept Phase 2 purely deterministic — nothing accepted for Phase 2 involves a threshold or a similarity score — and it is why the corpus could measure a real baseline instead of grading a heuristic against itself.
 
 Storage columns live in RFC-003; hashes and the block taxonomy are RFC-002 (frozen).
 
@@ -115,17 +115,67 @@ Every error's DETAIL carries the offending value (path, uuid, count); agents rep
 
 ---
 
-## Part B — Heuristic rebinding (DRAFT — hardens for Phase 3, not proposed for acceptance now)
+## Part B — Heuristic rebinding (REVISED 2026-08-06 from corpus measurement — proposed for acceptance)
 
-*Nothing in this part is normative yet. It is recorded so Part A's shapes (pass ordering, provenance fields, confidence plumbing) are demonstrably forward-compatible with it, and so the Phase 3 RFC work starts from structure instead of a blank page.*
+*This part was a structured draft with two invented thresholds. The adversarial edit corpus now exists (`eval/corpora/pgmind/rebinding/`, 42 cases, committed), the deterministic baseline is published, and the drafted pipeline has been simulated over the corpus. **Everything below that differs from the draft differs because a measurement said so**, and the measurements are in `eval/published/rebinding-baseline-v1.json` and `rebinding-tuning-v1.json`. Nothing here is normative until the owner accepts it; no rebinding code exists yet, which is deliberate — the precedence law is accepted-RFC-before-code.*
 
-When a whole document arrives from *outside* the block ops — sync, re-import, bulk `write` — passes 1-2 (A3) run first and are already deterministic. Between them and pass 3, Phase 3 inserts:
+### B1. What the deterministic engine actually does (measured, published)
 
-- **Stage 1 — modified-in-place.** Unmatched old/new blocks aligned by position and similarity: token-bigram Dice over normalized content, same-kind only, threshold **τ (draft: 0.5, tuned on the corpus before acceptance)**; alignment must be order-monotonic (no crossing matches). Carried ID, `confidence = score`.
-- **Stage 2 — splits & merges.** Containment heuristics over stage-1 leftovers: one old block whose content largely contains ≥ 2 new neighbors ⇒ split (first fragment carries, A2's convention); the mirror image ⇒ merge (dominant source carries). Draft containment metric: bigram overlap ≥ τ_split against the concatenation.
-- **Stage 3** = pass 3, with removals becoming tombstone revisions and every stage-1/2 binding written with `source='rebind'`, its confidence stored per RFC-005's `block_revision`, and provenance per RFC-011 — inferred identity must be *visibly* inferred (blame, citations, and the embedding queue all read confidence).
+| | expected bindings | carried | |
+|---|---|---|---|
+| **identical** — same content, same kind | 73 | 72 | pass 2's job |
+| **marked** — content differs, same `^id` on both sides | 5 | 5 | pass 1's job |
+| **inferred** — content differs, no marker | **22** | **0** | nothing deterministic can do it |
 
-Open questions Phase 3 must close before Part B acceptance: τ and τ_split values from corpus tuning; whether stage 1 considers `heading_path` locality; move-then-edit (hash gone *and* position gone); interaction with `pgmind.max_document_bytes`-scale documents (O(n·m) alignment needs a budget); whether sync (RFC-006) may pass per-file hints. The **adversarial edit corpus** (splits, merges, move+edit, near-duplicates, full rewrites) is the Phase 3 gate: the match-rate is published, honest, and tracked — the number *is* the deliverable (plan §16).
+Aggregate recall reads 0.770 and precision 0.987 — but the aggregate is mostly bookkeeping, because most blocks in a realistic edit are untouched. Split three ways, the number that matters is **0 of 22**. That is not a defect: A3 says in as many words that editing a paragraph and rewriting the note mints a new ID. Part B exists to move exactly that number and nothing else.
+
+The single missed *identical* binding and the one mis-binding are the same case — two byte-identical paragraphs where the first is edited. `k`-th ↔ `k`-th pairs the survivor with the wrong original. No content-based rule can do better; it is recorded rather than fixed.
+
+### B2. Five findings the corpus forced
+
+1. **Stage 1 as drafted breaks A2's first-keeps convention.** A split fragment is *similar to its parent*, so a plain similarity aligner binds the parent to whichever fragment scores highest — which is routinely not the first. Four of the five mis-bindings at the drafted τ=0.5 are this one bug.
+2. **Reversing the stages does not fix it.** Running split/merge detection before the aligner — the obvious repair — measures *worse* on both axes (inferred recall 0.591, precision 0.918, six mis-bindings): it repairs one case and fires on the decoy. Recorded because it is the repair a reader will propose.
+3. **The drafted containment rule can never fire on lists.** "≥ 2 new neighbours" reads as adjacency, and a list item is a `list_item` block *plus the paragraph inside it*, so two sibling items' same-kind fragments are never adjacent — by ord or in the residual. Split runs must be taken over **same-kind peers**, not neighbours.
+4. **Bigrams alone are unusable at the short end.** A one-word fragment has no bigrams, so it shares nothing with anything: `split-list-item`, where a fragment is the single word "beta", is unsolvable by construction rather than by threshold. The feature set must be unigrams ∪ bigrams.
+5. **Order-monotonicity within the residual is not monotonicity.** The deterministic passes have already bound blocks the residual cannot see, so a locally monotonic stage 1 still yields a globally crossing result — observed as (1→2) and (2→1) in the same note.
+
+### B3. The revised pipeline (normative once accepted)
+
+When a whole document arrives from *outside* the block ops — sync, re-import, bulk `write` — A3 passes 1-2 run first and are already deterministic. Between them and pass 3:
+
+- **Stage 1 — alignment.** Unmatched old/new blocks aligned by similarity: **Dice over the unigram ∪ bigram multiset** of normalized content, same-kind only, score ≥ **τ = 0.5**; the alignment is a maximum-weight order-monotonic matching over the residual (finding 5's global constraint is **not** adopted — see B5). Carried ID, `confidence = score`.
+- **Stage 1b — split detection, inside the aligner, not after it.** Before scoring an old block's candidates, test whether it was split: a run of **2-4 consecutive same-kind peers in the residual** qualifies when containment holds **in both directions** — the run covers the old block, *and every fragment in the run is itself made of it*, both at ≥ **τ_split = 0.6**. If a run qualifies, the old block's only candidate is the run's **first** fragment (A2's convention, now enforced rather than hoped for) and it scores as the run's coverage. Both directions are required: a one-way test calls a moved-and-edited paragraph a split and hands its ID to an unrelated block, which is what `split/split-decoy-lead-in` exists to catch.
+- **Stage 2 — merges.** Unchanged from the draft in intent: a run of old blocks covered by one new block is a merge, dominant source carries.
+- **Stage 3** = pass 3, with removals becoming tombstone revisions and every inferred binding written with `source='rebind'`, its confidence stored per RFC-005's `block_revision`, and provenance per RFC-011 — inferred identity must be *visibly* inferred (blame, citations, and the embedding queue all read confidence).
+
+### B4. Thresholds, and one that is not a threshold
+
+**τ = 0.5.** Measured, not guessed: recall on the inferred class is flat for every τ ≤ 0.5 and falls above it, so 0.5 is the highest threshold that reaches maximum recall. The draft's guess survives contact with the corpus — which is worth saying plainly, because it was a guess.
+
+**τ_split = 0.6, and it does not discriminate.** Swept 0.3 → 0.9, every value gives an identical result. What decides a split is the *bidirectional containment test*, not where its threshold sits. It is retained as a named constant with a stated default rather than advertised as a tunable the corpus cannot constrain.
+
+### B5. What the revision refuses, and what it costs
+
+Extending order-monotonicity to the deterministic bindings (finding 5) buys precision **0.969 → 0.989** and costs inferred recall **0.818 → 0.636**. It is rejected: every binding it removes is a *move*. `knowledge.move` is first-class, section reordering is routine, and a rebinder that cannot follow a block across a document is refusing the case Part B is most needed for. The crossing pair it would have prevented is in the undecidable duplicate case, where the alternative binding is not better.
+
+Recommended operating point, and what it costs against today's engine:
+
+| | inferred recall | overall recall | precision | mis-bindings |
+|---|---|---|---|---|
+| deterministic only (today) | 0.000 | 0.770 | 0.987 | 1 |
+| drafted pipeline, τ=0.5 | 0.682 | 0.920 | 0.939 | 5 |
+| **revised, τ=0.5, τ_split=0.6** | **0.818** | **0.950** | **0.969** | **2** |
+| revised + global monotonicity | 0.682 | 0.920 | 0.979 | 1 |
+
+18 of 22 inferred bindings, for 1.8 points of precision. Both remaining mis-bindings are the undecidable duplicate case — the pipeline introduces **no new mis-binding of its own**.
+
+Four inferred bindings stay unsolved, and their shapes are the honest statement of what this design cannot do: two are **short blocks** (`## Concurrency` → `## Concurrency and locking`; `Locks first.` → `Locks always.`) where two or three tokens carry all the signal; one is a **crossing match** (two blocks swapped *and* edited), which an order-monotonic aligner can never make both halves of; one is the **duplicate**. Nothing in this design will fix them, and a later attempt should say which of the four it is buying.
+
+### B6. Open questions this closes, and what remains
+
+*Closed:* τ and τ_split (B4). Whether stage 1 should consider `heading_path` locality — **no**, and not because it wouldn't help: A3 pass 2 is already section-first, so locality discriminates on the deterministic path *above* stage 1, and the corpus case that turns on it (`dup-boilerplate-section-removed`) is resolved before stage 1 ever sees it. Move-then-edit — resolved as a deliberate trade in B5.
+
+*Still open:* the O(n·m) budget for `max_document_bytes`-scale documents (stage 1's DP is quadratic and needs a declared cap with a documented fallback to pass 3, which this revision does **not** specify and MUST before implementation); whether sync (RFC-006) may pass per-file hints; whether `confidence` should suppress re-embedding below some floor (RFC-009's question, not this one's).
 
 ---
 
@@ -154,7 +204,11 @@ Open questions Phase 3 must close before Part B acceptance: τ and τ_split valu
 - carry cases for A3: untouched note (byte-identical short-circuit — IDs *and* `xmin` stable); pure reorder (pass 2 carries all, hashes unchanged); duplicate-content pairing (k-th ↔ k-th); `^id` claim beating hash match; `^id` collision (both sides); claim across kind change; edited-paragraph-mints (the documented Phase 2 behavior, pinned so Phase 3 must consciously change it); copy semantics (one hash, two IDs);
 - provenance: `revision.meta` matches the A4 schema for each scenario, including the 200-entry truncation and the split/merge marker-holder records.
 
-**Part B (Phase 3, defined now, gated then):** the adversarial edit corpus in `eval/` with **published match-rate** per category (split/merge/move+edit/rewrite/near-duplicate) — publish the honest number; acceptance thresholds are set by the Phase 3 revision of this RFC after corpus tuning, not invented today.
+**Part B (Phase 3): `rebinding-edit-corpus`** — the adversarial edit corpus at `eval/corpora/pgmind/rebinding/` (42 cases, eight categories, committed and hand-authored) with the **published match-rate** per category. Delivered 2026-08-06: `eval/published/rebinding-baseline-v1.json` (the engine as it stands) and `rebinding-tuning-v1.json` (the threshold study behind B3-B5).
+
+The suite deliberately **does not gate on a score.** The published number is the deliverable; asserting a floor on it would be claiming an acceptance the owner has not given, and the thresholds are supposed to come *from* this measurement. It fails on three things instead, each with a negative control in `gate-selftest`: a corpus that does not parse or whose ground truth is not 1:1; a stale case index (ground truth read against a document that no longer parses that way); and any regression in the **control** category, whose cases are deterministic by construction and whose failure is a Part A regression wearing a Part B costume.
+
+When Part B is implemented, this gate acquires one more assertion — that no category's precision falls below the deterministic baseline published here. Recall may be traded; misplaced identity may not, since history, citations and embeddings follow the ID silently.
 
 ## 6. Law compliance
 
