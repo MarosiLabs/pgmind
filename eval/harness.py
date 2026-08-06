@@ -351,6 +351,10 @@ PGRX_TEST_SUITES = {
         "cas_on_a_missing_note_raises_rather_than_creating",
         "block_ops_honour_expected_head",
         "append_to_section_keeps_both_appends",
+        # RFC-005 D6: tombstones, reconstruction-based undelete, rename repair.
+        "delete_then_undelete_restores_the_note",
+        "move_note_repairs_edges_both_ways",
+        "move_onto_an_occupied_path_raises_pm015",
         "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [

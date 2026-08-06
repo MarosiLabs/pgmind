@@ -778,4 +778,196 @@ pub mod knowledge {
         });
         TableIterator::new(rows)
     }
+
+    /// Tombstone the note and record a revision. The live lanes are cleared —
+    /// current state must stay current state — and history keeps everything, so
+    /// `undelete_note` is a reconstruction rather than a resurrection of rows
+    /// that were never really gone.
+    #[pg_extern(name = "delete_note", requires = ["pgmind_storage"])]
+    fn delete_note(path: &str, expected_head: default!(Option<Uuid>, "NULL")) -> Uuid {
+        let vault = store::current_vault();
+        let note = store::note_by_path_or_err(vault, path);
+        store::lock_path_name(vault, path);
+        let (locked_path, head) = store::lock_note_row(note.id);
+        if locked_path != path {
+            pm_error(
+                Pm::NoteNotFound,
+                "note was renamed by a concurrent transaction",
+                &format!("path {path:?}"),
+            );
+        }
+        store::cas_check(expected_head, head, path);
+
+        // The pre-image of a deletion is the whole note: every block gets a
+        // removal effect row, and the tile script rebuilds the bytes.
+        let rows = store::blocks_of(note.id);
+        let tiles = store::tiles_of(note.id);
+        let empty = crate::write::parse_note("");
+        let pre = crate::history::capture(
+            &rows,
+            &tiles,
+            &note.preamble,
+            &store::properties_of(note.id),
+            Some(path),
+            path,
+            &crate::history::NewState {
+                parsed: &empty,
+                ids: &[],
+            },
+        );
+        for stmt in [
+            "DELETE FROM pgmind.tag   WHERE note_id = $1",
+            "DELETE FROM pgmind.edge  WHERE src_note = $1",
+            "DELETE FROM pgmind.block WHERE note_id = $1",
+            "DELETE FROM pgmind.tile  WHERE note_id = $1",
+            "UPDATE pgmind.note SET tombstoned_at = now(), preamble = '',
+                    properties = '{}'::jsonb WHERE id = $1",
+        ] {
+            Spi::run_with_args(stmt, &[arg(note.id)])
+                .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure deleting note: {e}"));
+        }
+        let rev = crate::write::new_revision(
+            vault,
+            note.id,
+            Some(head),
+            "api",
+            "delete_note",
+            &serde_json::json!({"deleted": true}),
+        );
+        let seq = crate::write::seq_of(rev);
+        crate::history::record(vault, note.id, rev, seq, &pre);
+        rev
+    }
+
+    /// Reconstruct the note as of the revision before its deletion.
+    #[pg_extern(name = "undelete_note", requires = ["pgmind_storage"])]
+    fn undelete_note(path: &str) -> Uuid {
+        let vault = store::current_vault();
+        store::lock_path_name(vault, path);
+        store::assert_path_free(vault, path);
+        let found: Option<(Uuid, i64)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT n.id, (SELECT seq FROM pgmind.revision WHERE id = n.head_revision)
+                       FROM pgmind.note n
+                      WHERE n.vault_id = $1 AND n.path = $2 AND n.tombstoned_at IS NOT NULL
+                      ORDER BY n.tombstoned_at DESC LIMIT 1",
+                    Some(1),
+                    &[arg(vault), path.into()],
+                )
+                .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure finding tombstone: {e}"))
+                .map(|r| {
+                    (
+                        r.get::<Uuid>(1).unwrap().unwrap(),
+                        r.get::<i64>(2).unwrap().unwrap_or(0),
+                    )
+                })
+                .next()
+        });
+        let Some((note_id, head_seq)) = found else {
+            pm_error(
+                Pm::NoteNotFound,
+                "no deleted note at that path",
+                &format!("path {path:?}"),
+            );
+        };
+        let note = store::note_by_id_any(note_id)
+            .unwrap_or_else(|| pgrx::error!("pgmind: tombstoned note row vanished"));
+        if head_seq == 0 {
+            pm_error(
+                Pm::HistoryUnavailable,
+                "the note has no revision before its deletion",
+                path,
+            );
+        }
+        let before = state_at(&note, head_seq - 1);
+        Spi::run_with_args(
+            "UPDATE pgmind.note SET tombstoned_at = NULL WHERE id = $1",
+            &[arg(note_id)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure clearing tombstone: {e}"));
+        // Re-writing the reconstructed source restores both lanes through the
+        // ordinary write path, so identity carries by the ordinary A3 rules
+        // rather than by a second, private restore path that could drift.
+        crate::write::write_note(path, &before.source(), None)
+    }
+
+    /// Rename a note. Both paths are locked (lexicographic order, so two
+    /// concurrent moves cannot deadlock), and the D5 creation-repair pass runs
+    /// for BOTH the old and the new path: a rename can promote a basename match
+    /// to exact and demote another in the same step, and edges are rewritten
+    /// rather than guessed.
+    #[pg_extern(name = "move_note", requires = ["pgmind_storage"])]
+    fn move_note(
+        path: &str,
+        new_path: &str,
+        expected_head: default!(Option<Uuid>, "NULL"),
+    ) -> Uuid {
+        let vault = store::current_vault();
+        let target = pgmind_core::path::path_normalize(new_path);
+        if !pgmind_core::path::path_is_valid(&target) {
+            pm_error(
+                Pm::InvalidPath,
+                "invalid note path",
+                &format!("path {new_path:?}"),
+            );
+        }
+        let mut names = [path, target.as_str()];
+        names.sort_unstable();
+        for n in names {
+            store::lock_path_name(vault, n);
+        }
+        let note = store::note_by_path_or_err(vault, path);
+        let (locked_path, head) = store::lock_note_row(note.id);
+        if locked_path != path {
+            pm_error(
+                Pm::NoteNotFound,
+                "note was renamed by a concurrent transaction",
+                &format!("path {path:?}"),
+            );
+        }
+        store::cas_check(expected_head, head, path);
+        if target != path {
+            store::assert_path_free(vault, &target);
+        }
+
+        let rows = store::blocks_of(note.id);
+        let tiles = store::tiles_of(note.id);
+        let source = store::source_of(&note, &tiles);
+        let parsed = crate::write::parse_note(&source);
+        let ids: Vec<Uuid> = rows.iter().map(|b| b.id).collect();
+        let pre = crate::history::capture(
+            &rows,
+            &tiles,
+            &note.preamble,
+            &store::properties_of(note.id),
+            Some(path),
+            &target,
+            &crate::history::NewState {
+                parsed: &parsed,
+                ids: &ids,
+            },
+        );
+        Spi::run_with_args(
+            "UPDATE pgmind.note SET path = $2 WHERE id = $1",
+            &[arg(note.id), target.as_str().into()],
+        )
+        .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure moving note: {e}"));
+        let rev = crate::write::new_revision(
+            vault,
+            note.id,
+            Some(head),
+            "api",
+            "move_note",
+            &serde_json::json!({"move": {"from": path, "to": target}}),
+        );
+        let seq = crate::write::seq_of(rev);
+        crate::history::record(vault, note.id, rev, seq, &pre);
+        // Both directions: the vacated path may demote edges that resolved to
+        // it, and the new path may promote edges that were dangling or
+        // basename-resolved elsewhere.
+        store::repair_edges_on_creation(vault, path);
+        store::repair_edges_on_creation(vault, &target);
+        rev
+    }
 }

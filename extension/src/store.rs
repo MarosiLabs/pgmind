@@ -663,3 +663,26 @@ fn lock_linking_notes(vault: Uuid, target: &str) {
             .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure locking linking notes: {e}"));
     });
 }
+
+/// `note_by_id` including tombstoned notes — the lifecycle ops need to see
+/// what the read APIs deliberately hide.
+pub fn note_by_id_any(note_id: Uuid) -> Option<NoteRow> {
+    Spi::connect(|client| {
+        client
+            .select(
+                "SELECT id, vault_id, head_revision, preamble, tombstoned_at IS NOT NULL
+                   FROM pgmind.note WHERE id = $1",
+                Some(1),
+                &[arg(note_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure loading note: {e}"))
+            .map(|r| NoteRow {
+                id: r.get(1).unwrap().unwrap(),
+                vault_id: r.get(2).unwrap().unwrap(),
+                head_revision: r.get(3).unwrap().unwrap(),
+                preamble: r.get(4).unwrap().unwrap(),
+                tombstoned: r.get(5).unwrap().unwrap(),
+            })
+            .next()
+    })
+}

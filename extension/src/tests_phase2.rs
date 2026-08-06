@@ -1169,6 +1169,106 @@ mod tests {
         verify_clean("cas/log");
     }
 
+    // ---------- note lifecycle (RFC-005 D6) ----------
+
+    /// Delete is a tombstone plus a revision; the live lanes are cleared but
+    /// history keeps everything, so undelete is a reconstruction.
+    #[pg_test]
+    fn delete_then_undelete_restores_the_note() {
+        write("life/doc", "# Doc\n\nalpha\n\nbeta [[other]] #tag\n");
+        let before_ids = block_ids("life/doc");
+        let before = read("life/doc");
+
+        Spi::run("SELECT knowledge.delete_note('life/doc')").expect("delete failed");
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read('life/doc')"),
+            "PM002",
+            "a deleted note is gone from every read API"
+        );
+        let live_blocks: i64 = Spi::get_one(
+            "SELECT count(*) FROM pgmind.block b JOIN pgmind.note n ON n.id = b.note_id
+              WHERE n.path = 'life/doc'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(live_blocks, 0, "current state is cleared");
+        let history_rows: i64 = Spi::get_one(
+            "SELECT count(*) FROM pgmind.block_revision br JOIN pgmind.note n ON n.id = br.note_id
+              WHERE n.path = 'life/doc'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(history_rows > 0, "history keeps what current state dropped");
+
+        Spi::run("SELECT knowledge.undelete_note('life/doc')").expect("undelete failed");
+        assert_eq!(read("life/doc"), before, "bytes come back exactly");
+        let after_ids = block_ids("life/doc");
+        assert_eq!(
+            after_ids.iter().map(|(c, _)| c.clone()).collect::<Vec<_>>(),
+            before_ids
+                .iter()
+                .map(|(c, _)| c.clone())
+                .collect::<Vec<_>>(),
+            "structure comes back"
+        );
+        verify_clean("life/doc");
+    }
+
+    /// A rename rewrites edges in both directions and never guesses: the
+    /// vacated path demotes what resolved to it, the new path promotes what was
+    /// dangling.
+    #[pg_test]
+    fn move_note_repairs_edges_both_ways() {
+        write("mv/linker", "see [[mv/target]] and [[mv/renamed]]\n");
+        write("mv/target", "original\n");
+        let resolved_before: i64 = Spi::get_one(
+            "SELECT count(*) FROM knowledge.links('mv/linker') WHERE resolved_path IS NOT NULL",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(resolved_before, 1, "only mv/target resolves");
+
+        Spi::run("SELECT knowledge.move_note('mv/target', 'mv/renamed')").expect("move failed");
+        let rows: Vec<(String, Option<String>)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT target, resolved_path FROM knowledge.links('mv/linker') ORDER BY target",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| {
+                    (
+                        r.get::<String>(1).unwrap().unwrap(),
+                        r.get::<String>(2).unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(
+            rows,
+            vec![
+                ("mv/renamed".to_string(), Some("mv/renamed".to_string())),
+                ("mv/target".to_string(), None),
+            ],
+            "the new path promotes, the vacated one demotes"
+        );
+        assert_eq!(read("mv/renamed"), "original\n");
+        assert_eq!(sqlstate_of("SELECT knowledge.read('mv/target')"), "PM002");
+    }
+
+    /// PM015: a path a live note already occupies is not a place to move to.
+    #[pg_test]
+    fn move_onto_an_occupied_path_raises_pm015() {
+        write("mv/a", "a\n");
+        write("mv/b", "b\n");
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.move_note('mv/a', 'mv/b')"),
+            "PM015"
+        );
+        assert_eq!(read("mv/a"), "a\n", "the failed move changed nothing");
+    }
+
     // ---------- tenant isolation (RFC-003 D1 / §5 gate 4) ----------
 
     #[pg_test]
