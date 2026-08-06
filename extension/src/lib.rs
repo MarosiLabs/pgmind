@@ -11,6 +11,7 @@ use pgrx::{InOutFuncs, StringInfo};
 use serde::{Deserialize, Serialize};
 
 pub mod errors;
+pub mod excision;
 pub mod history;
 pub mod ids;
 pub mod ops;

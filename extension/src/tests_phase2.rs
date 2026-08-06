@@ -1269,6 +1269,179 @@ mod tests {
         assert_eq!(read("mv/a"), "a\n", "the failed move changed nothing");
     }
 
+    // ---------- excision & retention (RFC-005 D7/D8) ----------
+
+    /// Erasure must reach every surface, and the sweep that proves it must
+    /// enumerate from pg_catalog — `information_schema` is privilege-filtered,
+    /// which is how a sweep returns a positive attestation while the canary is
+    /// still sitting in a table it never opened.
+    #[pg_test]
+    fn excision_erases_from_every_surface_and_proves_it() {
+        let canary = "CANARY7f3d9b21";
+        write("ex/doc", &format!("# Doc\n\nkeep me\n\n{canary} secret\n"));
+        write(
+            "ex/doc",
+            &format!("# Doc\n\nkeep me\n\n{canary} secret edited\n"),
+        );
+        write("ex/doc", "# Doc\n\nkeep me\n");
+        // The canary is gone from head but alive in history.
+        assert!(!read("ex/doc").contains(canary));
+        let before = sweep_hits(canary);
+        assert!(before > 0, "history holds the erased-from-head content");
+
+        let id: Uuid = Spi::get_one_with_args(
+            "SELECT pgmind.excise($1::jsonb, 'gate test', dry_run => false)",
+            &[format!(r#"{{"literal":"{canary}"}}"#).into()],
+        )
+        .expect("excise failed")
+        .unwrap();
+        assert_eq!(sweep_hits(canary), 0, "no surface still holds the canary");
+
+        let violations: i64 = Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.verify_excision($1)",
+            &[id.into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(violations, 0, "verify_excision proves it");
+
+        let logged: i64 = Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.excision_log WHERE id = $1 AND survivors = 0",
+            &[id.into()],
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(logged, 1, "the erasure is audited");
+        // History still reconstructs — redacted, but parseable and byte-defined.
+        assert_eq!(history_violations("ex/doc"), 0);
+    }
+
+    /// Live content is refused, not silently spared: an erasure that left the
+    /// current copy in place is the worst outcome of a right-to-erasure request.
+    #[pg_test]
+    fn excision_refuses_live_content_unless_told_to_remove_it() {
+        let canary = "CANARY_LIVE_44";
+        write("ex/live", &format!("alpha\n\n{canary} here\n"));
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT pgmind.excise('{{\"literal\":\"{canary}\"}}'::jsonb, 'r', dry_run => false)"
+            )),
+            "PM012"
+        );
+        assert!(read("ex/live").contains(canary), "refusal changed nothing");
+
+        Spi::run(&format!(
+            "SELECT pgmind.excise('{{\"literal\":\"{canary}\"}}'::jsonb, 'r',
+                                  and_head => true, dry_run => false)"
+        ))
+        .expect("excise with and_head failed");
+        assert!(!read("ex/live").contains(canary), "head is cleaned too");
+        assert_eq!(sweep_hits(canary), 0);
+    }
+
+    /// dry_run is the default, and it changes nothing.
+    #[pg_test]
+    fn excision_dry_run_is_the_default() {
+        let canary = "CANARY_DRY_9";
+        write("ex/dry", &format!("{canary}\n"));
+        write("ex/dry", "replaced\n");
+        let before = sweep_hits(canary);
+        Spi::run(&format!(
+            "SELECT pgmind.excise('{{\"literal\":\"{canary}\"}}'::jsonb, 'r')"
+        ))
+        .expect("dry run failed");
+        assert_eq!(sweep_hits(canary), before, "a dry run erases nothing");
+    }
+
+    /// Retention raises the floor, writes the anchor frame, deletes frames
+    /// below it, and never deletes revision rows — a vault that forgot must
+    /// remember that it forgot.
+    #[pg_test]
+    fn retention_compacts_history_but_keeps_the_ledger() {
+        Spi::run("SET pgmind.frame_every = 2").unwrap();
+        for i in 0..8 {
+            write("ret/doc", &format!("body {i}\n"));
+        }
+        let revs_before: i64 = Spi::get_one(
+            "SELECT count(*) FROM pgmind.revision r JOIN pgmind.note n ON n.id = r.note_id
+              WHERE n.path = 'ret/doc'",
+        )
+        .unwrap()
+        .unwrap();
+
+        Spi::run("SELECT pgmind.retain(keep_revisions => 3, dry_run => false)")
+            .expect("retain failed");
+
+        let (floor, frames_below, revs_after): (i64, i64, i64) = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT n.history_floor,
+                            (SELECT count(*) FROM pgmind.note_frame f
+                              WHERE f.note_id = n.id AND f.seq < n.history_floor),
+                            (SELECT count(*) FROM pgmind.revision r WHERE r.note_id = n.id)
+                       FROM pgmind.note n WHERE n.path = 'ret/doc'",
+                    None,
+                    &[],
+                )
+                .unwrap()
+                .map(|r| {
+                    (
+                        r.get::<i64>(1).unwrap().unwrap(),
+                        r.get::<i64>(2).unwrap().unwrap(),
+                        r.get::<i64>(3).unwrap().unwrap(),
+                    )
+                })
+                .next()
+                .unwrap()
+        });
+        assert_eq!(floor, 5, "keep_revisions => 3 leaves seqs 5..7");
+        assert_eq!(frames_below, 0, "frames below the floor are deleted too");
+        assert_eq!(revs_after, revs_before, "revision rows are never deleted");
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read_as_of('ret/doc', 0::bigint)"),
+            "PM011",
+            "below the floor is 'no longer reconstructable'"
+        );
+        // Above the floor still reconstructs exactly, off the new anchor frame.
+        let at_floor: String =
+            Spi::get_one("SELECT knowledge.read_as_of('ret/doc', 5::bigint)::text")
+                .unwrap()
+                .unwrap();
+        assert_eq!(at_floor, "body 5\n");
+        assert_eq!(history_violations("ret/doc"), 0);
+        Spi::run("RESET pgmind.frame_every").unwrap();
+    }
+
+    fn sweep_hits(needle: &str) -> i64 {
+        Spi::get_one_with_args(
+            "SELECT count(*) FROM pgmind.block_revision br
+              WHERE position($1 in coalesce(br.prev_content, '')) > 0",
+            &[needle.into()],
+        )
+        .unwrap()
+        .unwrap_or(0)
+            + Spi::get_one_with_args(
+                "SELECT count(*) FROM pgmind.note_revision nr
+                  WHERE position($1 in array_to_string(nr.tile_payload, ' ')) > 0",
+                &[needle.into()],
+            )
+            .unwrap()
+            .unwrap_or(0)
+            + Spi::get_one_with_args(
+                "SELECT count(*) FROM pgmind.block b WHERE position($1 in b.content) > 0",
+                &[needle.into()],
+            )
+            .unwrap()
+            .unwrap_or(0)
+            + Spi::get_one_with_args(
+                "SELECT count(*) FROM pgmind.note_frame f
+                  WHERE position($1 in array_to_string(f.tiles, ' ')) > 0",
+                &[needle.into()],
+            )
+            .unwrap()
+            .unwrap_or(0)
+    }
+
     // ---------- tenant isolation (RFC-003 D1 / §5 gate 4) ----------
 
     #[pg_test]

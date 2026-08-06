@@ -355,6 +355,12 @@ PGRX_TEST_SUITES = {
         "delete_then_undelete_restores_the_note",
         "move_note_repairs_edges_both_ways",
         "move_onto_an_occupied_path_raises_pm015",
+        # RFC-005 D7/D8: erasure that reaches every surface and proves it, and
+        # retention that keeps the ledger it compacted.
+        "excision_erases_from_every_surface_and_proves_it",
+        "excision_refuses_live_content_unless_told_to_remove_it",
+        "excision_dry_run_is_the_default",
+        "retention_compacts_history_but_keeps_the_ledger",
         "invalid_link_targets_are_reported_as_invalid",
     ],
     "tenant-isolation": [
