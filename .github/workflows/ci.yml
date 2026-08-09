@@ -18,7 +18,7 @@ jobs:
       matrix:
         pg: [16, 17, 18]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install PostgreSQL ${{ matrix.pg }} (PGDG)
         run: |
@@ -59,8 +59,8 @@ jobs:
     name: eval harness
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -92,7 +92,7 @@ jobs:
         env:
           PGMIND_PG_CONFIG: /usr/lib/postgresql/18/bin/pg_config
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()   # the failure report is the one you need most
         with:
           name: eval-report

@@ -318,7 +318,7 @@ Untouched: `website/styles.css`, `website/main.js`, `website/robots.txt`, `websi
 ### 3.1 The seed vault (shared running example)
 
 Examples must be coherent across six pages, so every page draws on **one** demo vault, defined
-once in `scratchpad/seed.sql` and rebuilt from scratch before any verification run. Notes:
+once in `eval/manual/seed.sql` and rebuilt from scratch before any verification run. Notes:
 
 | Path | Role in the manual |
 |---|---|
@@ -447,7 +447,7 @@ Rules the shell imposes:
 11. **Revisions** — `seq`, `verb`, `author`, `source`, `head_revision`, `history_floor`,
     reconstructable.
 12. **Vaults and tenancy** — one column, one GUC, one policy.
-13. **Errors** — the PM001–PM016 table with "what the caller should do".
+13. **Errors** — the PM001–PM017 table with "what the caller should do".
 14. **Sharp edges** — the list from §2.3 that is conceptual rather than operational.
 
 ### 4.4 `internals.html`
@@ -537,7 +537,7 @@ Groups, in order:
   being internal and revoked.
 - **H. Server settings** — the three GUCs, with ranges, defaults, context, and what changing
   each actually trades.
-- **I. Error codes** — full PM001–PM016 table: SQLSTATE, condition name, meaning, what the
+- **I. Error codes** — full PM001–PM017 table: SQLSTATE, condition name, meaning, what the
   caller should do, which functions raise it. Plus how to catch them in plpgsql
   (`WHEN sqlstate 'PM009'`) and in client libraries.
 - **J. Not yet implemented** — one clearly-badged table listing everything from §2.2 with the
@@ -655,7 +655,7 @@ Markup vocabulary available (all styled, nothing else needed):
 ## 6. Execution order
 
 **Stage 0 — foundation (serial, before any page content).**
-- `scratchpad/seed.sql`: the demo vault, rebuildable from empty.
+- `eval/manual/seed.sql`: the demo vault, rebuildable from empty.
 - Rebuild the database, run the seed, capture the baseline outputs the pages will quote.
 - `website/docs/docs.css` and `website/docs/docs.js`.
 - One finished reference page (`index.html`) as the shell exemplar every other author copies.
@@ -695,31 +695,69 @@ Each verifier independently:
 
 ## 7. Definition of done
 
-- [ ] Six pages exist, share one shell, and are reachable from the landing page in one click.
-- [ ] Every SQL example in the manual executes green against a freshly seeded database, or is
-      an intentional error whose real message is shown.
-- [ ] No identifier appears that is not in §2.1, outside an explicitly badged "not yet" block.
-- [ ] Every function in §2.1 is documented in `sql.html` — all 43, plus 3 GUCs, 4 types, and
-      16 error codes.
-- [ ] The cookbook has ≥ 40 recipes, each with real output.
-- [ ] Internals cites a source file or RFC decision for every non-obvious claim.
-- [ ] All internal links and anchors resolve; no external resource is fetched.
-- [ ] `sitemap.xml` and `llms.txt` list the manual; the two TODOs in `index.html` are gone.
-- [ ] Pages read correctly at 375 px, 768 px and 1440 px, dark theme only, matching the landing
-      page's design language.
+Checked 2026-08-09. An item marked **(gate)** is re-checked by `make eval` on every CI run and
+cannot silently regress; an item marked **(human)** was verified once by reading, and this list
+is the only record that it was.
+
+- [x] Six pages exist, share one shell, and are reachable from the landing page in one click.
+      **(gate:** `manual-inventory` resolves every internal link and anchor**)**
+- [x] Every SQL example in the manual executes green against a freshly seeded database, or is
+      an intentional error whose real message is shown. **(gate:** `manual-examples`, 283 blocks
+      across six pages; 19 non-SQL or two-session blocks reported by name, never dropped**)**
+- [x] No identifier appears that is not in §2.1, outside an explicitly badged "not yet" block.
+      **(gate:** `manual-inventory`, 918 identifiers against a live catalog**)**
+- [x] Every function in §2.1 is documented in `sql.html` — all 43, plus 4 GUCs, 4 types, and
+      17 error codes. (3 GUCs / 16 codes until §2.5; `pgmind.author` and PM017 landed with
+      RFC-011 mid-authoring.) **(gate:** `manual-inventory` checks the reverse direction too —
+      a function that ships without a reference entry fails**)**
+- [x] The cookbook has ≥ 40 recipes, each with real output. 73 recipes. **(human** for "real
+      output"; the SQL behind it is **gate)**
+- [x] Internals cites a source file or RFC decision for every non-obvious claim. **(human)**
+- [x] All internal links and anchors resolve; no external resource is fetched. **(gate)**
+- [x] `sitemap.xml` and `llms.txt` list the manual; the two TODOs in `index.html` are gone.
+      **(human)**
+- [x] Pages read correctly at 375 px, 768 px and 1440 px, dark theme only, matching the landing
+      page's design language. **(human)**
+
+### 7.1 What the gates deliberately do not check
+
+Stated so that a green `make eval` is not mistaken for more than it is:
+
+- **That an example's pasted output still matches.** The gate asserts a block runs, not that
+  its output is byte-identical to what the page shows. UUIDs and timestamps differ every run,
+  so the pages elide them; asserting on the rest would mean a second serialisation format to
+  maintain. A query that starts returning the wrong *rows* passes this gate.
+- **That a name still badged "not yet" has not since shipped.** At row granularity the checker
+  cannot tell a missing function from a missing *overload* of one that exists, and a gate that
+  cries wolf gets ignored. §2.2 is the human check for that direction.
+- **Prose.** No gate reads English. Every claim in §2.3 and §2.4 is a human assertion.
 
 ---
 
 ## 8. Environment for verification
 
+The seed vault is `eval/manual/seed.sql`, committed. It asserts its own `knowledge.stats()`
+at the bottom — 7 notes, 48 blocks, 16 resolved edges, 2 dangling, 9 tags, 7 revisions,
+1383 bytes — so a seed that has drifted from what the pages describe refuses to seed at all
+rather than quietly rebasing every example onto a different vault.
+
+The gates run with everything else:
+
 ```bash
-# The extension is already built and installed into the pgrx-managed cluster.
-cd extension && cargo pgrx start pg18
-PGBIN=/Users/amin/.pgrx/18.4/pgrx-install/bin
-$PGBIN/dropdb  -h localhost -p 28818 --if-exists manual
-$PGBIN/createdb -h localhost -p 28818 manual
-$PGBIN/psql -h localhost -p 28818 -d manual -f scratchpad/seed.sql
+make eval          # includes manual-examples and manual-inventory
 ```
 
-`scratchpad` here means the session scratchpad directory, not a repo path — nothing from the
-verification harness is committed.
+To drive a page by hand against a `cargo pgrx run` cluster:
+
+```bash
+cd extension && cargo pgrx start pg18
+PGBIN=~/.pgrx/18.4/pgrx-install/bin
+$PGBIN/dropdb  -h localhost -p 28818 --if-exists manual
+$PGBIN/createdb -h localhost -p 28818 manual
+$PGBIN/psql -h localhost -p 28818 -d manual -f eval/manual/seed.sql
+```
+
+The first version of this plan put the seed in a session scratchpad and said "nothing from the
+verification harness is committed". That is why the manual's central claim — every example was
+executed — became unreproducible within three days: the vault the pages were verified against
+no longer existed. The seed is repo state now, and the claim is a gate.

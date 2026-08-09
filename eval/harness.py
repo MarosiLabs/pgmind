@@ -26,6 +26,7 @@ import time
 import urllib.request
 from pathlib import Path
 
+import manual_gate
 import rebinding
 
 ROOT = Path(__file__).resolve().parent
@@ -1093,6 +1094,59 @@ def suite_provenance_integrity():
     return out
 
 
+def suite_manual_examples():
+    """The website manual's SQL examples still run.
+
+    The manual claims every example was executed against a seeded vault and its real
+    output pasted. That claim had nothing holding it up: the seed lived in a scratch
+    directory and was lost, so nobody -- including CI -- could re-check a single
+    block. `eval/manual/seed.sql` is that vault, committed, and this replays all six
+    pages against it in document order.
+    """
+    c = cluster()
+    tmp = Path(tempfile.mkdtemp(prefix="pgmind-manual-"))
+    try:
+        r = manual_gate.suite_manual_sql(c, tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    out = {"status": "ok" if r["ok"] else "fail",
+           "blocks_run": r["blocks_run"], "blocks_skipped": r["blocks_skipped"],
+           "pages": r["pages"], "skips": r["skips"]}
+    if not r["ok"]:
+        out["reason"] = f"{len(r['failures'])} block(s) no longer behave as documented"
+        out["failures"] = r["failures"]
+    return out
+
+
+def suite_manual_inventory():
+    """RFC-000 §"no invented API": the manual names nothing the catalog cannot show.
+
+    Every knowledge.*/pgmind.* identifier in the manual must resolve against a live
+    database, unless it sits in a region the page has itself marked as unshipped --
+    the same badge the reader sees is the one the gate reads.
+    """
+    c = cluster()
+    c.psql("postgres", "DROP DATABASE IF EXISTS pgmind_manual_inv;")
+    c.createdb("pgmind_manual_inv")
+    c.psql("pgmind_manual_inv", file=manual_gate.SEED)
+    r = manual_gate.suite_manual_inventory(c, "pgmind_manual_inv")
+    out = {"status": "ok" if r["ok"] else "fail",
+           "identifiers_checked": r["identifiers_checked"],
+           "functions_in_catalog": r["functions_in_catalog"],
+           "undocumented_functions": r["undocumented_functions"],
+           "declared_absent": r["declared_absent"]}
+    if not r["ok"]:
+        reasons = []
+        if r["unknown"]:
+            reasons.append("names nothing in the catalog: " + ", ".join(r["unknown"]))
+        if r["undocumented_functions"]:
+            reasons.append("shipped but has no reference entry: "
+                           + ", ".join(r["undocumented_functions"]))
+        out["reason"] = "; ".join(reasons)
+        out["unknown"] = r["unknown"]
+    return out
+
+
 def suite_gate_selftest():
     """RFC-005 §5.0(b): every checker the Phase 3 gates rely on must be able to
     FAIL. This repo has three times shipped a gate that could not -- an exit code
@@ -1238,6 +1292,49 @@ beta
                                "SELECT count(*) FROM pgmind.revision WHERE author = '';",
                                tuples_only=True).strip())
     cases["author_check_catches_an_empty_author"] = empty_authors > 0
+
+    # 6. The two documentation gates. A doc gate that cannot fail is worse than
+    #    none: it converts "nobody checked" into "CI says it is fine". The SQL
+    #    checker is fed fabricated server output rather than a broken page, so the
+    #    control tests the decision and not the plumbing around it.
+    page = manual_gate.Block("fake.html", 1, "psql", "sql", "SELECT 1;", "")
+    errs = manual_gate.Block("fake.html", 2, "psql", "sql", "SELECT 1;",
+                             "ERROR:  pgmind: expected_head is not the note's current head\n"
+                             "DETAIL:  PM009")
+    green, boom = "SELECT 1", "psql:x.sql:2: ERROR:  syntax error at or near \"SLECT\""
+    cases["manual_sql_catches_a_block_that_stopped_working"] = (
+        manual_gate.verdict(page, boom) is not None)
+    cases["manual_sql_catches_a_documented_error_that_stopped_raising"] = (
+        manual_gate.verdict(errs, green) is not None)
+    cases["manual_sql_catches_the_wrong_error_code"] = (
+        manual_gate.verdict(errs, "psql:x.sql:2: ERROR:  pgmind: PM016 something else")
+        is not None)
+    cases["manual_sql_stays_quiet_when_page_and_server_agree"] = (
+        manual_gate.verdict(page, green) is None
+        and manual_gate.verdict(errs, "psql:x.sql:2: ERROR:  PM009 nope") is None)
+
+    known = {"knowledge.read"}
+    invented = "<p>Call <code>knowledge.summarize()</code> to do it.</p>"
+    disclaimed = ('<p>Call <code>knowledge.summarize()</code> — '
+                  '<span class="badge next">Phase 5</span>, it does not exist yet.</p>')
+    cases["manual_inventory_catches_an_invented_function"] = (
+        manual_gate.scan_page(invented, known)[0] == ["knowledge.summarize"])
+    cases["manual_inventory_excuses_a_name_the_page_declares_absent"] = (
+        manual_gate.scan_page(disclaimed, known)[0] == []
+        and "knowledge.summarize" in manual_gate.scan_page(disclaimed, known)[1])
+
+    # And the seed vault's own invariant: the manual quotes stats() numbers, so a
+    # seed that drifts from them has to refuse to seed rather than quietly rebase
+    # every example onto a vault the pages do not describe.
+    c.createdb("pgmind_selftest4")
+    c.psql("pgmind_selftest4", file=manual_gate.SEED)
+    c.psql("pgmind_selftest4", "SELECT knowledge.write('st/extra', 'drift'::markdown);")
+    try:
+        c.psql("pgmind_selftest4", file=manual_gate.SEED)
+        cases["seed_refuses_to_produce_a_vault_the_manual_does_not_describe"] = False
+    except RuntimeError as exc:
+        cases["seed_refuses_to_produce_a_vault_the_manual_does_not_describe"] = (
+            "does not match the manual" in str(exc))
 
     ok = all(cases.values())
     out = {"status": "ok" if ok else "fail", "cases": cases}
@@ -1644,6 +1741,10 @@ SUITES = {
     "excision-completeness": suite_excision_completeness,
     "rebinding-edit-corpus": suite_rebinding_corpus,
     "provenance-integrity": suite_provenance_integrity,
+    # Documentation gates: the manual is a claim about the code, so it gets checked
+    # like one. Both run against the committed seed vault in eval/manual/.
+    "manual-examples": suite_manual_examples,
+    "manual-inventory": suite_manual_inventory,
     "gate-selftest": suite_gate_selftest,
     # Phase 4 (RFC-006):     sync-round-trip (incl. unicode/case collisions), torture
     # Phase 5 (RFC-007/008): context-determinism, quality-per-token

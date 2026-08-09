@@ -14,7 +14,7 @@ Where it does not fit: one writer, one machine, offline. That case should stay o
 - [Quick start](https://marosilabs.github.io/pgmind/docs/quickstart.html): what pgmind is for, how to build and install it, and a first vault from `CREATE EXTENSION` to a cited paragraph.
 - [Concepts](https://marosilabs.github.io/pgmind/docs/concepts.html): notes, paths, tiles, blocks, edges, tags and revisions, plus the exact markdown dialect — wiki-links, tags, block-id markers, frontmatter, content hashing.
 - [Internals](https://marosilabs.github.io/pgmind/docs/internals.html): the two storage lanes, the write path, deterministic identity carry and heuristic rebinding, the pre-image history engine, locking and compare-and-swap, erasure and retention.
-- [SQL reference](https://marosilabs.github.io/pgmind/docs/sql.html): every function in the `knowledge` and `pgmind` schemas with signatures, return columns and error codes; the three GUCs; the PM001-PM016 error table.
+- [SQL reference](https://marosilabs.github.io/pgmind/docs/sql.html): every function in the `knowledge` and `pgmind` schemas with signatures, return columns and error codes; the four GUCs; the PM001-PM017 error table.
 - [Cookbook](https://marosilabs.github.io/pgmind/docs/cookbook.html): recipes for concurrent agent memory, backlinks and graph walks, retrieval without embeddings, citations, multi-tenancy, erasure and operations.
 
 ## Docs
