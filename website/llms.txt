@@ -4,7 +4,7 @@
 
 pgmind is pre-alpha; the first release is 0.1.0. It runs on PostgreSQL 16, 17 and 18, is written in Rust with pgrx, is distributed under the PostgreSQL License, and does no network I/O.
 
-The API is SQL. One public schema, `knowledge`, holds the nouns a vault already has: notes, sections, blocks, links, tags. Markdown goes in and the same bytes come out. Three artifacts ship: the `pgmind` extension (vault model, storage, identity, versioning, retrieval, context assembly), the `pgmind` CLI (`import`, `export`, and two-way `sync` against a real folder of markdown), and `pgmind-mcp` (the vault as MCP tools: read, write, append, search, context, history).
+The API is SQL. One public schema, `knowledge`, holds the nouns a vault already has: notes, sections, blocks, links, tags. Markdown goes in and the same bytes come out. Two artifacts ship: the `pgmind` extension (vault model, storage, identity, versioning, retrieval, context assembly) and `pgmind-mcp` (the vault as MCP tools: read, write, append, search, context, history). Moving a folder in or out is `scripts/import-vault.sh` and `scripts/export-vault.sh`, gated byte-for-byte; there is deliberately no two-way sync daemon.
 
 Where it does not fit: one writer, one machine, offline. That case should stay on files.
 

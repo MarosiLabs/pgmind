@@ -210,7 +210,7 @@
         <li><b>Multi-tenant out of the box.</b> Tag each vault with a tenant ID, and Postgres row security keeps every query inside it.</li>
         <li><b>You can really delete.</b> History is kept by default, but erasing something is a real, logged operation, not a workaround.</li>
         <li><b>It is just your database.</b> Notes, indexes and any embeddings you add all live in Postgres, inside the backup you already take.</li>
-        <li><b>Easy in, easy out.</b> <code class="nowrap">pgmind import ./vault</code> brings a markdown folder in. <code class="nowrap">pgmind export ./vault</code> gives it back, unchanged.</li>
+        <li><b>Easy in, easy out.</b> <code class="nowrap">import-vault.sh</code> brings a markdown folder in; <code class="nowrap">export-vault.sh</code> gives it back byte for byte. The round trip is a test, not a promise — and the export refuses rather than half-writing when two note paths would collide on one file.</li>
       </ul>
     </div>
   </section>
@@ -290,7 +290,7 @@ FROM   knowledge.blame('projects/auth');
 
 -- The note as it looked a week ago
 SELECT knowledge.read_as_of('projects/auth', now() - interval '7 days');</code></pre>
-          <p class="note"><span class="badge ok">In main</span> Versions are stored as deltas, so keeping all of them is cheap. <code>source</code> tells you whether a change came from your app or from a folder sync, and blame is honest about the rare cases where a paragraph was matched up by guesswork rather than tracked.</p>
+          <p class="note"><span class="badge ok">In main</span> Versions are stored as deltas, so keeping all of them is cheap. <code>author</code> and <code>source</code> record who claimed the write and how it arrived, and blame is honest about the rare cases where a paragraph was matched up by guesswork rather than tracked.</p>
         </div>
 
         <div class="panel" role="tabpanel" id="panel-context" aria-labelledby="tab-context" tabindex="0" hidden>
@@ -349,8 +349,8 @@ WHERE  block_id = $1;</code></pre>
           <p>Runs in PostgreSQL. The vault model, storage, identity, versioning, retrieval and context assembly.</p>
         </li>
         <li>
-          <b>pgmind</b><span class="where">CLI</span>
-          <p>Runs anywhere. <code>import</code>, <code>export</code> and two-way <code>sync</code> against a real folder of markdown.</p>
+          <b>scripts/</b><span class="where">shell</span>
+          <p>Runs anywhere psql does. <code>export-vault.sh</code> and <code>import-vault.sh</code> move a folder of markdown in and out, byte for byte.</p>
         </li>
         <li>
           <b>pgmind-mcp</b><span class="where">server</span>
@@ -465,9 +465,8 @@ make test    # runs inside a real Postgres</code></pre>
         <ol class="phases">
           <li class="done"><b>Markdown type &amp; parser</b><span>CommonMark + GFM, wiki-links, block refs</span></li>
           <li class="done"><b>The vault model</b><span>notes, blocks, edges, tags, backlinks</span></li>
-          <li class="active"><b>Versioning &amp; concurrency</b><span>revisions, diff, blame, CAS, excision</span></li>
-          <li><b>Sync bridge &amp; import</b><span>two-way sync with a real folder</span></li>
-          <li><b>MCP + <code>context()</code></b><span>first public release</span></li>
+          <li class="done"><b>Versioning &amp; concurrency</b><span>revisions, diff, blame, CAS, excision</span></li>
+          <li class="active"><b>MCP + <code>context()</code></b><span>first public release</span></li>
         </ol>
         <p class="status-foot">
           Two more phases follow 0.1.0: the optional vector lane, then the retrieval

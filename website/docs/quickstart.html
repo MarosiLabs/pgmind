@@ -201,8 +201,9 @@
         <tr>
           <td>Tenants must be isolated, and you would rather prove it with row
               security than with directory naming.</td>
-          <td>You need the files themselves on disk today — the sync bridge that
-              keeps a folder and a vault in step is Phase 4 and is not built.</td>
+          <td>You want a folder and a vault kept continuously in step by a
+              daemon. pgmind deliberately does not do that; it exports and
+              imports on demand, byte for byte.</td>
         </tr>
         <tr>
           <td>You already run PostgreSQL and would rather have one backup than
@@ -1170,13 +1171,14 @@ NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not ex
               columns.</td>
         </tr>
         <tr>
-          <td>The <code>pgmind</code> CLI — <code>import</code>,
-              <code>export</code>, two-way <code>sync</code> between a folder and
-              a vault</td>
-          <td><span class="badge next">Phase 4</span></td>
-          <td>A shell loop over <code>psql</code> imports a directory, and
-              <code>knowledge.read</code> writes it back out. See
-              <a href="cookbook.html#operations">operations</a>.</td>
+          <td>A two-way <code>sync</code> daemon between a folder and a vault</td>
+          <td><span class="badge next">Cut</span></td>
+          <td>Withdrawn 2026-08-09, deliberately and permanently: it served the
+              single-writer local case, and every editor save is a whole-note
+              replace, which is the worst input for identity rebinding.
+              <code>scripts/export-vault.sh</code> and
+              <code>scripts/import-vault.sh</code> move a folder in and out byte
+              for byte. See <a href="cookbook.html#operations">operations</a>.</td>
         </tr>
         <tr>
           <td><code>pgmind-mcp</code> — the vault exposed as MCP tools</td>

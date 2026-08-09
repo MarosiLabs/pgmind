@@ -21,7 +21,6 @@ pgmind ships as three pieces, all deterministic:
 | Artifact | Runs | Purpose |
 |---|---|---|
 | **`pgmind` extension** | Inside PostgreSQL | The vault model: markdown type, block storage, identity, versioning, links/tags, retrieval, context assembly, token budgeting |
-| **`pgmind` CLI** | Anywhere | Import/export/two-way sync between a real folder and the vault; admin utilities |
 | **`pgmind-mcp` server** | Anywhere | Exposes the vault to agents as MCP tools (read/write/append/search/context/history) |
 
 The extension is the product; the CLI is the migration path and the humans' bridge; the MCP server is the agents' front door.
@@ -33,8 +32,8 @@ These walkthroughs are the product spec in narrative form. If an implementation 
 ### Walkthrough A — Day 1: bring your brain (5-minute quickstart)
 
 ```bash
-$ pgmind import ./my-vault --db postgres://…
-  imported 412 notes · 9,381 blocks · 1,204 links · 87 tags   (4.2s)
+$ ./scripts/import-vault.sh ./my-vault mydb
+  import-vault: imported 412 note(s), skipped 0
 ```
 
 ```sql
@@ -47,8 +46,8 @@ SELECT * FROM knowledge.orphans();                        -- notes nothing links
 ```
 
 ```bash
-$ pgmind export ./my-vault-copy      # and you can always leave
-$ diff -r ./my-vault ./my-vault-copy # byte-faithful
+$ ./scripts/export-vault.sh mydb ./my-vault-copy   # and you can always leave
+$ diff -r ./my-vault ./my-vault-copy               # byte-faithful, and gated
 ```
 
 ### Walkthrough B — Many agents, one brain, no clobbering
@@ -252,7 +251,7 @@ The CLAUDE.md `@`-imports pattern, generalized. Guarantee: **same vault state + 
 - **`write` with `expected_head`** — compare-and-swap on the note's head revision. Loud, typed failure; never last-writer-wins silently.
 - **`append_to_section`** — serialized per (note, section) via a transaction-scoped advisory lock on `hash(note_id, heading_path)` (sections have no row of their own to lock); final lock granularity is an RFC-005 decision. Concurrent appends both land, ordered by commit order.
 - **`patch_block` with `expected_hash`** — CAS at block granularity, so two agents editing *different* paragraphs of one note never conflict at all.
-- **Sync vs API races** — the sync bridge's state file supplies the three-way merge base (§12), while `source` provenance marks sync-originated revisions for downstream consumers; the API always wins the current transaction, sync rebases.
+- **External-editor races** — there is no sync daemon to race with (§12). A folder round-trips through the export/import scripts as ordinary `write()` calls, so it takes the same CAS and rebinding path as any other client, with no privileged merge base.
 
 This section is the core "why not files" payoff — files give none of these.
 
@@ -269,12 +268,33 @@ Identity is minted by the write path (Law 4). When a whole document arrives from
 
 Every rebind records confidence and `bind='rebind'` — downstream consumers (blame, citations, the embedding queue) can see exactly where identity is inferred rather than known. The adversarial edit corpus (eval/) publishes the match-rate honestly, tracked over time. Optional escape hatch: serialized `^block-id` markers for users who want deterministic round-trips through external editors.
 
-## 12. Sync bridge (normative home: RFC-006)
+## 12. Getting a folder in and out — **no sync bridge** *(decided 2026-08-09)*
 
-- `pgmind import DIR` / `export DIR` / `sync DIR [--watch]`.
-- Local state file (`.pgmind/state`) records per file: note ID, head revision, content hash at last sync ⇒ classic three-way merge: local-only change → push (through rebinding); remote-only → pull; both → conflict, default **fail with a list** (`--strategy ours|theirs|fork` opt-in; `fork` writes `name.conflict-<rev>.md`).
-- `.pgmindignore` (gitignore syntax). Git-friendly: sync never touches `.git`, and exported files are stable so diffs stay clean.
-- Import is idempotent: re-importing an unchanged vault is a no-op (hash short-circuit).
+The two-way sync bridge was cut and [RFC-006](rfcs/RFC-006-sync-bridge-and-import-export.md)
+withdrawn; [handbook §11](PGMIND.md#11-risks--open-questions) carries the argument. Short
+version: continuous two-way sync served the single-writer local case the handbook says to
+cede, and it was the largest generator of the whole-document replaces that drive the
+rebinding risk it was cited as mitigating.
+
+What remains is what law 4 actually needs:
+
+- [`scripts/export-vault.sh DB DIR`](../scripts/export-vault.sh) — byte-exact, deterministic
+  file order, LF endings. **Refuses and writes nothing** when two paths differ only by case or
+  Unicode normal form, because on APFS/NTFS they are one file and either one silently destroys
+  the other. Warns (does not fail) on paths holding characters Windows forbids.
+- [`scripts/import-vault.sh DIR DB`](../scripts/import-vault.sh) — one transaction per note,
+  resumable, `*.md` only, exactly one `.md` stripped. Invalid paths are reported and skipped,
+  never renamed into validity.
+- Idempotent by construction: a byte-identical `write()` creates no revision, so re-running
+  either script over unchanged input is a no-op.
+- **Gated.** `make eval`'s `folder-round-trip` runs both over a corpus of legal-but-hostile
+  paths — apostrophe, colon, `?`, `%`, a path already ending `.md`, an accented NFC segment, a
+  four-byte emoji, a note with no trailing newline, a note ending on a blank line — and asserts
+  the bytes come back. The naive loop this repo shipped in its own cookbook lost 2 of 8 such
+  notes and printed one error doing it.
+
+No `.pgmindignore`, no state file, no watch mode, no conflict strategies: those existed only
+for the two-way case.
 
 ## 13. Security & multi-tenancy (normative home: RFC-003 + RFC-007)
 
@@ -298,12 +318,11 @@ Design targets (to validate, not promises): vaults to **100k notes / 10M blocks 
 | 1 | Markdown type & parser | 002 | `markdown` type, AST fns, round-trip | M |
 | 2 | The vault model | 003, 004 (write-path part accepted) | notes/blocks/links/tags in SQL | L |
 | 3 | Versioning & concurrency | 004 (final), 005, 011 | history, CAS, append, rebinding, excision | L (the hard one) — **exited 2026-08-06** |
-| 4 | Sync bridge | 006 | import/export/sync CLI, quickstart | M |
 | 5 | MCP + context ⇒ **pgmind 0.1.0** | 007, 008, 012 | MCP server, `context()` v1, packaging | M |
 | 6 | Optional vector lane | 009 | embedding hooks + queue, blended search | S |
 | 7 | Retrieval & context maturation | 010, 008-rev | planner, fusion, explain, BM25 adapter | M/L |
 
-Rules binding all phases (handbook §8/§9): build order parser → storage → indexes → planner; an RFC is accepted before its phase's implementation starts; a phase exits only when its benchmark gate passes *and is published*; the quickstart must pass continuously from Phase 4 on. Effort bands deliberately avoid dates — the honest calibration is in the handbook (comparable extensions: 4-6 years to maturity; phases 0-5 ≈ 12-18 months for a small team).
+Rules binding all phases (handbook §8/§9): build order parser → storage → indexes → planner; an RFC is accepted before its phase's implementation starts; a phase exits only when its benchmark gate passes *and is published*; the quickstart must pass continuously from Phase 5 on (it was Phase 4's, and Phase 4 was cut). Effort bands deliberately avoid dates — the honest calibration is in the handbook (comparable extensions: 4-6 years to maturity; phases 0-5 ≈ 12-18 months for a small team).
 
 ## 16. Phase details
 
@@ -330,14 +349,13 @@ Rules binding all phases (handbook §8/§9): build order parser → storage → 
 **Goal:** history for everything; many writers, zero silent clobbers; honest rebinding.
 **RFCs:** RFC-004 (final — rebinding pipeline, thresholds, split/merge policy); RFC-005 (revisions, delta/keyframe format, CAS + append semantics, excision mechanics); RFC-011 (provenance model: authors, sources, confidence).
 **Deliverables:** revision engine (append-only, deltas + keyframes); history/diff/blame/as-of; `write` CAS, `append_to_section`, `patch_block`; `move`/`delete` (tombstone revisions); rebinding pipeline; excision + retention + audit log.
-**Gate:** adversarial edit corpus with published match-rate (the number is the deliverable — start honest, improve); concurrency suite (CAS conflicts, concurrent appends, ~~interleaved rebind-source (`source='sync'`) and API writes~~ — **deferred to Phase 4, recorded at the exit**: `revision.source` is hardcoded `'api'` and the only thing that can set `'sync'` is the sync bridge, which is RFC-006; the plan already puts true bridge interleaving in Phase 4's torture suite); storage-growth benchmark under revision load.
+**Gate:** adversarial edit corpus with published match-rate (the number is the deliverable — start honest, improve); concurrency suite (CAS conflicts, concurrent appends, ~~interleaved rebind-source (`source='sync'`) and API writes~~ — **deferred at the Phase 3 exit, and now withdrawn**: the clause needed something able to write `source='sync'`, that was the sync bridge, and the bridge was cut on 2026-08-09 (§12). Nothing will produce `'sync'`; RFC-012 retires the CHECK value alongside `'rebind'`. `eval/published/phase-3-gates.json` keeps the original deferral text with a supersedes note appended — the record of what was true at the exit is not rewritten); storage-growth benchmark under revision load.
 **Risks:** rebinding quality (mitigation: corpus-driven iteration, `^id` escape hatch); delta-chain read cost (mitigation: keyframe cadence tuning in the benchmark).
 
-### Phase 4 — Sync bridge
-**Goal:** one-command migration in; one-command exit; humans keep their editors.
-**RFC-006 must decide:** state-file format, three-way merge semantics, conflict strategies, ignore rules, watch mode, git interaction, freshness metadata, and the path↔filename mapping (`.md` extension handling, Windows-illegal characters, case-insensitive-filesystem and NFC/NFD normalization collisions on export).
-**Deliverables:** `pgmind import/export/sync [--watch]`; `.pgmindignore`; freshness metadata on synced notes; the **5-minute quickstart**, tested in CI from here forever.
-**Gate:** round-trip fidelity import→export (incl. Unicode-normalization and case-collision cases); sync torture suite (rename storms, concurrent edits both sides, partial failures); quickstart passes on a clean machine.
+### Phase 4 — **cut 2026-08-09**
+Was a two-way sync bridge. Cut with [RFC-006](rfcs/RFC-006-sync-bridge-and-import-export.md) withdrawn; the argument is in [handbook §11](PGMIND.md#11-risks--open-questions) and §12 above. The part of it law 4 needed — byte-exact folder round-trip — shipped as two gated shell scripts with Phase 3's tail, so nothing is waiting on this slot.
+
+**Phase numbering is unchanged.** Phase 5 follows Phase 3. Renumbering would falsify three frozen RFCs and four published gate artifacts that name their phase, to buy nothing.
 
 ### Phase 5 — MCP + deterministic context ⇒ **first public release: pgmind 0.1.0**
 **Goal:** the headline demo end-to-end, zero AI configured.

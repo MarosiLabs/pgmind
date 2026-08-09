@@ -1900,42 +1900,30 @@ dropdb --if-exists vault
 createdb vault
 psql -q -d vault -c "CREATE EXTENSION pgmind;"
 
-cd /tmp/vault-in
-find . -name '*.md' | sed 's|^\./||' | while read -r f; do
-  psql -qt -d vault -v ON_ERROR_STOP=1 &lt;&lt;SQL
-\set doc \`cat "$f"\`
-SELECT knowledge.write('${f%.md}', (:'doc' || E'\n')::markdown);
-SQL
-done
+./scripts/import-vault.sh /tmp/vault-in vault
 psql -d vault -c "SELECT path, head_revision FROM knowledge.notes();"</code></pre>
 <pre class="out"><code class="out">NOTICE:  database "vault" does not exist, skipping
 WARNING:  pgmind: lz4 toast compression unavailable on this server; using default
- 019fd643-…
-
- 019fd643-…
-
+import-vault: imported 2 note(s), skipped 0
      path      |            head_revision             
 ---------------+--------------------------------------
- one           | 019fd643-…
- projects/auth | 019fd643-…
+ one           | 019fe52b-6313-…
+ projects/auth | 019fe52b-634e-…
 (2 rows)</code></pre>
 </div>
-    <p><span class="badge next">Phase 4</span> <code>pgmind import</code> replaces this. Two things to watch: psql's backtick <code>\set</code> strips trailing newlines, which is why the <code>|| E'\n'</code> is there, and the extension emits the <code>lz4</code> warning at <code>CREATE EXTENSION</code> on servers without lz4 — a warning, not an error.</p>
+    <p><span class="badge ok">In main</span> Write the loop yourself and it will bite you, so the script is the recipe. Two traps it exists to avoid: psql's backtick <code>\set</code> strips <em>every</em> trailing newline, which silently drops the blank line a note ends on — the script appends a sentinel byte and removes it server-side with <code>left(:'doc', -1)</code>; and <code>psql -c</code> does not expand <code>:'var'</code>, so a parameterised statement has to arrive on stdin. Invalid paths are reported and skipped, never renamed into validity. The <code>lz4</code> warning at <code>CREATE EXTENSION</code> is a warning, not an error.</p>
 
     <h3 id="r-export">Export the vault back to files</h3>
     <p><b>Problem.</b> Round-trip the whole thing to disk and check it is the same bytes.</p>
 <div class="code">
   <div class="cap">shell</div>
-<pre><code class="shell">rm -rf /tmp/vault-out &amp;&amp; mkdir -p /tmp/vault-out
-psql -Aqt -d vault -c "SELECT path FROM knowledge.notes()" | while read -r p; do
-  mkdir -p "/tmp/vault-out/$(dirname "$p")"
-  psql -Aqt -d vault -c "SELECT knowledge.read('$p')" \
-    | perl -0777 -pe 's/\n\z//' &gt; "/tmp/vault-out/$p.md"
-done
+<pre><code class="shell">rm -rf /tmp/vault-out
+./scripts/export-vault.sh vault /tmp/vault-out
 diff -r /tmp/vault-in /tmp/vault-out &amp;&amp; echo "round trip is byte-exact"</code></pre>
-<pre class="out"><code class="out">round trip is byte-exact</code></pre>
+<pre class="out"><code class="out">export-vault: wrote 2 note(s) to /tmp/vault-out
+round trip is byte-exact</code></pre>
 </div>
-    <p><span class="badge next">Phase 4</span> <code>knowledge.read</code> returns <code>preamble‖tiles</code> concatenated, which is the source byte for byte; the <code>perl</code> filter removes the record separator <code>psql</code> adds, and <code>diff -r</code> is the assertion. See <a href="internals.html#lanes">the two lanes</a>.</p>
+    <p><span class="badge ok">In main</span> <code>knowledge.read</code> returns <code>preamble‖tiles</code> concatenated, which is the source byte for byte; the script strips exactly one trailing newline (the record separator psql adds) rather than all of them. It also <b>refuses to write anything</b> if two note paths differ only by case or Unicode normal form — on APFS and NTFS those are one file, and writing either one destroys the other with no error. The hand-written version of this loop lost 2 of 8 notes on a vault of legal-but-awkward paths; <code>make eval</code>'s <code>folder-round-trip</code> suite is what keeps this one honest. See <a href="internals.html#lanes">the two lanes</a>.</p>
 
     <h3 id="r-backup">A backup checklist</h3>
     <p><b>Problem.</b> Know what a dump does and does not carry.</p>

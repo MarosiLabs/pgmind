@@ -25,7 +25,8 @@
     {
       "item": "concurrency gate clause: interleaved source='sync' and API writes (product plan \u00a716, Phase 3)",
       "reason": "revision.source is hardcoded 'api' and nothing can set it to 'sync'. The only thing that could is the sync bridge, which is RFC-006 in Phase 4 -- the plan itself puts true bridge interleaving in Phase 4's torture suite. Deferring is recorded rather than skipped so the clause is not mistaken for covered.",
-      "lands_in": "Phase 4, RFC-006"
+      "lands_in": "Phase 4, RFC-006",
+      "superseded": "2026-08-09: Phase 4 and RFC-006 were cut (handbook 11). Nothing will ever write source='sync'; the clause is withdrawn rather than deferred, and RFC-012 retires the CHECK value with 'rebind'."
     },
     {
       "item": "revision.message stays NULL",

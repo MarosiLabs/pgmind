@@ -238,14 +238,16 @@ published — including the unflattering ones.
 | 0 | Groundwork | ✅ exited |
 | 1 | Markdown type & parser — CommonMark + GFM, wiki-links, block refs | ✅ exited |
 | 2 | The vault model — notes, blocks, edges, tags, backlinks | ✅ exited |
-| 3 | Versioning & concurrency — revisions, diff, blame, CAS, rebinding, excision | 🔨 **in progress** |
-| 4 | Sync bridge — `pgmind import` / `export` / two-way `sync` | — |
+| 3 | Versioning & concurrency — revisions, diff, blame, CAS, rebinding, excision | ✅ exited |
+| 4 | ~~Sync bridge~~ — **cut 2026-08-09** ([why](docs/PGMIND.md#11-risks--open-questions)); export/import ship as [scripts/](scripts/) | ✂️ |
 | 5 | MCP server + `knowledge.context()` — **the first public release, 0.1.0** | — |
 | 6 | Optional vector lane (pgvector hooks) | — |
 | 7 | Retrieval planner & context maturation | — |
 
-Two artifacts beyond the extension are planned but not built: a `pgmind` CLI (Phase 4)
-and `pgmind-mcp`, the vault as MCP tools (Phase 5).
+One artifact beyond the extension is planned but not built: `pgmind-mcp`, the vault as
+MCP tools (Phase 5). Moving a vault in or out needs no CLI — [`scripts/export-vault.sh`](scripts/export-vault.sh)
+and [`scripts/import-vault.sh`](scripts/import-vault.sh) do it, and `make eval`'s
+`folder-round-trip` suite proves the bytes survive paths chosen to break them.
 
 ## Build, run, test
 

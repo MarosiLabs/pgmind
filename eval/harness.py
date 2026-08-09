@@ -1094,6 +1094,94 @@ def suite_provenance_integrity():
     return out
 
 
+ROUND_TRIP_PATHS = [
+    # Every one of these is a legal note path per core/src/path.rs, and every one
+    # broke the obvious shell loop. The apostrophe ended a psql statement early and
+    # left a zero-byte file; the rest ride along because a path that survives
+    # quoting still has to survive the filesystem.
+    ("notes/it's mine", "# Apostrophe\n"),
+    ("notes/quarterly: q3", "# Colon, illegal on Windows\n"),
+    ("notes/what?", "# Question mark\n"),
+    ("notes/50% done", "# Percent\n"),
+    ("notes/readme.md", "# A path that already ends in .md\n"),
+    ("notes/café", "# NFC accent\n"),
+    ("notes/\U0001f9e0 brain", "# Four-byte emoji\n"),
+    ("a/b/c/d/e/deep", "# Nested\n"),
+    ("notes/no-newline", "# Ends without a trailing newline"),
+    ("notes/blank-tail", "# Ends on a blank line\n\n"),
+    ("notes/plain", "# Plain\n"),
+]
+
+
+def suite_folder_round_trip():
+    """Handbook law 4: you can leave, and the bytes come back.
+
+    pgmind ships no CLI -- Phase 4's sync bridge was cut, and RFC-006 withdrawn,
+    once measurement showed two-way sync served the single-writer local case the
+    handbook says to cede. What survives is the half the law actually needs:
+    scripts/export-vault.sh and scripts/import-vault.sh, gated here.
+
+    The corpus is adversarial on purpose. The obvious shell loop -- the one this
+    repo shipped in its own cookbook -- lost 2 of 8 notes on paths like these, and
+    printed one error while doing it.
+    """
+    c = cluster()
+    src, dst = "pgmind_rt_src", "pgmind_rt_dst"
+    for db in (src, dst):
+        c.psql("postgres", f"DROP DATABASE IF EXISTS {db};")
+        c.createdb(db)
+
+    for path, body in ROUND_TRIP_PATHS:
+        c.psql(src, "SELECT knowledge.write($$" + path + "$$, $$" + body + "$$::markdown);")
+
+    tmp = Path(tempfile.mkdtemp(prefix="pgmind-rt-"))
+    env = {**os.environ, "PGHOST": str(c.sock), "PGUSER": "pgmind",
+           "PATH": f"{c.bindir}:{os.environ['PATH']}"}
+
+    def run(script, *args):
+        return subprocess.run([str(REPO / "scripts" / script), *args],
+                              capture_output=True, text=True, env=env)
+
+    checks = {}
+    try:
+        out = run("export-vault.sh", src, str(tmp / "vault"))
+        checks["export_succeeded"] = out.returncode == 0
+        # A path with a Windows-illegal character exports fine on POSIX, but the
+        # script has to say so -- a silent export produces a repo half a team
+        # cannot check out.
+        checks["export_warned_about_windows_hostile_paths"] = "Windows forbids" in out.stderr
+
+        files = sorted(p for p in (tmp / "vault").rglob("*.md"))
+        checks["every_note_became_a_file"] = len(files) == len(ROUND_TRIP_PATHS)
+
+        back = run("import-vault.sh", str(tmp / "vault"), dst)
+        checks["import_succeeded"] = back.returncode == 0
+
+        def fingerprint(db):
+            return c.psql(db, "SELECT path || '  ' || md5(knowledge.read(path)::text) "
+                              "FROM knowledge.notes() ORDER BY path;", tuples_only=True)
+
+        checks["round_trip_is_byte_exact"] = fingerprint(src) == fingerprint(dst)
+
+        # Refuse, don't half-export. Two paths differing only by case are one file
+        # on APFS and NTFS; writing either one silently destroys a note.
+        c.psql(src, "SELECT knowledge.write('Notes/Plain', '# Upper'::markdown);")
+        refused = run("export-vault.sh", src, str(tmp / "collide"))
+        checks["collision_refuses"] = refused.returncode == 3
+        checks["collision_names_both_paths"] = (
+            "Notes/Plain" in refused.stderr and "notes/plain" in refused.stderr)
+        checks["collision_wrote_nothing"] = not list((tmp / "collide").rglob("*.md"))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    ok = all(checks.values())
+    out = {"status": "ok" if ok else "fail", "checks": checks,
+           "notes_round_tripped": len(ROUND_TRIP_PATHS)}
+    if not ok:
+        out["reason"] = "; ".join(k for k, v in checks.items() if not v)
+    return out
+
+
 def suite_manual_examples():
     """The website manual's SQL examples still run.
 
@@ -1322,6 +1410,35 @@ beta
     cases["manual_inventory_excuses_a_name_the_page_declares_absent"] = (
         manual_gate.scan_page(disclaimed, known)[0] == []
         and "knowledge.summarize" in manual_gate.scan_page(disclaimed, known)[1])
+
+    # 7. The round-trip checker. It compares fingerprints, and a fingerprint
+    #    comparison that cannot see a single flipped byte is a green light with
+    #    nothing behind it — which is exactly how the manual's "every example was
+    #    executed" claim survived losing the vault it was executed against.
+    c.createdb("pgmind_selftest5")
+    c.createdb("pgmind_selftest6")
+    c.psql("pgmind_selftest5", "SELECT knowledge.write('rt/n', E'# One\n\nbody\n'::markdown);")
+    rt = Path(tempfile.mkdtemp(prefix="pgmind-rt-selftest-"))
+    try:
+        env = {**os.environ, "PGHOST": str(c.sock), "PGUSER": "pgmind",
+               "PATH": f"{c.bindir}:{os.environ['PATH']}"}
+        subprocess.run([str(REPO / "scripts" / "export-vault.sh"),
+                        "pgmind_selftest5", str(rt / "v")],
+                       check=True, capture_output=True, env=env)
+        # One byte, in the middle of a note nobody would look at twice.
+        f = rt / "v" / "rt" / "n.md"
+        f.write_text(f.read_text().replace("body", "bodx"))
+        subprocess.run([str(REPO / "scripts" / "import-vault.sh"),
+                        str(rt / "v"), "pgmind_selftest6"],
+                       check=True, capture_output=True, env=env)
+
+        def fp(db):
+            return c.psql(db, "SELECT path || md5(knowledge.read(path)::text) "
+                              "FROM knowledge.notes() ORDER BY path;", tuples_only=True)
+
+        cases["round_trip_check_catches_one_flipped_byte"] = fp("pgmind_selftest5") != fp("pgmind_selftest6")
+    finally:
+        shutil.rmtree(rt, ignore_errors=True)
 
     # And the seed vault's own invariant: the manual quotes stats() numbers, so a
     # seed that drifts from them has to refuse to seed rather than quietly rebase
@@ -1741,6 +1858,9 @@ SUITES = {
     "excision-completeness": suite_excision_completeness,
     "rebinding-edit-corpus": suite_rebinding_corpus,
     "provenance-integrity": suite_provenance_integrity,
+    # Handbook law 4. Phase 4's sync bridge was cut and RFC-006 withdrawn; the
+    # exportability the law promises is held up by scripts/, gated here.
+    "folder-round-trip": suite_folder_round_trip,
     # Documentation gates: the manual is a claim about the code, so it gets checked
     # like one. Both run against the committed seed vault in eval/manual/.
     "manual-examples": suite_manual_examples,

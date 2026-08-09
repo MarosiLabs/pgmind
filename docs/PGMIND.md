@@ -52,7 +52,7 @@ Scenarios the roadmap must serve end-to-end:
 
 1. **The shared agent brain (the headline).** A backend runs many agent instances; they read and write one knowledge base concurrently — project decisions, learned facts, task state, conventions. Writes are transactional (no clobbered memory), reads are queryable ("everything tagged `#architecture` touched this week"), and every change has history.
 2. **Claude-Code-style memory, server-side.** The exact filesystem-memory pattern (memory files, imports, topic notes) relocated into Postgres for a hosted product — same mental model, none of the filesystem drawbacks.
-3. **Obsidian-not-local.** A team knowledge vault with wiki-links, backlinks, tags, and block references — in the database, with RLS for access control, agents as first-class readers/writers, and a two-way bridge to real folders for humans who want their local editor.
+3. **Obsidian-not-local.** A team knowledge vault with wiki-links, backlinks, tags, and block references — in the database, with RLS for access control, agents as first-class readers/writers. Humans who want their local editor export a folder and work in it; pgmind is not trying to be a live mirror of one person's disk (§11).
 4. **SQL-joined knowledge.** Context assembly filtered by operational data in the same database (`WHERE customer_id = …`) — impossible for filesystem vaults and managed RAG APIs alike.
 5. **Auditable knowledge.** Block-level history, diff, and blame; answers cite block IDs at specific revisions, verifiable after the knowledge has changed.
 
@@ -65,7 +65,7 @@ Scenarios the roadmap must serve end-to-end:
 - Per-block storage with stable identity; append-only versioning with audited excision.
 - Agent-safe write operations (compare-and-swap, append-to-section, block-level patch).
 - Deterministic retrieval and context assembly (links, structure, tags, FTS, recency) with token budgeting.
-- Filesystem/git two-way sync bridge; MCP server.
+- MCP server. *(A filesystem/git two-way sync bridge was in scope through 2026-08-09 and was cut; §11 records why.)*
 - **Optional vector lane:** schema hooks for pgvector embeddings the *user* populates; retrieval uses them when present.
 
 **Non-goals (v1) — explicit, so scope creep has to argue with this list:**
@@ -86,7 +86,7 @@ The adoption question is "why would people choose this over a folder of md files
 1. **The vault model, not the database model.** The API's nouns are the ones agent developers already think in: notes, paths, sections, links, tags, blocks. `knowledge.read('projects/auth')` returns markdown. Nobody needs to learn a "knowledge object" ontology to write a note.
 2. **Markdown in, markdown out — always.** Every note round-trips as plain markdown, byte-faithfully. Any editor, any diff tool, any LLM prompt template that speaks markdown works unchanged. The database is invisible until you want it.
 3. **File-shaped reads, database-strength writes.** Reading feels like reading files. Writing gives what files never could: transactions, compare-and-swap on revision (two agents can't silently clobber each other's memory), `append_to_section` (the single most common agent memory operation, made atomic), block-addressed patches.
-4. **No lock-in, ever: the vault is always exportable.** `pgmind export ./vault` reproduces a plain markdown folder; `pgmind sync ./vault` keeps a real folder and the database in two-way sync. Migration *in* is one command (`pgmind import ./vault`); migration *out* is one command. People trust a brain they can walk away with — and the sync bridge means local Obsidian and server pgmind aren't rivals but two views of the same vault.
+4. **No lock-in, ever: the vault is always exportable.** Every note is markdown at a path, stored in ordinary tables; `knowledge.read()` returns the source bytes exactly, and `pg_dump` is a complete backup. Leaving is a folder of `.md` files produced by [`scripts/export-vault.sh`](../scripts/export-vault.sh), arriving is [`scripts/import-vault.sh`](../scripts/import-vault.sh), and the round trip is a gate (`folder-round-trip`) over a corpus of paths chosen to break it — not a claim. People trust a brain they can walk away with. *(pgmind deliberately ships no two-way sync daemon; see §11.)*
 5. **Queries you couldn't ask a folder.** Backlinks, orphans, tag intersections, "notes linking to this block," link-distance neighborhoods, history/blame — one SQL call or MCP tool each. This is where "why bother" turns into "oh."
 6. **Deterministic context assembly.** `context()` walks pins, transclusions, and links — explainable, reproducible, no embeddings needed. The CLAUDE.md-imports pattern, generalized.
 7. **Vectors are a lane, not a lane change.** If the user populates the embedding hooks (pgvector), search and `context()` blend that signal in. If not, everything works. pgmind never generates an embedding.
@@ -99,7 +99,7 @@ The adoption question is "why would people choose this over a folder of md files
 
 **Markdown is a boundary, not storage.** Markdown is the serialization format at the edges; internally, knowledge lives as per-block rows. The parser emits structure, positions, and content hashes — the write path assigns identity. *(audit C3)*
 
-**Identity is minted on write, kept by policy.** Every block has a permanent surrogate ID assigned when it is created through the write path. When whole documents are replaced from outside (re-import, sync), IDs are *re-bound* heuristically with explicit confidence semantics — never silently. Split/merge/move each have defined rules (RFC-004). We do not claim what no system on earth delivers: deterministic identity recovered from plain-text diffing. *(audit C1)*
+**Identity is minted on write, kept by policy.** Every block has a permanent surrogate ID assigned when it is created through the write path. When whole documents are replaced from outside (a re-import, or any `write()` of a full note), IDs are *re-bound* heuristically with explicit confidence semantics — never silently. Split/merge/move each have defined rules (RFC-004). We do not claim what no system on earth delivers: deterministic identity recovered from plain-text diffing. *(audit C1)*
 
 **Append-only by default; forgetting is a feature, audited.** Updates create revisions; history is the default. Excision (legal erasure, retention, compaction) is a first-class, audited operation — every shipped immutable database (Datomic, Dolt, XTDB) learned this; we start with it. *(audit C4)*
 
@@ -117,7 +117,7 @@ The adoption question is "why would people choose this over a folder of md files
 
 ```
    Humans ── editors / Obsidian ──┐
-                                  │ two-way sync
+                                  │ export / import (scripts/)
    Applications ───── SQL ────┐   │        ┌──── MCP ──── Agents
                               │   │        │
         ┌─────────────────────▼───▼────────▼─────────────────────┐
@@ -144,7 +144,7 @@ The adoption question is "why would people choose this over a folder of md files
              own pipeline, never by pgmind
 ```
 
-Companion tools (`pgmind` CLI for import/export/sync, MCP server) run outside the database and are equally deterministic. There is no pgmind process that calls a model.
+Companion tools (the import/export scripts, MCP server) run outside the database and are equally deterministic. There is no pgmind process that calls a model.
 
 ## 6.2 Architecture laws
 
@@ -167,7 +167,7 @@ Constraints, not preferences. An RFC that violates one must say so in its title.
 - `note(id, path, title, properties jsonb, head_revision, …)` — the vault namespace
 - `block(id uuid, note_id, kind, content, content_hash, attrs, …)` — small rows, LZ4 TOAST, insert-only autovacuum tuning
 - `block_revision(block_id, revision_id, content_delta | keyframe, …)` — delta chains with periodic keyframes (MediaWiki precedent, ~98% compression); history tables partitioned
-- `revision(id, note_id, parent, author, source, created_at, …)` — append-only; `source` distinguishes API writes from sync-bridge rebinds
+- `revision(id, note_id, parent, author, source, created_at, …)` — append-only; `source` records how the write arrived (`'api'` today; `'sync'` and `'rebind'` are legacy CHECK values nothing can set, retired by RFC-012)
 - `edge(src_block, dst_note | dst_block, kind, …)` — wiki-links, md links, transclusions, block refs; **native edge tables, traversed with recursive CTEs [DECIDED]** — the v0.2 graph-backend question dissolves because the core graph is deterministic links only (no semantic graph engine needed); PG18 SQL/PGQ tracked for query ergonomics
 - `tag(block_id, tag)` / properties from frontmatter — extracted at write time
 - `embedding_hook(block_id, content_hash, model, vector, …)` — **optional**, pgvector-typed, populated only by the user
@@ -216,9 +216,8 @@ Append-only revisions; delta chains + keyframes; history/diff/blame; **compare-a
 *User can:* run many agents against one brain without lost updates; see block-level history; legally erase.
 *Benchmark:* published adversarial edit corpus with rebinding match-rate targets (the project's #1 research problem — experimental track with measured progress); concurrency test suite.
 
-### Phase 4 — Sync bridge & import
-`pgmind import ./vault`, `pgmind export ./vault`, `pgmind sync ./vault` (two-way, built on Phase 3 rebinding); git-friendly; freshness metadata; the **5-minute quickstart** as a tested deliverable.
-*User can:* migrate an existing vault or memory directory in one command — and leave in one command; keep local Obsidian and the server brain in sync.
+### Phase 4 — **cut 2026-08-09**
+Was: a two-way filesystem/git sync bridge (`pgmind sync --watch`). Removed after measurement; §11 has the argument, [RFC-006](rfcs/RFC-006-sync-bridge-and-import-export.md) the record. What the law-4 promise actually needed — byte-exact export and import — ships as gated shell scripts instead, and landed with Phase 3. Phase numbering is unchanged: Phase 5 follows Phase 3, and the published Phase 0-3 gates keep their numbers.
 
 ### Phase 5 — MCP + deterministic context ⇒ **first public release, pgmind 0.1.0**
 `knowledge.context()` v1: pins + transclusions + link-distance traversal + recency, deduplicated by content hash, ordered, packed to a token budget with block-ID citations; composable primitives public (`search` over FTS/tags/properties, `traverse`, `expand`, `backlinks`); **MCP server** exposing the lot (read/write/append/search/context as tools).
@@ -273,13 +272,25 @@ This project is currently exploration/learning; this section keeps reality in vi
 
 | Risk | Mitigation |
 |---|---|
-| **Rebinding quality plateaus** (heuristic identity matching too lossy under external edits) | Experimental track with public corpus from Phase 3; the write API remains the deterministic path; sync bridge minimizes full-document replaces; optional serialized `^id` mode as escape hatch |
+| **Rebinding quality plateaus** (heuristic identity matching too lossy under external edits) | Experimental track with public corpus from Phase 3; the write API remains the deterministic path; **cutting two-way sync removes the largest source of whole-document replaces** (see below); optional serialized `^id` mode as escape hatch |
 | **"Why not just files + SQLite/git?"** (the low end fights back) | Be honest in positioning: single-writer local use should stay on files; pgmind starts winning at *concurrent agents, server backends, multi-tenancy* — lead with those |
 | **Row-count economics of per-block revisions** | Capacity model as a Phase 2 deliverable (RFC-003), revalidated under Phase 3 revision load; partitioning + keyframes + excision from the start |
 | **Precedent mortality pattern** (pgrag/Korvus/pgai) | Law 1 removes the fault line entirely; the "why we survive" argument ([AUDIT.md §4](archive/AUDIT.md)) reviewed at every phase gate |
 | **Scope gravity toward AI features** | Laws 1-2; Future Work quarantine; RFC titles must declare law violations |
 | **pgrx pre-1.0 churn** | Pin versions; budget upgrade time per release |
 | **Naming/trademark (MindsDB adjacency)** | Decide before first public release; register names early |
+
+### Why there is no sync bridge *(decided 2026-08-09)*
+
+The roadmap carried a Phase 4 two-way filesystem sync bridge — `pgmind sync ./vault --watch`, a state file, three-way merge, conflict strategies — from v0.1 until it was cut. Three arguments, in increasing order of weight:
+
+1. **It served the user this handbook says to cede.** The risk table above answers "why not just files?" with *single-writer local use should stay on files; pgmind starts winning at concurrent agents, server backends, multi-tenancy.* A continuous two-way bridge exists to serve one human editing one local folder — exactly the case we decline to compete for. We were building the losing half of our own positioning.
+2. **It manufactured the risk it was cited as mitigating.** The rebinding-plateau row above used to read "sync bridge minimizes full-document replaces." It does the opposite: every file save is a whole-document replace, so continuous sync is the single largest generator of heuristic rebinding — the project's #1 research problem — and it generates it from the least controlled source, a human's editor.
+3. **The complexity was concentrated in the half we cut.** Of RFC-006's nine decisions, four (state file, three-way merge, conflict strategies, watch mode) and two of its four benchmark suites existed only for two-way sync. Byte-exact import and export — the part law 4 actually needs — is two shell scripts and one gate.
+
+What replaced it is smaller and honest: [`scripts/export-vault.sh`](../scripts/export-vault.sh) and [`scripts/import-vault.sh`](../scripts/import-vault.sh), gated by `folder-round-trip` over a corpus of legal-but-hostile paths. The measurement that prompted the cut is worth keeping in view — the naive shell loop this repo shipped in its own cookbook lost **2 of 8 notes** on such a vault and printed **one** error doing it, so "it's just a bash command" was true only for tidy ASCII paths. Refusing to write anything when two paths collide on a case-insensitive filesystem is the behaviour that makes the difference.
+
+Reversing this means a new RFC that argues past point 2, and it inherits a `revision.source` CHECK that still permits `'sync'` with nothing able to set it (RFC-012 retires it alongside `'rebind'`).
 
 **Open questions routed to RFCs:** wiki-link/block-ref syntax details (RFC-002); rebinding algorithm family and confidence thresholds (RFC-004); excision vs provenance guarantees (RFC-005/011); sync-bridge conflict semantics (RFC-006); BM25 adapter (RFC-010); name **[OPEN]**.
 
@@ -299,7 +310,7 @@ This project is currently exploration/learning; this section keeps reality in vi
 | 003 | Vault & Block Storage Layout (incl. edge/tag tables) | 2 |
 | 004 | Block Identity & Rebinding Semantics | 2-3 |
 | 005 | Version Engine, Concurrency Semantics & Excision | 3 |
-| 006 | Sync Bridge & Import/Export | 4 |
+| 006 | ~~Sync Bridge & Import/Export~~ — **withdrawn 2026-08-09** (§11) | — |
 | 007 | Query API & MCP Surface | 5 |
 | 008 | Deterministic Context Assembly & Token Budgeting | 5, matured 7 |
 | 009 | Optional Vector Lane (pgvector hooks) | 6 |
@@ -312,7 +323,8 @@ This project is currently exploration/learning; this section keeps reality in vi
 ```
 docs/          RFCs, archived handbook versions
 extension/     the pgrx extension (type, vault model, storage, planner, API)
-tools/         pgmind CLI (import/export/sync), MCP server
+tools/         pgmind-mcp, the MCP server (Phase 5)
+scripts/       export-vault.sh, import-vault.sh — the law-4 round trip
 eval/          benchmark corpora, harnesses, published results
 tests/         extension + integration tests
 ```

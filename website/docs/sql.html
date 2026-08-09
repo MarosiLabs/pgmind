@@ -4193,12 +4193,14 @@ DO</code></pre>
               <a href="cookbook.html#retrieval">Cookbook: retrieval</a>.</td>
         </tr>
         <tr>
-          <td>The <code>pgmind</code> CLI —
-              <code>import</code>, <code>export</code>, <code>sync</code></td>
-          <td>Handbook §8, landing page</td>
-          <td><span class="badge next">Phase 4</span></td>
-          <td>A shell loop over <code>psql</code> does both directions today;
-              the <a href="cookbook.html#operations">cookbook</a> has one.</td>
+          <td>A <code>pgmind</code> CLI with <code>import</code>,
+              <code>export</code>, <code>sync</code></td>
+          <td>Handbook §8 (until 2026-08-09)</td>
+          <td><span class="badge next">Cut</span></td>
+          <td><code>scripts/export-vault.sh</code> and
+              <code>scripts/import-vault.sh</code> ship instead and are gated
+              byte-for-byte; the two-way sync daemon was withdrawn. The
+              <a href="cookbook.html#operations">cookbook</a> has both.</td>
         </tr>
         <tr>
           <td><code>pgmind-mcp</code> server</td>
