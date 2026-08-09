@@ -1,0 +1,1465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Quick start · pgmind manual</title>
+<meta name="description" content="Build and install pgmind, create a markdown vault in PostgreSQL, run the five operations an agent needs, and end with a paragraph you can cite by id.">
+<link rel="canonical" href="https://marosilabs.github.io/pgmind/docs/quickstart.html">
+<meta name="author" content="Marosi Labs">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+
+<meta name="theme-color" content="#0a0c10">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.png" type="image/png" sizes="180x180">
+<link rel="apple-touch-icon" href="../assets/favicon.png">
+<link rel="stylesheet" href="docs.css">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="pgmind">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://marosilabs.github.io/pgmind/docs/quickstart.html">
+<meta property="og:title" content="Quick start · pgmind manual">
+<meta property="og:description" content="From CREATE EXTENSION to a cited paragraph in about ten minutes — install, a first vault, the five moves an agent makes, and what two agents do to one note.">
+<meta property="og:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Quick start · pgmind manual">
+<meta name="twitter:description" content="Install pgmind, build a vault, and end with a paragraph you can cite by id.">
+<meta name="twitter:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+</head>
+<body>
+
+<a class="skip" href="#doc">Skip to content</a>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="gh" viewBox="0 0 16 16">
+    <path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27s-1.36.09-2 .27c-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+  </symbol>
+  <symbol id="copy" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
+          d="M5.7 5.7h7.1v7.1H5.7zM10.3 5.7V3.2H3.2v7.1h2.5"/>
+  </symbol>
+  <symbol id="check" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+          stroke-linejoin="round" d="m3.4 8.4 3 3 6.2-7"/>
+  </symbol>
+  <symbol id="menu" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+          d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+  </symbol>
+</svg>
+
+<header class="site-head">
+  <div class="head-inner">
+    <button class="side-toggle" type="button" aria-expanded="false" aria-controls="side" aria-label="Navigation">
+      <svg width="16" height="16" aria-hidden="true"><use href="#menu"/></svg>
+    </button>
+    <a class="brand" href="../" aria-label="pgmind home">
+      <img src="../assets/mark.png" alt="" width="28" height="24">
+      <span><b>pg</b>mind</span>
+      <span class="in">manual</span>
+    </a>
+    <nav class="head-nav">
+      <a href="../">Overview</a>
+      <a href="quickstart.html">Quick start</a>
+      <a class="icon-link" href="https://github.com/MarosiLabs/pgmind" aria-label="Repository on GitHub">
+        <svg width="18" height="18" aria-hidden="true"><use href="#gh"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-side" id="side">
+    <nav aria-label="Manual">
+      <h2>Start</h2>
+      <ul>
+        <li><a href="index.html">The manual</a></li>
+        <li><a href="quickstart.html">Quick start</a></li>
+      </ul>
+
+      <h2>Learn</h2>
+      <ul>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="internals.html">Internals</a></li>
+      </ul>
+
+      <h2>Look up</h2>
+      <ul>
+        <li><a href="sql.html">SQL reference</a></li>
+        <li><a href="cookbook.html">Cookbook</a></li>
+      </ul>
+
+      <h2>Elsewhere</h2>
+      <ul>
+        <li><a href="https://github.com/MarosiLabs/pgmind">Repository</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">RFCs</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published">Benchmarks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="docs-main" id="doc">
+    <p class="crumbs"><a href="index.html">Manual</a> · Quick start</p>
+    <h1>Quick start</h1>
+    <p class="lede">
+      Ten minutes from an empty database to a citation that points at one
+      paragraph at one revision — by way of the build, a seven-note vault, and
+      the five operations an agent actually needs.
+    </p>
+
+    <details class="more">
+      <summary>How the transcripts below are elided</summary>
+      <p>
+        Every block was executed against PostgreSQL&nbsp;18 and its output pasted
+        back. UUIDs are shortened to <code>019fd625-…</code> because yours will
+        differ, and the <code>CONTEXT</code> line that every pgmind error carries
+        is dropped after the first error shows it.
+      </p>
+    </details>
+
+    <h2 id="what-it-is">What pgmind is</h2>
+
+    <p>
+      A PostgreSQL extension that stores an Obsidian-shaped markdown vault —
+      notes at paths, headings, paragraphs, list items, wiki-links, tags — as
+      relational rows. You write markdown in and the same bytes come back out;
+      in between, every structural piece of the document is a <em>block</em>: a
+      row with a UUID, a content hash and a history.
+    </p>
+    <p>
+      No model is called anywhere inside it and it opens no network sockets.
+      That is an architecture law, not a gap in the current build — no embedding
+      step, no summarizer, no background worker, nothing to allowlist. If you
+      want vectors you fill a table of your own with your own pipeline and join
+      to it.
+    </p>
+
+    <details class="more">
+      <summary>Why not a folder of markdown</summary>
+      <p>
+        A directory handles one writer beautifully. Put it behind a backend and
+        the failures are all the same failure: two requests write the same note
+        and one disappears, "what links here" becomes a grep of the whole tree,
+        history means shelling out to <code>git</code> in a request handler, and
+        every tenant needs a directory somebody has to prove you stayed inside.
+        pgmind answers each of those with the thing the database was already good
+        at — a row, a lock, a transaction, a query.
+      </p>
+    </details>
+
+    <div class="note-box warn">
+      <span class="lbl">Where the project is</span>
+      <p>
+        Research pre-alpha, version <code>0.0.1</code>. Phases 0–2 have exited
+        and Phase 3 is in progress. Everything on this page runs today, but the
+        SQL surface is unstable, there is <em>no upgrade path</em> between builds
+        — you drop the extension and rebuild the vault — and the first public
+        release (0.1.0) is two phases out.
+      </p>
+    </div>
+
+    <h2 id="when-to-use">When to use it, and when not to</h2>
+
+    <p>
+      The honest scope is phases 0–3: the vault model, block-level operations,
+      versioning, concurrency control and erasure. Enough to build against, not
+      enough to serve traffic on.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Reach for pgmind when</th>
+          <th scope="col">Stay on files when</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Several agents, workers or request handlers write the same vault and
+              a lost write is a real bug.</td>
+          <td><strong>One writer, one machine, offline.</strong> A folder plus
+              <code>git</code> is simpler, faster, and already works. pgmind adds
+              a database dependency and buys you nothing.</td>
+        </tr>
+        <tr>
+          <td>You need to cite a specific paragraph and resolve that citation
+              later, after the note has changed.</td>
+          <td>The vault is small enough that reading every file on every request
+              is fine.</td>
+        </tr>
+        <tr>
+          <td>Backlinks, tags, orphans or graph walks are queries you run often
+              rather than once.</td>
+          <td>A human edits the notes in an editor and nothing else touches
+              them.</td>
+        </tr>
+        <tr>
+          <td>Tenants must be isolated, and you would rather prove it with row
+              security than with directory naming.</td>
+          <td>You need the files themselves on disk today — the sync bridge that
+              keeps a folder and a vault in step is Phase 4 and is not built.</td>
+        </tr>
+        <tr>
+          <td>You already run PostgreSQL and would rather have one backup than
+              two systems that drift.</td>
+          <td>You need a stable, versioned API. This one changes between
+              commits.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2 id="install">Install</h2>
+
+    <p>
+      There is no binary release; you build it. A few minutes on a warm cache —
+      the first <code>make setup</code> compiles a PostgreSQL from source and is
+      considerably longer.
+    </p>
+
+    <h3 id="prerequisites">Prerequisites</h3>
+
+    <ul>
+      <li><strong>Rust</strong>, pinned by <code>rust-toolchain.toml</code> to
+          1.97.1. rustup installs it for you on first build; you do not pick a
+          version.</li>
+      <li><strong>macOS only:</strong> <code>pkgconf</code> and
+          <code>icu4c</code>, needed to compile the pgrx-managed
+          PostgreSQL.</li>
+      <li><strong>Python 3.10+</strong>, only if you intend to run
+          <code>make eval</code> (the benchmark gates).</li>
+    </ul>
+
+    <div class="code">
+      <div class="cap">shell</div>
+<pre><code class="shell">brew install pkgconf icu4c          # macOS only
+git clone https://github.com/MarosiLabs/pgmind.git
+cd pgmind</code></pre>
+    </div>
+
+    <h3 id="build-and-test">Build and test</h3>
+
+    <p>Three canonical targets. CI runs exactly these.</p>
+
+    <div class="code">
+      <div class="cap">shell</div>
+<pre><code class="shell">make setup   # install the pinned cargo-pgrx, then compile a PostgreSQL 18
+             # into ~/.pgrx — self-contained and writable. This is the slow one.
+make build   # build the extension (PG=18 by default; make build PG=16)
+make test    # core unit tests, then cargo pgrx test inside a real PostgreSQL</code></pre>
+    </div>
+
+    <details class="more">
+      <summary>Why pgrx compiles its own PostgreSQL, and what the Makefile does for you</summary>
+      <p>
+        System installs are traps: Homebrew's <code>libpq</code> ships a
+        client-only <code>pg_config</code>, and macOS refuses to let anything
+        write an extension into Postgres.app's protected bundle.
+      </p>
+      <p>
+        On macOS the <code>Makefile</code> puts keg-only <code>icu4c</code> on
+        <code>PKG_CONFIG_PATH</code> and exports <code>SDKROOT</code> for you, so
+        bindgen can find the system headers.
+      </p>
+    </details>
+
+    <h3 id="run-it">Run it</h3>
+
+    <p>
+      <code>cargo pgrx run</code> builds the extension, installs it into the
+      managed cluster, starts the server and drops you at a <code>psql</code>
+      prompt on a scratch database.
+    </p>
+
+    <div class="code">
+      <div class="cap">shell</div>
+<pre><code class="shell">cd extension
+cargo pgrx run pg18 --no-default-features --features pg18</code></pre>
+    </div>
+
+    <h3 id="create-extension">CREATE EXTENSION</h3>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">CREATE EXTENSION pgmind;
+SELECT pgmind_version();</code></pre>
+<pre class="out"><code class="out">WARNING:  pgmind: lz4 toast compression unavailable on this server; using default
+CREATE EXTENSION
+ pgmind_version
+----------------
+ 0.0.1
+(1 row)</code></pre>
+    </div>
+
+    <details class="more">
+      <summary>Why the lz4 warning is harmless, and why the install needs a superuser</summary>
+      <p>
+        The <code>lz4</code> line is a <code>WARNING</code>, not an error. pgmind
+        asks for lz4 TOAST compression on its large text columns and falls back
+        to the server default when the build does not have it — which a
+        pgrx-compiled PostgreSQL usually does not. Nothing else changes.
+      </p>
+      <p>
+        The control file sets <code>superuser = true</code>,
+        <code>trusted = false</code> and <code>relocatable = false</code>. So
+        <code>CREATE EXTENSION</code> needs a superuser, a non-superuser database
+        owner cannot install it into their own database, and the schemas are
+        fixed at <code>knowledge</code> and <code>pgmind</code>. Application roles
+        never need superuser — only the install does.
+      </p>
+    </details>
+
+    <h3 id="gucs-are-late">The settings are invisible until the library loads</h3>
+
+    <p>
+      pgmind's four GUCs are registered by <code>_PG_init</code>, which
+      PostgreSQL runs the first time a backend actually loads the shared library.
+      Installing the extension does not do that for <em>later</em> sessions:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql · a new connection</div>
+<pre><code class="sql">\c
+SHOW pgmind.frame_every;</code></pre>
+<pre class="out"><code class="out">You are now connected to database "pgmind" as user "amin".
+ERROR:  unrecognized configuration parameter "pgmind.frame_every"</code></pre>
+    </div>
+
+    <p>Call any pgmind function — or load the library explicitly — and all four appear:</p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">LOAD 'pgmind';
+SHOW pgmind.frame_every;
+SHOW pgmind.max_document_bytes;
+SHOW pgmind.author;
+SHOW pgmind.vault_id;</code></pre>
+<pre class="out"><code class="out">LOAD
+ pgmind.frame_every
+--------------------
+ 50
+(1 row)
+
+ pgmind.max_document_bytes
+---------------------------
+ 8388608
+(1 row)
+
+ pgmind.author
+---------------
+
+(1 row)
+
+           pgmind.vault_id
+--------------------------------------
+ 00000000-0000-0000-0000-000000000000
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      <code>pgmind.author</code> is empty by default, which means revisions are
+      attributed to <code>current_user</code>. Set it and the value is recorded
+      as written — the writer's own claim about itself, never authenticated.
+    </p>
+
+    <details class="more">
+      <summary>Why <code>SET</code> works before the load even though <code>SHOW</code> does not</summary>
+      <p>
+        PostgreSQL accepts a placeholder setting in a namespace it does not know
+        yet, so <code>SET pgmind.vault_id = …</code> succeeds before
+        <code>_PG_init</code> has run and the value is honoured once it does. It
+        is only <code>SHOW</code> that fails. If you set the GUC from a
+        connection-pool startup hook, nothing is wrong.
+      </p>
+    </details>
+
+    <h3 id="existing-cluster">Installing into a cluster you already run</h3>
+
+    <p>
+      Put that server's <code>pg_config</code> on <code>PATH</code> — the real
+      one from the server package, not <code>libpq</code>'s — and let pgrx write
+      into it. The role running <code>CREATE EXTENSION</code> must be a
+      superuser.
+    </p>
+
+    <div class="code">
+      <div class="cap">shell</div>
+<pre><code class="shell">which pg_config                     # must be the server's, not libpq's
+cd extension
+cargo pgrx install --release --no-default-features --features pg18</code></pre>
+    </div>
+
+    <h2 id="first-note">Your first note</h2>
+
+    <p>
+      A note is markdown at a path — no create step, no schema to declare.
+      <code>knowledge.write</code> takes a path and a document and returns the id
+      of the revision it created, or the current head when the bytes are
+      identical to what is already stored, because then no revision is written.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', $md$---
+title: Auth
+tags: [architecture, active]
+owner: platform
+---
+
+# Auth
+
+The service that issues and rotates credentials. Owned by [[people/ada]].
+
+## Decisions
+
+- [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
+- Refresh tokens rotate every 24h #decision ^rotation
+- Access tokens live 15 minutes, no exceptions
+
+## Runbook
+
+Key rotation is [[runbooks/rotate-keys|documented separately]].
+
+## Log
+
+Migrated the session store.
+$md$);</code></pre>
+<pre class="out"><code class="out">                write
+--------------------------------------
+ 019fd625-ce4d-…
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Markdown is full of quotes and backslashes, so the examples pass it
+      dollar-quoted as <code>$md$…$md$</code>. From an application, bind it as an
+      ordinary text parameter — the <code>markdown</code> type is nothing special
+      at the wire level.
+    </p>
+
+    <h3 id="read-it-back">Read it back</h3>
+
+    <p>
+      Byte for byte, frontmatter and all: pgmind stores the original bytes
+      alongside the parse, so reading re-renders nothing.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read('projects/auth');</code></pre>
+<pre class="out"><code class="out">                                   read
+---------------------------------------------------------------------------
+ ---                                                                      +
+ title: Auth                                                              +
+ tags: [architecture, active]                                             +
+ owner: platform                                                          +
+ ---                                                                      +
+                                                                          +
+ # Auth                                                                   +
+                                                                          +
+ The service that issues and rotates credentials. Owned by [[people/ada]].+
+                                                                          +
+ ## Decisions                                                             +
+                                                                          +
+ - [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture     +
+ - Refresh tokens rotate every 24h #decision ^rotation                    +
+ - Access tokens live 15 minutes, no exceptions                           +
+                                                                          +
+ ## Runbook                                                               +
+                                                                          +
+ Key rotation is [[runbooks/rotate-keys|documented separately]].          +
+                                                                          +
+ ## Log                                                                   +
+                                                                          +
+ Migrated the session store.                                              +
+(1 row)</code></pre>
+    </div>
+
+    <h3 id="everything-is-a-row">Everything in it is a row</h3>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, heading_path, block_ref_id, left(content, 32) AS content
+FROM   knowledge.blocks('projects/auth')
+ORDER  BY ord;</code></pre>
+<pre class="out"><code class="out"> ord |   kind    |   heading_path   | block_ref_id |             content
+-----+-----------+------------------+--------------+----------------------------------
+   0 | heading   | {}               |              | # Auth
+   1 | paragraph | {Auth}           |              | The service that issues and rota
+   2 | heading   | {Auth}           |              | ## Decisions
+   3 | list_item | {Auth,Decisions} |              | [[oauth2]] over server sessions,
+   4 | paragraph | {Auth,Decisions} |              | [[oauth2]] over server sessions,
+   5 | list_item | {Auth,Decisions} |              | Refresh tokens rotate every 24h
+   6 | paragraph | {Auth,Decisions} | rotation     | Refresh tokens rotate every 24h
+   7 | list_item | {Auth,Decisions} |              | Access tokens live 15 minutes, n
+   8 | paragraph | {Auth,Decisions} |              | Access tokens live 15 minutes, n
+   9 | heading   | {Auth}           |              | ## Runbook
+  10 | paragraph | {Auth,Runbook}   |              | Key rotation is [[runbooks/rotat
+  11 | heading   | {Auth}           |              | ## Log
+  12 | paragraph | {Auth,Log}       |              | Migrated the session store.
+(13 rows)</code></pre>
+    </div>
+
+    <div class="note-box">
+      <span class="lbl">One bullet is two rows</span>
+      <p>
+        Rows 3 and 4 are the same bullet: a <code>list_item</code> container and
+        the <code>paragraph</code> inside it. Markers land on the innermost
+        block, which is why <code>^rotation</code> is on row 6 and not row 5.
+      </p>
+    </div>
+
+    <details class="more">
+      <summary>Why, and where the vault's 48 blocks come from</summary>
+      <p>
+        CommonMark says a list item holds block content, and pgmind stores the
+        parse rather than a flattened summary of it, so both rows exist. That is
+        why the seven-note vault you are about to finish reports
+        <strong>48 blocks</strong> for maybe thirty visible lines of prose:
+      </p>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, count(*)
+FROM   knowledge.notes() n, LATERAL knowledge.blocks(n.path) b
+GROUP  BY kind ORDER BY count(*) DESC;</code></pre>
+<pre class="out"><code class="out">   kind    | count
+-----------+-------
+ paragraph |    24
+ list_item |    13
+ heading   |    11
+(3 rows)</code></pre>
+      </div>
+      <p>
+        Thirteen list items, each with a paragraph inside it, is 26 of the 48.
+        Internalise it before you write a query that counts paragraphs and gets
+        an answer twice the size you expected.
+      </p>
+    </details>
+
+    <h3 id="links-and-repair">Links, including the broken ones</h3>
+
+    <p>
+      Every wiki-link, transclusion, block reference and markdown link is an edge
+      row. Edges that resolve to nothing are stored anyway, with a reason, so a
+      broken-link report is a query rather than a crawl. Nothing else exists in
+      the vault yet, so every link dangles:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, alias, resolved_path, dangling_reason
+FROM   knowledge.links('projects/auth')
+ORDER  BY target;</code></pre>
+<pre class="out"><code class="out">   kind   |        target        |         alias         | resolved_path | dangling_reason
+----------+----------------------+-----------------------+---------------+-----------------
+ wikilink | oauth2               |                       |               | missing
+ wikilink | people/ada           |                       |               | missing
+ wikilink | rfc/auth-01          |                       |               | missing
+ wikilink | runbooks/rotate-keys | documented separately |               | missing
+(4 rows)</code></pre>
+    </div>
+
+    <p>
+      Write the notes they point at and the edges repair themselves inside the
+      same transaction that creates each note. These six writes finish the demo
+      vault that every page of this manual uses.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('rfc/auth-01', $md$# RFC-AUTH-01: token rotation
+
+Rotation policy for [[projects/auth]]. #architecture #decision
+
+The operational steps live in the [rotation runbook](runbooks/rotate-keys.md).
+$md$);
+
+SELECT knowledge.write('runbooks/rotate-keys', $md$---
+tags: runbook
+---
+
+# Rotate the signing keys
+
+1. Announce the maintenance window
+2. Generate the new key pair
+3. Roll [[projects/auth]] to the new key id
+4. Retire the old key once every token has expired
+
+> Retiring the old key early invalidates live sessions.
+$md$);
+
+SELECT knowledge.write('people/ada', $md$# Ada Lovelace
+
+Platform lead, reachable at ada@example.com.
+
+Owns [[projects/auth]] and [[runbooks/rotate-keys]]. #person
+$md$);
+
+SELECT knowledge.write('daily/2026-08-06', $md$# 2026-08-06
+
+## Log
+
+Reviewed the rotation window with [[people/ada]]. #decision
+$md$);
+
+SELECT knowledge.write('notes/scratch', $md$# Scratch
+
+A bare [[auth]] resolves by basename, because exactly one note ends in that segment.
+
+A link to [[nowhere]] dangles, and stays a first-class row.
+$md$);
+
+SELECT knowledge.write('index', $md$# Index
+
+- [[projects/auth]]
+- [[rfc/auth-01]]
+- [[runbooks/rotate-keys]]
+- [[people/ada]]
+- [[daily/2026-08-06]]
+- [[notes/scratch]]
+$md$);</code></pre>
+    </div>
+
+    <p>Now the same query, unchanged:</p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, resolved_path, dangling_reason
+FROM   knowledge.links('projects/auth')
+ORDER  BY target;</code></pre>
+<pre class="out"><code class="out">   kind   |        target        |    resolved_path     | dangling_reason
+----------+----------------------+----------------------+-----------------
+ wikilink | oauth2               |                      | missing
+ wikilink | people/ada           | people/ada           |
+ wikilink | rfc/auth-01          | rfc/auth-01          |
+ wikilink | runbooks/rotate-keys | runbooks/rotate-keys |
+(4 rows)</code></pre>
+    </div>
+
+    <p>
+      <code>oauth2</code> still dangles because no note is called that. It stays
+      a row, so it shows up in a report instead of vanishing.
+    </p>
+
+    <h3 id="backlinks-and-tags">Backlinks and tags</h3>
+
+    <p>
+      Backlinks are the same edges read from the other end, with the source
+      paragraph as an excerpt — enough to render a "linked mentions" panel from
+      one query.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT src_path, kind, left(excerpt, 38) AS excerpt
+FROM   knowledge.backlinks('projects/auth');</code></pre>
+<pre class="out"><code class="out">       src_path       |   kind   |                excerpt
+----------------------+----------+----------------------------------------
+ index                | wikilink | [[projects/auth]]
+ notes/scratch        | wikilink | A bare [[auth]] resolves by basename,
+ people/ada           | wikilink | Owns [[projects/auth]] and [[runbooks/
+ rfc/auth-01          | wikilink | Rotation policy for [[projects/auth]].
+ runbooks/rotate-keys | wikilink | Roll [[projects/auth]] to the new key
+(5 rows)</code></pre>
+    </div>
+
+    <p>
+      Tags come from two places: the frontmatter <code>tags</code> key, which tags
+      the whole note, and <code>#hashtags</code> in the prose, which tag the block
+      they appear in. <code>knowledge.tags()</code> counts both;
+      <code>knowledge.tagged()</code> gives you the rows.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.tags();
+SELECT * FROM knowledge.tagged('decision');</code></pre>
+<pre class="out"><code class="out">     tag      | notes | blocks
+--------------+-------+--------
+ active       |     1 |      0
+ architecture |     2 |      2
+ decision     |     3 |      3
+ person       |     1 |      1
+ runbook      |     1 |      0
+(5 rows)
+
+       path       |               block_id               |   tag
+------------------+--------------------------------------+----------
+ daily/2026-08-06 | 019fd625-ce75-…                      | decision
+ projects/auth    | 019fd625-ce4d-…                      | decision
+ rfc/auth-01      | 019fd625-ce68-…                      | decision
+(3 rows)</code></pre>
+    </div>
+
+    <h3 id="the-whole-vault">The whole vault, counted</h3>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT notes, blocks, edges_resolved, edges_dangling, tags, revisions, bytes
+FROM   knowledge.stats();</code></pre>
+<pre class="out"><code class="out"> notes | blocks | edges_resolved | edges_dangling | tags | revisions | bytes
+-------+--------+----------------+----------------+------+-----------+-------
+     7 |     48 |             16 |              2 |    9 |         7 |  1383
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      The <code>tags</code> column counts tag <em>rows</em> (9), not distinct tags
+      — <code>knowledge.tags()</code> above listed the five distinct ones.
+    </p>
+
+    <h2 id="agent-loop">The five moves an agent makes</h2>
+
+    <p>
+      Everything an agent does to a vault is one of these. None of them requires
+      reading or rewriting the whole note.
+    </p>
+
+    <h3 id="move-read-section">1. Read one section</h3>
+
+    <p>
+      <code>read_section</code> returns the heading and everything under it, as
+      markdown, ready to drop into a prompt. The heading path is the chain of
+      heading texts, outermost first.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_section('projects/auth', ARRAY['Auth','Decisions']);</code></pre>
+<pre class="out"><code class="out">                             read_section
+----------------------------------------------------------------------
+ ## Decisions                                                        +
+                                                                     +
+ - [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture+
+ - Refresh tokens rotate every 24h #decision ^rotation               +
+ - Access tokens live 15 minutes, no exceptions                      +
+(1 row)</code></pre>
+    </div>
+
+    <h3 id="move-append">2. Append to a section</h3>
+
+    <p>
+      The workhorse. It resolves the anchor <em>after</em> taking the note lock,
+      so it never reads the note first and never guesses where the section ends.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.append_to_section('projects/auth', ARRAY['Auth','Log'],
+    $md$Rotated the signing key.$md$);</code></pre>
+<pre class="out"><code class="out">               revision               |               block_ids
+--------------------------------------+----------------------------------------
+ 019fd625-ce8b-…                      | {019fd625-ce89-…}
+(1 row)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_section('projects/auth', ARRAY['Auth','Log']);</code></pre>
+<pre class="out"><code class="out">        read_section
+-----------------------------
+ ## Log                     +
+                            +
+ Migrated the session store.+
+                            +
+ Rotated the signing key.   +
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Like all six write operations it returns a <code>pgmind.op_result</code>
+      composite, so you call it from <code>FROM</code> and never from the select
+      list. That is not a style preference —
+      <a href="#trap-double-eval">it applies the edit twice</a>.
+    </p>
+
+    <h3 id="move-patch">3. Patch one block</h3>
+
+    <p>
+      A <code>^marker</code> in the markdown gives a block a name you chose,
+      easier to carry around than a UUID. Here <code>^rotation</code> finds the
+      block and replaces it:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.update_block(
+    (SELECT block_id FROM knowledge.blocks('projects/auth')
+     WHERE  block_ref_id = 'rotation'),
+    $md$Refresh tokens rotate every 12h #decision ^rotation$md$);</code></pre>
+<pre class="out"><code class="out">               revision               |               block_ids
+--------------------------------------+----------------------------------------
+ 019fd625-ce8e-…                      | {019fd625-ce4d-78a9-…}
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      The returned block id is the <em>same</em> id the block had before the
+      edit: updating a block asserts that identity is kept, so anything that
+      cited it still points at it.
+    </p>
+
+    <h3 id="move-cite">4. Cite a block</h3>
+
+    <p>
+      A citation is a path, a block, and the revision you read it at — three
+      columns you already have:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT n.path || '#^' || b.block_ref_id || ' @ ' || n.head_revision AS citation
+FROM   knowledge.notes('projects/auth') n,
+       LATERAL knowledge.blocks(n.path) b
+WHERE  b.block_ref_id = 'rotation';</code></pre>
+<pre class="out"><code class="out">                            citation
+----------------------------------------------------------------
+ projects/auth#^rotation @ 019fd625-ce8e-…
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      That string survives being written into an answer, a log or another note.
+      Resolving it later gives the exact text as of that revision, however much
+      the note has moved on since:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, content
+FROM   knowledge.blocks_as_of('projects/auth',
+         (SELECT head_revision FROM knowledge.notes('projects/auth')))
+WHERE  block_id = (SELECT block_id FROM knowledge.blocks('projects/auth')
+                   WHERE  block_ref_id = 'rotation');</code></pre>
+<pre class="out"><code class="out"> ord |                  content
+-----+-------------------------------------------
+   6 | Refresh tokens rotate every 12h #decision
+(1 row)</code></pre>
+    </div>
+
+    <h3 id="move-history">5. Look at what changed</h3>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT seq, verb, author, source, blocks_changed, reconstructable
+FROM   knowledge.history('projects/auth');</code></pre>
+<pre class="out"><code class="out"> seq |     verb      | author | source | blocks_changed | reconstructable
+-----+---------------+--------+--------+----------------+-----------------
+   2 | update_block  | amin   | api    |              2 | t
+   1 | insert_blocks | amin   | api    |              1 | t
+   0 | write         | amin   | api    |             13 | t
+(3 rows)</code></pre>
+    </div>
+
+    <p>
+      <code>source</code> is <code>api</code> for every operation the shipped
+      extension performs. The append shows up as <code>insert_blocks</code>
+      because <code>append_to_section</code> resolves the anchor and then
+      delegates. <code>reconstructable</code> is the honest flag:
+      <code>t</code> means the note can still be rebuilt as of that revision, and
+      retention or an excision — erasing a revision's text on request — can turn
+      it <code>f</code>.
+    </p>
+
+    <p>
+      <code>diff</code> compares two revisions block by block. The one-line edit
+      shows as two changed blocks: the list item and the paragraph inside it.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT change, left(before, 34) AS before, left(after, 34) AS after
+FROM   knowledge.diff('projects/auth',
+         (SELECT revision FROM knowledge.history('projects/auth') WHERE seq = 1),
+         (SELECT revision FROM knowledge.history('projects/auth') WHERE seq = 2));</code></pre>
+<pre class="out"><code class="out"> change  |               before               |               after
+---------+------------------------------------+------------------------------------
+ changed | Refresh tokens rotate every 24h #d | Refresh tokens rotate every 12h #d
+ changed | Refresh tokens rotate every 24h #d | Refresh tokens rotate every 12h #d
+(2 rows)</code></pre>
+    </div>
+
+    <h2 id="concurrency">Two agents, one note</h2>
+
+    <p>
+      This is the part that does not work in a folder. Three cases, in increasing
+      order of how little they cost you.
+    </p>
+
+    <h3 id="real-conflict">The conflict you want</h3>
+
+    <p>
+      Pass the revision you read as <code>expected_head</code> and a stale write
+      is refused instead of silently applied. Here it is handed the note's very
+      first revision, two revisions out of date:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', $md$# Auth
+
+Rewritten from a stale read.
+$md$, expected_head => (SELECT revision FROM knowledge.history('projects/auth')
+                        WHERE seq = 0));</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: expected_head is not the note's current head
+DETAIL:  pgmind_stale_head — note projects/auth: expected 019fd625-ce4d-…, head is 019fd625-ce8e-…
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE</code></pre>
+    </div>
+
+    <p>
+      SQLSTATE <code>PM009</code>. The <code>DETAIL</code> always carries the
+      offending value, and the repair is to re-read and try again, never to
+      force. Omitting <code>expected_head</code> means "I do not care what was
+      there" — right for a first write, wrong for a read-modify-write.
+    </p>
+
+    <h3 id="not-a-conflict">The conflict that isn't</h3>
+
+    <p>
+      Two agents appending to the same section do not conflict at all. Both
+      writes land, in lock order: session A holds a transaction open, and session
+      B waits on the note's row lock.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql · session A</div>
+<pre><code class="sql">BEGIN;
+SELECT * FROM knowledge.append_to_section('projects/auth', ARRAY['Auth','Log'],
+    $md$Agent A rotated the staging key.$md$);
+SELECT pg_sleep(2);
+COMMIT;</code></pre>
+<pre class="out"><code class="out">BEGIN
+               revision               |               block_ids
+--------------------------------------+----------------------------------------
+ 019fd626-9a4e-…                      | {019fd626-9a46-…}
+(1 row)
+
+COMMIT</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql · session B, while A still holds the lock</div>
+<pre><code class="sql">SELECT * FROM knowledge.append_to_section('projects/auth', ARRAY['Auth','Log'],
+    $md$Agent B rotated the production key.$md$);</code></pre>
+<pre class="out"><code class="out">               revision               |               block_ids
+--------------------------------------+----------------------------------------
+ 019fd626-a291-…                      | {019fd626-a285-…}
+(1 row)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_section('projects/auth', ARRAY['Auth','Log']);</code></pre>
+<pre class="out"><code class="out">            read_section
+-------------------------------------
+ ## Log                             +
+                                    +
+ Migrated the session store.        +
+                                    +
+ Rotated the signing key.           +
+                                    +
+ Agent A rotated the staging key.   +
+                                    +
+ Agent B rotated the production key.+
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Nothing was lost and nobody retried: <code>append_to_section</code> resolves
+      its anchor after acquiring the lock, so B sees A's paragraph and lands after
+      it. This is the only operation for which a race is not a conflict — which is
+      exactly why an agent log should be an append rather than a rewrite.
+    </p>
+
+    <h3 id="false-conflict">The false conflict, removed</h3>
+
+    <p>
+      <code>expected_head</code> guards the whole note, so two agents patching
+      <em>different</em> paragraphs still collide. That is real serialization but
+      a false conflict: the edits do not overlap. Agent B reads the head and the
+      block it intends to edit (<code>\gset</code> is how psql holds a value
+      between statements):
+    </p>
+
+    <div class="code">
+      <div class="cap">psql · agent B reads</div>
+<pre><code class="sql">SELECT head_revision AS head FROM knowledge.notes('projects/auth') \gset
+SELECT block_id AS bid, encode(content_hash, 'hex') AS bhash
+FROM   knowledge.blocks('projects/auth') WHERE ord = 1 \gset</code></pre>
+    </div>
+
+    <p>Agent A now edits a different paragraph, moving the head:</p>
+
+    <div class="code">
+      <div class="cap">psql · agent A writes</div>
+<pre><code class="sql">SELECT * FROM knowledge.update_block(
+    (SELECT block_id FROM knowledge.blocks('projects/auth') WHERE ord = 8),
+    $md$Access tokens live 10 minutes, no exceptions$md$);</code></pre>
+<pre class="out"><code class="out">               revision               |               block_ids
+--------------------------------------+----------------------------------------
+ 019fd626-a2c6-…                      | {019fd626-99de-…}
+(1 row)</code></pre>
+    </div>
+
+    <p>Agent B, guarding on the note, is rejected — though its paragraph never moved:</p>
+
+    <div class="code">
+      <div class="cap">psql · agent B, guarding the note</div>
+<pre><code class="sql">SELECT * FROM knowledge.update_block(:'bid',
+    $md$The service that issues and rotates credentials. Owned by [[people/ada]], on call.$md$,
+    expected_head => :'head');</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: expected_head is not the note's current head
+DETAIL:  pgmind_stale_head — note projects/auth: expected 019fd626-a291-…, head is 019fd626-a2c6-…</code></pre>
+    </div>
+
+    <p>
+      Guard on the block instead. <code>expected_hash</code> is compare-and-swap
+      at block granularity: it fails only if <em>that</em> paragraph's content
+      changed.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql · agent B, guarding the block</div>
+<pre><code class="sql">SELECT * FROM knowledge.update_block(:'bid',
+    $md$The service that issues and rotates credentials. Owned by [[people/ada]], on call.$md$,
+    expected_hash => decode(:'bhash', 'hex'));</code></pre>
+<pre class="out"><code class="out">               revision               |               block_ids
+--------------------------------------+----------------------------------------
+ 019fd626-a2d1-…                      | {019fd626-99de-…}
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Run it a second time and you get <code>PM016</code>
+      (<code>pgmind_stale_block</code>) instead — the guard did its job. What
+      <code>expected_hash</code> removes is the <em>false</em> conflict, not the
+      serialization: both agents still queue on the note's row lock, and both
+      succeed. Of the write operations only <code>update_block</code> accepts it;
+      the rest take <code>expected_head</code> alone.
+    </p>
+
+    <h2 id="tenancy">One vault per tenant</h2>
+
+    <p>
+      Every row in pgmind carries a <code>vault_id</code>. One session setting
+      picks which vault the <code>knowledge</code> functions see. Nothing else
+      changes — same schema, same functions, same connection.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SET pgmind.vault_id = '11111111-1111-1111-1111-111111111111';
+SELECT vault_id, notes, blocks FROM knowledge.stats();</code></pre>
+<pre class="out"><code class="out">SET
+               vault_id               | notes | blocks
+--------------------------------------+-------+--------
+ 11111111-1111-1111-1111-111111111111 |     0 |      0
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Empty, in a database with seven notes in it. Paths are scoped too, so this
+      tenant can have its own <code>projects/auth</code>:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', $md$# Auth
+
+Another tenant's note, at the same path.
+$md$);
+SELECT path, title FROM knowledge.notes();</code></pre>
+<pre class="out"><code class="out">                write
+--------------------------------------
+ 019fd626-a2d8-…
+(1 row)
+
+     path      | title
+---------------+-------
+ projects/auth | auth
+(1 row)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">RESET pgmind.vault_id;
+SELECT vault_id, notes, blocks FROM knowledge.stats();</code></pre>
+<pre class="out"><code class="out">RESET
+               vault_id               | notes | blocks
+--------------------------------------+-------+--------
+ 00000000-0000-0000-0000-000000000000 |     7 |     51
+(1 row)</code></pre>
+    </div>
+
+    <div class="note-box warn">
+      <span class="lbl">The GUC scopes; it does not defend</span>
+      <p>
+        <code>pgmind.vault_id</code> is <code>USERSET</code>. Any session can set
+        it to any value, and a session that can reach the <code>pgmind</code>
+        tables directly can read every tenant regardless. On its own it is a
+        convenience for addressing, not a boundary. The boundary is row-level
+        security plus a grant set that keeps application roles out of the
+        <code>pgmind</code> schema. Inside a connection pool, use
+        <code>SET LOCAL</code> inside the transaction so the value cannot leak to
+        the next borrower of the connection.
+      </p>
+    </div>
+
+    <p>
+      <span class="badge admin">Admin</span> One call installs the policies. It is
+      idempotent — it drops each policy before creating it, which is why the first
+      run is noisy.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT pgmind.enable_vault_rls();</code></pre>
+<pre class="out"><code class="out">NOTICE:  policy "vault_isolation" for relation "pgmind.note" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.revision" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.tile" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.block" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.edge" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.tag" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.note_revision" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.block_revision" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.note_frame" does not exist, skipping
+NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not exist, skipping
+ enable_vault_rls
+------------------
+
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Ten policies, one per table that carries a <code>vault_id</code>. RLS does
+      not apply to a superuser or to a table's owner unless you force it;
+      <code>pgmind.enable_vault_rls(force => true)</code> covers that case. Run
+      your application as a role that owns nothing.
+    </p>
+
+    <h2 id="not-yet">What is not here yet</h2>
+
+    <p>
+      Three things you will read about elsewhere and will not find in the
+      catalog.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Surface</th>
+          <th scope="col">Phase</th>
+          <th scope="col">What to do meanwhile</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>knowledge.context()</code> — deterministic, token-budgeted
+              context assembly with a citation on every block</td>
+          <td><span class="badge next">Phase 5</span></td>
+          <td>Assemble it yourself: pins, backlinks and link distance packed to a
+              budget, one citation per block. The
+              <a href="cookbook.html#retrieval">retrieval recipes</a> do this
+              with full-text search and, if you want them, your own pgvector
+              columns.</td>
+        </tr>
+        <tr>
+          <td>The <code>pgmind</code> CLI — <code>import</code>,
+              <code>export</code>, two-way <code>sync</code> between a folder and
+              a vault</td>
+          <td><span class="badge next">Phase 4</span></td>
+          <td>A shell loop over <code>psql</code> imports a directory, and
+              <code>knowledge.read</code> writes it back out. See
+              <a href="cookbook.html#operations">operations</a>.</td>
+        </tr>
+        <tr>
+          <td><code>pgmind-mcp</code> — the vault exposed as MCP tools</td>
+          <td><span class="badge next">Phase 5</span></td>
+          <td>Wrap the SQL you need in your own functions and expose those. The
+              shapes the MCP tools will take are sketched in
+              <a href="cookbook.html#integration">integration</a>.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      The catalog is the truth: if <code>\df knowledge.*</code> cannot show it, it
+      is not there.
+    </p>
+
+    <details class="more">
+      <summary>The headline call, and the signatures that differ from RFC-005</summary>
+      <p>
+        <code>knowledge.context()</code> will look like this. It does not run
+        today:
+      </p>
+      <div class="code">
+        <div class="cap">not implemented · Phase 5</div>
+<pre><code class="sql">-- Illustrative only. knowledge.context does not exist in this build.
+SELECT knowledge.context(root => 'projects/auth', token_budget => 12000);</code></pre>
+      </div>
+      <p>
+        A handful of other signatures differ from what RFC-005 describes — the
+        shipped <code>pgmind.retain</code> takes
+        <code>(keep_revisions, dry_run)</code> and returns <code>bigint</code>,
+        <code>blocks_as_of</code> has no <code>timestamptz</code> overload, and
+        <code>pgmind.enforce_excisions()</code> does not exist. The
+        <a href="sql.html#not-yet">SQL reference</a> lists all of them.
+      </p>
+    </details>
+
+    <h2 id="troubleshooting">When something goes wrong</h2>
+
+    <p>
+      pgmind raises errors in its own SQLSTATE class, <code>PM</code>. The
+      <code>DETAIL</code> names the error condition and carries the offending
+      value, and every one is catchable — <code>EXCEPTION WHEN sqlstate 'PM009'</code>
+      in plpgsql, or by reading <code>SQLSTATE</code> from your driver.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Code</th>
+          <th scope="col">You will see</th>
+          <th scope="col">Cause &rarr; fix</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>PM001</code><br><span class="badge err">path</span></td>
+          <td><code>pgmind: invalid note path</code></td>
+          <td>The path breaks the grammar — leading or trailing slash, empty
+              segment, <code>.</code> or <code>..</code>, over 1&nbsp;024 bytes.
+              Check it with <code>pgmind.path_is_valid</code>;
+              <code>pgmind.path_normalize</code> trims and NFC-normalises but does
+              <em>not</em> validate.</td>
+        </tr>
+        <tr>
+          <td><code>PM002</code><br><span class="badge err">missing</span></td>
+          <td><code>pgmind: note not found</code></td>
+          <td>No live note at that path in this vault: a typo, the wrong
+              <code>pgmind.vault_id</code>, or a path that differs by case — paths
+              are case-<em>sensitive</em>. Reading an invalid path also lands here
+              rather than on PM001.</td>
+        </tr>
+        <tr>
+          <td><code>PM003</code><br><span class="badge err">missing</span></td>
+          <td><code>pgmind: block not found</code></td>
+          <td>The id is stale or foreign: nothing live in this vault carries it —
+              another vault, a deleted note, or a block some later write removed.
+              A cached id normally survives editing: a block keeps its id through
+              a whole-note rewrite, matched by content hash, by its
+              <code>^id</code> marker, or by the rebinder (the pass that
+              re-attaches ids to blocks that moved or changed), and is re-minted
+              only when none of those match. Re-read
+              <code>knowledge.blocks()</code>.</td>
+        </tr>
+        <tr>
+          <td><code>PM004</code><br><span class="badge err">fragment</span></td>
+          <td><code>pgmind: split_block fragment must contain at least two
+              blocks</code></td>
+          <td>Fragment arity. Each operation demands a specific number of
+              top-level blocks: <code>update_block</code> exactly one,
+              <code>split_block</code> two or more. The DETAIL tells you what it
+              parsed.</td>
+        </tr>
+        <tr>
+          <td><code>PM005</code><br><span class="badge err">anchor</span></td>
+          <td><code>pgmind: give before OR after, not both</code></td>
+          <td>An illegal anchor. Give <code>insert_blocks</code> one of
+              <code>before</code>/<code>after</code>, or neither to append at the
+              end. Also raised as <code>anchor must be a top-level block or a list
+              item</code> when the anchor cannot carry an insert — the paragraph
+              nested inside a bullet, for instance. Anchor on the
+              <code>list_item</code> row instead.</td>
+        </tr>
+        <tr>
+          <td><code>PM007</code><br><span class="badge err">section</span></td>
+          <td><code>pgmind: section not found</code><br>
+              <code>pgmind: no section with that heading path</code></td>
+          <td>No section matches that heading path. Read
+              <code>heading_path</code> off <code>knowledge.blocks()</code> rather
+              than guessing it from the markdown: the normalisation keeps the
+              plain inline text only — <code>#</code> marks and emphasis dropped,
+              wiki-links reduced to alias-else-target, a trailing
+              <code>^id</code> stripped, NFC, trimmed.
+              <code>append_to_section</code> additionally needs at least one block
+              <em>inside</em> the section — a heading with nothing under it raises
+              PM007 even though <code>read_section</code> finds it.</td>
+        </tr>
+        <tr>
+          <td><code>PM009</code><br><span class="badge err">conflict</span></td>
+          <td><code>pgmind: expected_head is not the note's current head</code></td>
+          <td>Somebody wrote since you read. Re-read, re-apply, retry — never
+              retry with the same <code>expected_head</code>. If the edit is
+              confined to one block, switch to
+              <code>update_block(…, expected_hash => …)</code>; if it is an append,
+              switch to <code>append_to_section</code> and drop the guard
+              entirely. Passing <code>expected_head</code> for a path with no live
+              note also raises PM009, never a silent create.</td>
+        </tr>
+        <tr>
+          <td><code>PM016</code><br><span class="badge err">conflict</span></td>
+          <td><code>pgmind: expected_hash is not the block's current content
+              hash</code></td>
+          <td>That block changed under you. Re-read the block, decide whether
+              your edit still applies, and rebuild it. The DETAIL prints both
+              hashes.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      All seventeen codes, with the functions that raise each, are in the
+      <a href="sql.html#errors">SQL reference</a>.
+    </p>
+
+    <h3 id="trap-double-eval">The trap: composite returns in the select list</h3>
+
+    <p>
+      PostgreSQL expands <code>(f(x)).*</code> by evaluating <code>f</code>
+      <em>once per output column</em>. <code>pgmind.op_result</code> has two
+      columns, so your edit is applied twice:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql · do not do this</div>
+<pre><code class="sql">SELECT knowledge.write('notes/trap', $md$# Trap
+
+## Log
+
+First line.
+$md$);
+
+SELECT (knowledge.append_to_section('notes/trap', ARRAY['Trap','Log'],
+        $md$Appended once.$md$)).*;
+
+SELECT knowledge.read('notes/trap');</code></pre>
+<pre class="out"><code class="out">      read
+----------------
+ # Trap        +
+               +
+ ## Log        +
+               +
+ First line.   +
+               +
+ Appended once.+
+               +
+ Appended once.+
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      One call, two paragraphs. Measured, not theoretical. Call these functions
+      from <code>FROM</code> and the problem disappears:
+      <code>SELECT * FROM knowledge.append_to_section(…)</code>. It applies to all
+      six functions returning <code>pgmind.op_result</code> —
+      <code>insert_blocks</code>, <code>append_to_section</code>,
+      <code>update_block</code>, <code>move_block</code>,
+      <code>split_block</code>, <code>merge_blocks</code>.
+      <code>knowledge.write</code> and the lifecycle functions return a bare
+      <code>uuid</code> and are safe anywhere.
+    </p>
+
+    <h3 id="trap-not-unique">"function is not unique"</h3>
+
+    <p>
+      Several functions are overloaded on their second argument —
+      <code>read_as_of</code> takes a <code>uuid</code>, a <code>bigint</code> or a
+      <code>timestamptz</code>. An untyped literal or a bare <code>NULL</code>
+      leaves PostgreSQL nothing to choose on:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_as_of('projects/auth', NULL);</code></pre>
+<pre class="out"><code class="out">ERROR:  function knowledge.read_as_of(unknown, unknown) is not unique
+HINT:  Could not choose a best candidate function. You might need to add explicit type casts.</code></pre>
+    </div>
+
+    <p>
+      Cast the argument: <code>0::bigint</code>, <code>$1::uuid</code>,
+      <code>now() - interval '7 days'</code>. The same message with a
+      <em>different</em> cause appears after a rebuild — install a build whose
+      signature changed without dropping the extension first and both versions end
+      up in <code>pg_proc</code>, making every call ambiguous. There is no upgrade
+      path in pre-alpha, so the fix is
+      <code>DROP EXTENSION pgmind CASCADE;</code> followed by
+      <code>CREATE EXTENSION pgmind;</code> — which drops your vault. Check with
+      <code>\df knowledge.read_as_of</code> before you assume it is a type
+      problem.
+    </p>
+
+    <h2 id="next">Next steps</h2>
+
+    <div class="cards">
+      <a href="concepts.html">
+        <b>Concepts</b>
+        <span>What exactly counts as a tag, why <code>heading_path</code> is not
+              unique, what a content hash is for, and how a block keeps its id
+              through a rewrite.</span>
+      </a>
+      <a href="cookbook.html#agent-memory">
+        <b>Agent memory recipes</b>
+        <span>Atomic append from N workers, read-modify-write with a retry loop,
+              disjoint patches, a fact ledger deduplicated by hash.</span>
+      </a>
+      <a href="sql.html">
+        <b>SQL reference</b>
+        <span>All 43 functions with signatures, return columns, the errors each
+              raises, and a worked example.</span>
+      </a>
+      <a href="internals.html">
+        <b>Internals</b>
+        <span>How the write path, the identity carry, the history engine and the
+              locking actually work — with the measurements and the
+              caveats.</span>
+      </a>
+    </div>
+
+    <p>
+      If something on this page did not do what it says,
+      <a href="https://github.com/MarosiLabs/pgmind/issues">open an issue</a> —
+      the manual is downstream of the code, so the manual is what is wrong.
+    </p>
+
+    <nav class="page-nav" aria-label="Page">
+      <a href="index.html">
+        <span>Previous</span>
+        The manual
+      </a>
+      <a class="next" href="concepts.html">
+        <span>Next</span>
+        Concepts
+      </a>
+    </nav>
+  </main>
+
+  <aside class="docs-toc" aria-label="On this page"><nav id="toc"></nav></aside>
+</div>
+
+<footer class="site-foot">
+  <div class="foot-inner">
+    <p><b>pgmind</b>: files hold notes, PostgreSQL holds the brain.</p>
+    <p class="foot-links">
+      <a href="../">Overview</a>
+      <a href="https://github.com/MarosiLabs/pgmind">Repository</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/LICENSE">PostgreSQL License</a>
+    </p>
+  </div>
+</footer>
+
+<script src="docs.js" defer></script>
+</body>
+</html>

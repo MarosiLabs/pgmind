@@ -1,0 +1,2399 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Cookbook · pgmind manual</title>
+<meta name="description" content="Seventy-odd recipes for pgmind: concurrent agent memory, backlink and graph queries, retrieval without embeddings, citations and audit, tenancy, erasure and operations — every one executed against a live database.">
+<link rel="canonical" href="https://marosilabs.github.io/pgmind/docs/cookbook.html">
+<meta name="author" content="Marosi Labs">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+
+<meta name="theme-color" content="#0a0c10">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.png" type="image/png" sizes="180x180">
+<link rel="apple-touch-icon" href="../assets/favicon.png">
+<link rel="stylesheet" href="docs.css">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="pgmind">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://marosilabs.github.io/pgmind/docs/cookbook.html">
+<meta property="og:title" content="Cookbook · pgmind manual">
+<meta property="og:description" content="Recipes for a markdown vault stored as PostgreSQL rows: concurrent agent memory, graph walks, retrieval, citations, tenancy, erasure, operations.">
+<meta property="og:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Cookbook · pgmind manual">
+<meta name="twitter:description" content="Recipes for a markdown vault stored as PostgreSQL rows — every one executed against a live database.">
+<meta name="twitter:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+</head>
+<body>
+
+<a class="skip" href="#doc">Skip to content</a>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="gh" viewBox="0 0 16 16">
+    <path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27s-1.36.09-2 .27c-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+  </symbol>
+  <symbol id="copy" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
+          d="M5.7 5.7h7.1v7.1H5.7zM10.3 5.7V3.2H3.2v7.1h2.5"/>
+  </symbol>
+  <symbol id="check" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+          stroke-linejoin="round" d="m3.4 8.4 3 3 6.2-7"/>
+  </symbol>
+  <symbol id="menu" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+          d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+  </symbol>
+</svg>
+
+<header class="site-head">
+  <div class="head-inner">
+    <button class="side-toggle" type="button" aria-expanded="false" aria-controls="side" aria-label="Navigation">
+      <svg width="16" height="16" aria-hidden="true"><use href="#menu"/></svg>
+    </button>
+    <a class="brand" href="../" aria-label="pgmind home">
+      <img src="../assets/mark.png" alt="" width="28" height="24">
+      <span><b>pg</b>mind</span>
+      <span class="in">manual</span>
+    </a>
+    <nav class="head-nav">
+      <a href="../">Overview</a>
+      <a href="quickstart.html">Quick start</a>
+      <a class="icon-link" href="https://github.com/MarosiLabs/pgmind" aria-label="Repository on GitHub">
+        <svg width="18" height="18" aria-hidden="true"><use href="#gh"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-side" id="side">
+    <nav aria-label="Manual">
+      <h2>Start</h2>
+      <ul>
+        <li><a href="index.html">The manual</a></li>
+        <li><a href="quickstart.html">Quick start</a></li>
+      </ul>
+
+      <h2>Learn</h2>
+      <ul>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="internals.html">Internals</a></li>
+      </ul>
+
+      <h2>Look up</h2>
+      <ul>
+        <li><a href="sql.html">SQL reference</a></li>
+        <li><a href="cookbook.html">Cookbook</a></li>
+      </ul>
+
+      <h2>Elsewhere</h2>
+      <ul>
+        <li><a href="https://github.com/MarosiLabs/pgmind">Repository</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">RFCs</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published">Benchmarks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="docs-main" id="doc">
+    <p class="crumbs"><a href="index.html">Manual</a> / Cookbook</p>
+    <h1>Cookbook</h1>
+    <p class="lede">
+      Recipes for the things people actually ask pgmind to do: keep several
+      agents writing to one note without losing edits, walk the link graph,
+      retrieve without embeddings, cite a paragraph and resolve the citation
+      later, isolate tenants, erase a person, and survive the traps.
+    </p>
+
+    <div class="note-box">
+      <span class="lbl">How to read this page</span>
+      <p>
+        Every block below was executed, in this order, against a database seeded
+        with the seven-note demo vault, and the output is what
+        <code>psql</code> printed. The page therefore has a plot: recipes change
+        the vault, and later outputs reflect earlier edits. UUIDs are yours to
+        differ on. Where a block is illustrative rather than executed — the two
+        client-library examples and the backup checklist — it says so.
+      </p>
+    </div>
+
+    <div class="note-box warn">
+      <span class="lbl">Two conventions that will save you an afternoon</span>
+      <p>
+        The six block-level write operations return a composite, so they are always called
+        from <code>FROM</code>, never from the select list —
+        <code>SELECT (knowledge.update_block(…)).*</code> applies the edit once
+        per output column. It is measured in
+        <a href="#r-double-edit">the sharp edges</a>. And several recipes read
+        <code>pgmind.*</code> tables directly: that is admin reach
+        (<span class="badge admin">Admin</span>, Law 11 in the handbook), it is
+        not covered by any stability promise, and it is flagged where it happens.
+      </p>
+    </div>
+
+
+    <h2 id="agent-memory">Agent memory</h2>
+    <p>Several processes, one vault, no lost writes. Everything here is the public <code>knowledge</code> API; nothing needs a lock you take yourself.</p>
+
+    <h3 id="r-atomic-append">Append a line under a heading</h3>
+    <p><b>Problem.</b> An agent has one fact to record and does not want to read, rewrite and re-check a whole note to do it.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT revision, array_length(block_ids, 1) AS blocks_added
+FROM knowledge.append_to_section(
+    'daily/2026-08-06', ARRAY['2026-08-06','Log'],
+    $md$- 09:14 worker-a rotated the staging key$md$);</code></pre>
+<pre class="out"><code class="out">               revision               | blocks_added 
+--------------------------------------+--------------
+ 019fd643-…                           |            2
+(1 row)</code></pre>
+</div>
+    <p><code>append_to_section</code> resolves the heading, takes the note's row lock, and splices after the last anchorable block in that section, so no caller ever sends the whole document. Two blocks came back for one bullet because a list item and its inner paragraph are separate rows — see <a href="concepts.html#blocks">the block taxonomy</a> and <a href="sql.html#fn-knowledge-append-to-section">the reference entry</a>.</p>
+
+    <h3 id="r-append-n-workers">Append from N workers at once</h3>
+    <p><b>Problem.</b> Three agents write to the same log section in the same instant and you want all three lines, not the last one.</p>
+<div class="code">
+  <div class="cap">shell</div>
+<pre><code class="shell">for w in b c d; do
+  psql -Aqt -c "SELECT 'worker-$w wrote ' || revision FROM knowledge.append_to_section(
+      'daily/2026-08-06', ARRAY['2026-08-06','Log'],
+      \$md\$- 09:15 worker-$w checked the token TTL\$md\$);" &amp;
+done
+wait
+psql -Aqt -c "SELECT knowledge.read_section('daily/2026-08-06',
+                                            ARRAY['2026-08-06','Log']);"</code></pre>
+<pre class="out"><code class="out">worker-b wrote 019fd643-…
+worker-d wrote 019fd643-…
+worker-c wrote 019fd643-…
+## Log
+
+Reviewed the rotation window with [[people/ada]]. #decision
+
+- 09:14 worker-a rotated the staging key
+- 09:15 worker-b checked the token TTL
+- 09:15 worker-d checked the token TTL
+- 09:15 worker-c checked the token TTL</code></pre>
+</div>
+    <p>Append is the one operation for which a concurrent write is not a conflict: each call re-reads the section under the note's row lock and appends after whatever is there, so the writers serialize in lock order and all survive. Ordering between them is the lock order, not your submission order — see <a href="internals.html#concurrency">the concurrency model</a>.</p>
+
+    <h3 id="r-cas-retry">Read-modify-write with a retry loop</h3>
+    <p><b>Problem.</b> You must rewrite a whole note, and pgmind will not merge for you: a stale <code>expected_head</code> is an error, not a silent overwrite.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', $md$# Auth
+$md$, expected_head =&gt; '00000000-0000-0000-0000-000000000000');</code></pre>
+<pre class="out"><code class="out">psql:blocks/03_pm009.sql:2: ERROR:  pgmind: expected_head is not the note's current head
+DETAIL:  pgmind_stale_head — note projects/auth: expected 00000000-0000-0000-0000-000000000000, head is 019fd643-…
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE
+SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">CREATE SCHEMA IF NOT EXISTS app;
+
+CREATE FUNCTION app.append_line(p_path text, p_line text, p_tries int DEFAULT 5)
+RETURNS uuid LANGUAGE plpgsql AS $body$
+DECLARE
+  v_head uuid;
+  v_doc  text;
+BEGIN
+  FOR i IN 1..p_tries LOOP
+    SELECT head_revision, knowledge.read(path) INTO v_head, v_doc
+      FROM knowledge.notes(p_path);
+    BEGIN
+      RETURN knowledge.write(p_path, (v_doc || p_line || E'\n')::markdown,
+                             expected_head =&gt; v_head);
+    EXCEPTION WHEN sqlstate 'PM009' THEN
+      PERFORM pg_sleep(0.02 * i);   -- somebody else won; re-read and try again
+    END;
+  END LOOP;
+  RAISE EXCEPTION 'pgmind: gave up after % attempts on %', p_tries, p_path;
+END;
+$body$;
+
+SELECT knowledge.write('agents/worklog', $md$# Worklog
+$md$) AS seeded;</code></pre>
+<pre class="out"><code class="out">CREATE SCHEMA
+CREATE FUNCTION
+                seeded                
+--------------------------------------
+ 019fd643-…
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">shell</div>
+<pre><code class="shell">for w in 1 2 3 4; do
+  psql -Aqt -c "SELECT app.append_line('agents/worklog', '- worker $w finished');" &amp;
+done
+wait
+psql -c "SELECT seq, verb, blocks_changed FROM knowledge.history('agents/worklog');"</code></pre>
+<pre class="out"><code class="out">019fd643-…
+019fd643-…
+019fd643-…
+019fd643-…
+ seq | verb  | blocks_changed 
+-----+-------+----------------
+   4 | write |              2
+   3 | write |              2
+   2 | write |              2
+   1 | write |              2
+   0 | write |              1
+(5 rows)</code></pre>
+</div>
+    <p>pgmind never retries internally and never raises a serialization failure: it tells you the head moved (PM009) and leaves the policy to you. The loop above re-reads and re-applies; four workers produced four revisions and lost nothing. See <a href="internals.html#concurrency">locking</a> and <a href="sql.html#errors">PM009</a>.</p>
+
+    <h3 id="r-expected-hash">Two agents patch different paragraphs</h3>
+    <p><b>Problem.</b> Two agents edit the same note at the same time but touch different blocks; note-level compare-and-swap would fail one of them for nothing.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, block_ref_id, left(content, 30) AS content,
+       left(encode(content_hash, 'hex'), 16) || '…' AS content_hash
+FROM knowledge.blocks('projects/auth')
+WHERE heading_path = ARRAY['Auth','Decisions'] AND kind = 'paragraph';</code></pre>
+<pre class="out"><code class="out"> ord |   kind    | block_ref_id |            content             |   content_hash    
+-----+-----------+--------------+--------------------------------+-------------------
+   4 | paragraph |              | [[oauth2]] over server session | c2637e83018db133…
+   6 | paragraph | rotation     | Refresh tokens rotate every 24 | 5b67c1e4e458f567…
+   8 | paragraph |              | Access tokens live 15 minutes, | ca07d51df7743e77…
+(3 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">shell</div>
+<pre><code class="shell">patch() {
+  psql -q -c "SELECT r.revision
+    FROM knowledge.blocks('projects/auth') b
+    CROSS JOIN LATERAL knowledge.update_block(b.block_id, \$md\$$2\$md\$,
+        expected_hash =&gt; b.content_hash) r
+    WHERE $1;"
+}
+patch "b.block_ref_id = 'rotation'" \
+      "Refresh tokens rotate every 12h #decision ^rotation" &amp;
+patch "b.kind = 'paragraph' AND b.content LIKE 'Access tokens%'" \
+      "Access tokens live 10 minutes, no exceptions" &amp;
+wait
+psql -Aqt -c "SELECT knowledge.read_section('projects/auth',
+                                            ARRAY['Auth','Decisions']);"</code></pre>
+<pre class="out"><code class="out">               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+## Decisions
+
+- [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
+- Refresh tokens rotate every 12h #decision ^rotation
+- Access tokens live 10 minutes, no exceptions</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT r.revision
+FROM knowledge.blocks('projects/auth') b
+CROSS JOIN LATERAL knowledge.update_block(
+    b.block_id, $md$Refresh tokens rotate every 6h #decision ^rotation$md$,
+    expected_hash =&gt; '\x00'::bytea) r
+WHERE b.block_ref_id = 'rotation';</code></pre>
+<pre class="out"><code class="out">psql:blocks/08_pm016.sql:6: ERROR:  pgmind: expected_hash is not the block's current content hash
+DETAIL:  pgmind_stale_block — block 019fd643-…: expected 00, current is 08b3b4180fd86b73f71b92e8a269641196386857d4b5663a1a3b6b0c894c6c89
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE
+SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
+</div>
+    <p><code>expected_hash</code> moves the compare-and-swap from the note to the block, so a disjoint edit is not a conflict; PM016 still fires when the block itself moved under you. It removes the false conflict, not the serialization — both calls still take the note's row lock in turn. See <a href="internals.html#concurrency">CAS granularity</a> and <a href="sql.html#fn-knowledge-update-block"><code>update_block</code></a>.</p>
+
+    <h3 id="r-idempotent-write">Make a re-write free</h3>
+    <p><b>Problem.</b> A crashed agent replays its last write and you do not want a second identical revision in the history.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT (SELECT head_revision FROM knowledge.notes('rfc/auth-01')) AS head_before,
+       knowledge.write('rfc/auth-01', knowledge.read('rfc/auth-01')) AS returned,
+       (SELECT count(*) FROM knowledge.history('rfc/auth-01')) AS revisions;</code></pre>
+<pre class="out"><code class="out">             head_before              |               returned               | revisions 
+--------------------------------------+--------------------------------------+-----------
+ 019fd643-…                           | 019fd643-…                           |         1
+(1 row)</code></pre>
+</div>
+    <p>A byte-identical <code>write</code> short-circuits after the compare-and-swap check: it returns the current head and records nothing. The check still runs first, so a stale <code>expected_head</code> is still an error even when the bytes match — see <a href="internals.html#write-path">the write path</a>.</p>
+
+    <h3 id="r-scratch-note">A per-session scratch note</h3>
+    <p><b>Problem.</b> An agent needs somewhere to keep its plan and tick items off, without polluting the real notes.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('agents/session-7f21', $md$# Session 7f21
+
+## Tasks
+
+- [ ] read projects/auth ^t1
+- [ ] rotate the staging key ^t2
+$md$) AS created;
+
+SELECT r.revision AS toggled
+FROM knowledge.blocks('agents/session-7f21') b
+CROSS JOIN LATERAL knowledge.update_block(
+    b.block_id, $md$- [x] read projects/auth ^t1$md$) r
+WHERE b.kind = 'list_item' AND b.attrs-&gt;&gt;'checked' = 'false'
+  AND b.ord = (SELECT min(ord) FROM knowledge.blocks('agents/session-7f21')
+               WHERE kind = 'list_item');
+
+SELECT ord, kind, attrs-&gt;&gt;'checked' AS checked, content
+FROM knowledge.blocks('agents/session-7f21') WHERE kind = 'list_item';</code></pre>
+<pre class="out"><code class="out">               created                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+               toggled                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ ord |   kind    | checked |        content         
+-----+-----------+---------+------------------------
+   2 | list_item | true    | read projects/auth
+   4 | list_item | false   | rotate the staging key
+(2 rows)</code></pre>
+</div>
+    <p>A task list item stores its state in <code>attrs</code> (<code>task</code>, <code>checked</code>), so toggling one is an ordinary <code>update_block</code> on the list item; the <code>^t1</code> marker keeps the item's id stable across the edit. See <a href="concepts.html#blocks">block attrs</a> and <a href="concepts.html#identity">identity</a>.</p>
+
+    <h3 id="r-fact-ledger">A fact ledger that never stores a fact twice</h3>
+    <p><b>Problem.</b> Agents keep re-deriving the same fact and you want the ledger to stay one line long.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('facts/ledger', $md$# Fact ledger
+
+One paragraph per fact, appended by agents.
+$md$) AS created;</code></pre>
+<pre class="out"><code class="out">               created                
+--------------------------------------
+ 019fd643-…
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH cand AS (
+  SELECT content, content_hash
+  FROM knowledge.blocks($md$Refresh tokens rotate every 12h.$md$::markdown)
+  WHERE kind = 'paragraph'
+), fresh AS (
+  SELECT c.content FROM cand c
+  WHERE NOT EXISTS (SELECT 1 FROM knowledge.blocks('facts/ledger') b
+                    WHERE b.content_hash = c.content_hash)
+)
+SELECT r.revision
+FROM fresh
+CROSS JOIN LATERAL knowledge.append_to_section(
+    'facts/ledger', ARRAY['Fact ledger'], fresh.content::markdown) r;</code></pre>
+<pre class="out"><code class="out">               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH cand AS (
+  SELECT content, content_hash
+  FROM knowledge.blocks($md$Refresh tokens rotate every 12h.$md$::markdown)
+  WHERE kind = 'paragraph'
+), fresh AS (
+  SELECT c.content FROM cand c
+  WHERE NOT EXISTS (SELECT 1 FROM knowledge.blocks('facts/ledger') b
+                    WHERE b.content_hash = c.content_hash)
+)
+SELECT r.revision
+FROM fresh
+CROSS JOIN LATERAL knowledge.append_to_section(
+    'facts/ledger', ARRAY['Fact ledger'], fresh.content::markdown) r;</code></pre>
+<pre class="out"><code class="out"> revision 
+----------
+(0 rows)</code></pre>
+</div>
+    <p><code>knowledge.blocks(doc)</code> parses a fragment without storing it, so you can compute the same normalised content hash pgmind would store and test for it first; the second run matches an existing hash and the <code>LATERAL</code> write is never evaluated. See <a href="concepts.html#hashing">content hashing</a>.</p>
+
+    <h3 id="r-split-block">Split one paragraph into two addressable blocks</h3>
+    <p><b>Problem.</b> A paragraph says two things and you want to cite them separately.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/blocks-demo', $md$# Block ops
+
+Tokens rotate every 12h and sessions expire after 30 days.
+
+Keys live in the HSM.
+$md$) AS created;
+
+SELECT r.revision, r.block_ids
+FROM knowledge.blocks('notes/blocks-demo') b
+CROSS JOIN LATERAL knowledge.split_block(b.block_id, $md$Tokens rotate every 12h.
+
+Sessions expire after 30 days.$md$) r
+WHERE b.kind = 'paragraph' AND b.content LIKE 'Tokens rotate%';
+
+SELECT ord, kind, '…' || right(block_id::text, 12) AS block_id, content
+FROM knowledge.blocks('notes/blocks-demo');</code></pre>
+<pre class="out"><code class="out">               created                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+               revision               |                                  block_ids                                  
+--------------------------------------+-----------------------------------------------------------------------------
+ 019fd643-…                           | {019fd643-…,019fd643-…}
+(1 row)
+
+ ord |   kind    |   block_id    |            content             
+-----+-----------+---------------+--------------------------------
+   0 | heading   | …ddcd3cd1b33e | # Block ops
+   1 | paragraph | …216e2745a94a | Tokens rotate every 12h.
+   2 | paragraph | …a422309f8045 | Sessions expire after 30 days.
+   3 | paragraph | …4df6fd74b88f | Keys live in the HSM.
+(4 rows)</code></pre>
+</div>
+    <p><code>split_block</code> takes a fragment of at least two blocks and replaces the target in place; the first result keeps the original id, the rest are minted, so existing citations to the block still resolve. See <a href="internals.html#block-ops">block-operation mechanics</a>.</p>
+
+    <h3 id="r-merge-blocks">Merge adjacent blocks and choose which id survives</h3>
+    <p><b>Problem.</b> Two blocks should have been one, and you would rather not orphan both ids.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT r.revision, r.block_ids
+FROM (SELECT array_agg(b.block_id ORDER BY b.ord) AS ids
+      FROM knowledge.blocks('notes/blocks-demo') b
+      WHERE b.content IN ('Tokens rotate every 12h.',
+                          'Sessions expire after 30 days.')) s
+CROSS JOIN LATERAL knowledge.merge_blocks(s.ids,
+    $md$Tokens rotate every 12h; sessions expire after 30 days.$md$,
+    keep =&gt; s.ids[1]) r;
+
+SELECT ord, kind, '…' || right(block_id::text, 12) AS block_id, content
+FROM knowledge.blocks('notes/blocks-demo');</code></pre>
+<pre class="out"><code class="out">               revision               |               block_ids                
+--------------------------------------+----------------------------------------
+ 019fd643-…                           | {019fd643-…}
+(1 row)
+
+ ord |   kind    |   block_id    |                         content                         
+-----+-----------+---------------+---------------------------------------------------------
+   0 | heading   | …ddcd3cd1b33e | # Block ops
+   1 | paragraph | …216e2745a94a | Tokens rotate every 12h; sessions expire after 30 days.
+   2 | paragraph | …4df6fd74b88f | Keys live in the HSM.
+(3 rows)</code></pre>
+</div>
+    <p><code>merge_blocks</code> replaces a contiguous run with one block and <code>keep</code> names the id that carries; everything else is removed. The ids must be adjacent in document order — see <a href="sql.html#fn-knowledge-merge-blocks">the reference entry</a>.</p>
+
+    <h3 id="r-move-block">Reorder a block without rewriting the note</h3>
+    <p><b>Problem.</b> One paragraph belongs above another and the rest of the note must not change.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT r.revision
+FROM knowledge.blocks('notes/blocks-demo') b
+CROSS JOIN LATERAL knowledge.move_block(b.block_id, before =&gt; (
+    SELECT block_id FROM knowledge.blocks('notes/blocks-demo') WHERE ord = 1)) r
+WHERE b.content = 'Keys live in the HSM.';
+
+SELECT ord, '…' || right(block_id::text, 12) AS block_id, content
+FROM knowledge.blocks('notes/blocks-demo');</code></pre>
+<pre class="out"><code class="out">               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ ord |   block_id    |                         content                         
+-----+---------------+---------------------------------------------------------
+   0 | …ddcd3cd1b33e | # Block ops
+   1 | …4df6fd74b88f | Keys live in the HSM.
+   2 | …216e2745a94a | Tokens rotate every 12h; sessions expire after 30 days.
+(3 rows)</code></pre>
+</div>
+    <p><code>move_block</code> re-splices the byte lane and renumbers <code>ord</code>; the block keeps its id, its history and any citation pointing at it. Give exactly one of <code>before</code> or <code>after</code> — both is PM005.</p>
+
+    <h3 id="r-stable-ids">Keep a block's identity across an external round trip</h3>
+    <p><b>Problem.</b> An agent exports a note, edits it somewhere else, and writes the whole thing back; you want the paragraph ids to survive.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/identity-demo', $md$# Identity demo
+
+The signing key is rotated every ninety days by the platform team. ^keep
+
+The session store was migrated to Redis in July.
+$md$) AS v1;
+
+SELECT ord, block_ref_id, '…' || right(block_id::text, 12) AS block_id,
+       left(content, 34) AS content
+FROM knowledge.blocks('notes/identity-demo');</code></pre>
+<pre class="out"><code class="out">                  v1                  
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ ord | block_ref_id |   block_id    |              content               
+-----+--------------+---------------+------------------------------------
+   0 |              | …e06f9f61556e | # Identity demo
+   1 | keep         | …9fb7a178cf38 | The signing key is rotated every n
+   2 |              | …f80650e4e0c3 | The session store was migrated to 
+(3 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/identity-demo', $md$# Identity demo
+
+The signing key is now rotated every thirty days by the platform team. ^keep
+
+We moved the session store onto Redis during July, and it stuck.
+$md$) AS v2;
+
+SELECT ord, block_ref_id, '…' || right(block_id::text, 12) AS block_id,
+       left(content, 34) AS content
+FROM knowledge.blocks('notes/identity-demo');</code></pre>
+<pre class="out"><code class="out">                  v2                  
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ ord | block_ref_id |   block_id    |              content               
+-----+--------------+---------------+------------------------------------
+   0 |              | …e06f9f61556e | # Identity demo
+   1 | keep         | …9fb7a178cf38 | The signing key is now rotated eve
+   2 |              | …8f2089139dd9 | We moved the session store onto Re
+(3 rows)</code></pre>
+</div>
+    <p>A <code>^id</code> marker is a claim on identity: the paragraph carrying <code>^keep</code> kept its block id through a substantial reword, while the unmarked paragraph was rewritten far enough that the rebinder declined and a new id was minted. Deterministic carry is exact hash or <code>^id</code>, nothing else — see <a href="internals.html#carry">the carry passes</a>.</p>
+
+    <h3 id="r-retire-note">Retire a note without losing it</h3>
+    <p><b>Problem.</b> A session is over and its scratch note should stop showing up in queries.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.delete_note('notes/blocks-demo') AS removed;</code></pre>
+<pre class="out"><code class="out">               removed                
+--------------------------------------
+ 019fd643-…
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.delete_note('agents/worklog') AS retired;
+SELECT path FROM knowledge.notes('agents/**');</code></pre>
+<pre class="out"><code class="out">               retired                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+        path         
+---------------------
+ agents/session-7f21
+(1 row)</code></pre>
+</div>
+    <p><code>delete_note</code> tombstones the note row and clears the live lanes: the tag, edge, block and tile rows are deleted and the preamble and properties are blanked, so the note leaves <code>knowledge.notes()</code>, globs and link resolution. What stays is the note row and the whole history, which is what lets <a href="#r-undelete"><code>undelete_note</code></a> reconstruct the note — not resurrect the rows. Deleting is not erasing — for that see <a href="#r-excise-workflow">the excision workflow</a>.</p>
+
+    <h2 id="navigation">Navigation and graph</h2>
+    <p>Outlines, backlinks, orphans and graph walks. The link and tag queries are public API; the two recursive walks read <code>pgmind.edge</code> directly and are marked accordingly.</p>
+
+    <h3 id="r-toc">Table of contents for one note</h3>
+    <p><b>Problem.</b> You want the headings of a note, with their levels, for a sidebar.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, (attrs-&gt;&gt;'level')::int AS level, attrs-&gt;&gt;'text' AS heading
+FROM knowledge.blocks('projects/auth')
+WHERE kind = 'heading' ORDER BY ord;</code></pre>
+<pre class="out"><code class="out"> ord | level |  heading  
+-----+-------+-----------
+   0 |     1 | Auth
+   2 |     2 | Decisions
+   9 |     2 | Runbook
+  11 |     2 | Log
+(4 rows)</code></pre>
+</div>
+    <p>Heading blocks keep their rendered text and level in <code>attrs</code>, so no markdown parsing is needed on your side. <code>ord</code> is document order across the whole note — see <a href="concepts.html#sections">sections and heading paths</a>.</p>
+
+    <h3 id="r-outline">An indented outline of a note</h3>
+    <p><b>Problem.</b> You want the shape of a note in one column, cheap enough to render on every page load.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT repeat('    ', CASE WHEN kind = 'heading' THEN (attrs-&gt;&gt;'level')::int - 1
+                           ELSE coalesce(array_length(heading_path, 1), 0) END)
+       || CASE WHEN kind = 'list_item' THEN '- ' ELSE '' END
+       || left(content, 38) AS outline
+FROM knowledge.blocks('projects/auth')
+WHERE parent_block IS NULL ORDER BY ord;</code></pre>
+<pre class="out"><code class="out">                     outline                      
+--------------------------------------------------
+ # Auth
+     The service that issues and rotates cr
+     ## Decisions
+         - [[oauth2]] over server sessions, see [
+         - Refresh tokens rotate every 12h #decis
+         - Access tokens live 10 minutes, no exce
+     ## Runbook
+         Key rotation is [[runbooks/rotate-keys
+     ## Log
+         Migrated the session store.
+(10 rows)</code></pre>
+</div>
+    <p><code>heading_path</code> gives the depth of every non-heading block for free, and <code>parent_block IS NULL</code> drops the paragraphs that live inside list items so each bullet appears once. See <a href="concepts.html#anatomy">a note's anatomy</a>.</p>
+
+    <h3 id="r-backlinks">A backlink panel with excerpts</h3>
+    <p><b>Problem.</b> “What points at this note?”, with enough context to be worth displaying.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT src_path, kind, anchor, left(excerpt, 46) AS excerpt
+FROM knowledge.backlinks('projects/auth') ORDER BY src_path;</code></pre>
+<pre class="out"><code class="out">       src_path       |   kind   | anchor |                    excerpt                     
+----------------------+----------+--------+------------------------------------------------
+ index                | wikilink |        | [[projects/auth]]
+ notes/scratch        | wikilink |        | A bare [[auth]] resolves by basename, because 
+ people/ada           | wikilink |        | Owns [[projects/auth]] and [[runbooks/rotate-k
+ rfc/auth-01          | wikilink |        | Rotation policy for [[projects/auth]]. #archit
+ runbooks/rotate-keys | wikilink |        | Roll [[projects/auth]] to the new key id
+(5 rows)</code></pre>
+</div>
+    <p><code>backlinks</code> reads resolved edges in reverse and returns the source block's text as the excerpt, so the panel needs one query and no second read. Only resolved edges appear — a dangling link to this path is not a backlink. See <a href="concepts.html#resolution">link resolution</a>.</p>
+
+    <h3 id="r-broken-links">A vault-wide broken-link report</h3>
+    <p><b>Problem.</b> Find every link that does not resolve, and why.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT n.path AS from_note, l.target, l.kind, l.dangling_reason
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.links(n.path) l
+WHERE l.dangling_reason IS NOT NULL
+ORDER BY n.path, l.target;</code></pre>
+<pre class="out"><code class="out">   from_note   | target  |   kind   | dangling_reason 
+---------------+---------+----------+-----------------
+ notes/scratch | nowhere | wikilink | missing
+ projects/auth | oauth2  | wikilink | missing
+(2 rows)</code></pre>
+</div>
+    <p><code>links()</code> keeps unresolved edges as first-class rows with a <code>dangling_reason</code> of <code>missing</code>, <code>ambiguous</code> or <code>invalid</code>, so a broken link is data rather than an absence. Fanning <code>knowledge.notes()</code> out with <code>LATERAL</code> is the standard way to ask a per-note function a vault-wide question.</p>
+
+    <h3 id="r-ambiguous">Find basenames that two notes both claim</h3>
+    <p><b>Problem.</b> A bare <code>[[auth]]</code> stopped resolving and you want to know what collided with what.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('archive/auth', $md$# Auth (archived)
+
+Superseded by [[projects/auth]].
+$md$) AS created;
+
+SELECT regexp_replace(path, '^.*/', '') AS basename, count(*) AS notes,
+       string_agg(path, ', ' ORDER BY path) AS candidates
+FROM knowledge.notes() GROUP BY 1 HAVING count(*) &gt; 1;
+
+SELECT n.path AS from_note, l.target, l.dangling_reason
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.links(n.path) l
+WHERE l.dangling_reason = 'ambiguous';</code></pre>
+<pre class="out"><code class="out">               created                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ basename | notes |         candidates          
+----------+-------+-----------------------------
+ auth     |     2 | archive/auth, projects/auth
+(1 row)
+
+   from_note   | target | dangling_reason 
+---------------+--------+-----------------
+ notes/scratch | auth   | ambiguous
+(1 row)</code></pre>
+</div>
+    <p>Resolution is exact path first, then unique live basename; a second live note with the same last segment makes every bare reference <code>ambiguous</code> at once. The first query finds the collisions before they bite — see <a href="concepts.html#resolution">resolution order</a>.</p>
+
+    <h3 id="r-repair">Un-dangle links after the collision is gone</h3>
+    <p><b>Problem.</b> You removed the colliding note and the links are still ambiguous.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.delete_note('archive/auth') AS tombstoned;
+SELECT target, resolved_path, dangling_reason FROM knowledge.links('notes/scratch');
+
+SELECT knowledge.undelete_note('archive/auth') AS back;
+SELECT knowledge.move_note('archive/auth', 'archive/auth-2018') AS renamed;
+SELECT target, resolved_path, dangling_reason FROM knowledge.links('notes/scratch');</code></pre>
+<pre class="out"><code class="out">              tombstoned              
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ target  | resolved_path | dangling_reason 
+---------+---------------+-----------------
+ nowhere |               | missing
+ auth    |               | ambiguous
+(2 rows)
+
+                 back                 
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+               renamed                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ target  | resolved_path | dangling_reason 
+---------+---------------+-----------------
+ nowhere |               | missing
+ auth    | projects/auth | 
+(2 rows)</code></pre>
+</div>
+    <p>Edge repair runs on note <em>creation</em> and on <em>rename</em>, not on delete, and unchanged blocks keep their existing edge rows — so a tombstone alone never re-resolves anything. A <code>move_note</code> re-runs resolution for both the old and the new path and fixes the whole vault in one pass. See <a href="internals.html#write-path">creation repair</a>.</p>
+
+    <h3 id="r-orphans">Notes nothing links to</h3>
+    <p><b>Problem.</b> Find the notes that fell out of the graph.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.orphans();</code></pre>
+<pre class="out"><code class="out">        path         
+---------------------
+ agents/session-7f21
+ archive/auth-2018
+ facts/ledger
+ index
+ notes/identity-demo
+(5 rows)</code></pre>
+</div>
+    <p><code>orphans()</code> ignores self-links and dangling edges, so a note that only links to itself, or is only pointed at by a broken link, still counts as an orphan. Hub notes like <code>index</code> are orphans by construction — nothing links <em>to</em> the index.</p>
+
+    <h3 id="r-hubs">Rank notes by degree</h3>
+    <p><b>Problem.</b> Which notes are the centre of this vault?</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH deg AS (
+  SELECT n.path,
+         count(*) FILTER (WHERE l.resolved_path IS NOT NULL) AS out_links,
+         (SELECT count(*) FROM knowledge.backlinks(n.path))  AS in_links
+  FROM knowledge.notes() n
+  LEFT JOIN LATERAL knowledge.links(n.path) l ON true
+  GROUP BY n.path
+)
+SELECT path, out_links, in_links FROM deg
+ORDER BY out_links + in_links DESC, path LIMIT 6;</code></pre>
+<pre class="out"><code class="out">         path         | out_links | in_links 
+----------------------+-----------+----------
+ projects/auth        |         3 |        6
+ index                |         6 |        0
+ people/ada           |         2 |        3
+ runbooks/rotate-keys |         1 |        4
+ rfc/auth-01          |         2 |        2
+ daily/2026-08-06     |         1 |        1
+(6 rows)</code></pre>
+</div>
+    <p>Out-degree comes from <code>links()</code> and in-degree from <code>backlinks()</code>; both count edges, so a note linked twice from one source counts twice. That is usually what you want for ranking and never what you want for a set.</p>
+
+    <h3 id="r-neighbourhood">Everything within N hops of a note</h3>
+    <p><b>Problem.</b> Build a link neighbourhood for a context window, treating links as undirected.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH RECURSIVE link AS (
+  SELECT s.path AS src, d.path AS dst
+  FROM pgmind.edge e
+  JOIN pgmind.note s ON s.id = e.src_note AND s.tombstoned_at IS NULL
+  JOIN pgmind.note d ON d.id = e.dst_note AND d.tombstoned_at IS NULL
+  WHERE e.dst_note IS NOT NULL AND s.path &lt;&gt; d.path
+), walk AS (
+  SELECT 'projects/auth'::text AS path, 0 AS hops,
+         ARRAY['projects/auth']::text[] AS trail
+  UNION ALL
+  SELECT nxt.p, w.hops + 1, w.trail || nxt.p
+  FROM walk w
+  JOIN link l ON w.path IN (l.src, l.dst)
+  CROSS JOIN LATERAL (SELECT CASE WHEN l.src = w.path THEN l.dst ELSE l.src END)
+       AS nxt(p)
+  WHERE w.hops &lt; 2 AND NOT nxt.p = ANY(w.trail)
+)
+SELECT path, min(hops) AS distance FROM walk GROUP BY path ORDER BY 2, 1;</code></pre>
+<pre class="out"><code class="out">         path         | distance 
+----------------------+----------
+ projects/auth        |        0
+ archive/auth-2018    |        1
+ index                |        1
+ notes/scratch        |        1
+ people/ada           |        1
+ rfc/auth-01          |        1
+ runbooks/rotate-keys |        1
+ daily/2026-08-06     |        2
+(8 rows)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> This walks <code>pgmind.edge</code> directly because the public API exposes links one note at a time and a recursive CTE needs the whole relation. <code>knowledge.traverse()</code> (<span class="badge next">Phase 5</span>) replaces it; until then this is the honest way to walk the graph, and the <code>trail</code> array is what keeps a cycle from running forever.</p>
+
+    <h3 id="r-shortest-path">The shortest path between two notes</h3>
+    <p><b>Problem.</b> “How is this related to that?”, answered with a route rather than a score.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH RECURSIVE link AS (
+  SELECT s.path AS src, d.path AS dst
+  FROM pgmind.edge e
+  JOIN pgmind.note s ON s.id = e.src_note AND s.tombstoned_at IS NULL
+  JOIN pgmind.note d ON d.id = e.dst_note AND d.tombstoned_at IS NULL
+  WHERE e.dst_note IS NOT NULL AND s.path &lt;&gt; d.path
+), walk AS (
+  SELECT 'daily/2026-08-06'::text AS path, 0 AS hops,
+         ARRAY['daily/2026-08-06']::text[] AS trail
+  UNION ALL
+  SELECT nxt.p, w.hops + 1, w.trail || nxt.p
+  FROM walk w
+  JOIN link l ON w.path IN (l.src, l.dst)
+  CROSS JOIN LATERAL (SELECT CASE WHEN l.src = w.path THEN l.dst ELSE l.src END)
+       AS nxt(p)
+  WHERE w.hops &lt; 4 AND NOT nxt.p = ANY(w.trail)
+)
+SELECT hops, array_to_string(trail, ' -&gt; ') AS route
+FROM walk WHERE path = 'runbooks/rotate-keys' ORDER BY hops LIMIT 1;</code></pre>
+<pre class="out"><code class="out"> hops |                         route                          
+------+--------------------------------------------------------
+    2 | daily/2026-08-06 -&gt; people/ada -&gt; runbooks/rotate-keys
+(1 row)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> Same relation, bounded depth, ordered by hops and cut at the first hit — breadth-first search expressed as a recursive CTE. Raise the <code>hops</code> bound with care: the walk is exponential in a dense vault and PostgreSQL will cheerfully try.</p>
+
+    <h3 id="r-tag-cooccurrence">Which tags travel together</h3>
+    <p><b>Problem.</b> You want the tag vocabulary and the pairs that keep appearing on the same note.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.tags() ORDER BY notes DESC, tag;</code></pre>
+<pre class="out"><code class="out">     tag      | notes | blocks 
+--------------+-------+--------
+ decision     |     3 |      3
+ architecture |     2 |      2
+ active       |     1 |      0
+ person       |     1 |      1
+ runbook      |     1 |      0
+(5 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH nt AS (
+  SELECT DISTINCT t.path, lower(t.tag) AS tag
+  FROM knowledge.tags() g CROSS JOIN LATERAL knowledge.tagged(g.tag) t
+)
+SELECT a.tag AS tag_a, b.tag AS tag_b, count(*) AS notes
+FROM nt a JOIN nt b ON a.path = b.path AND a.tag &lt; b.tag
+GROUP BY 1, 2 ORDER BY notes DESC, 1, 2;</code></pre>
+<pre class="out"><code class="out">    tag_a     |    tag_b     | notes 
+--------------+--------------+-------
+ architecture | decision     |     2
+ active       | architecture |     1
+ active       | decision     |     1
+(3 rows)</code></pre>
+</div>
+    <p><code>tags()</code> groups case-insensitively and reports the lexicographically first spelling it has seen, and counts notes and blocks separately — a tag in frontmatter belongs to the note and has no block. See <a href="concepts.html#dialect">the tag grammar</a>.</p>
+
+    <h3 id="r-tag-setops">Tag intersection and exclusion</h3>
+    <p><b>Problem.</b> “Architecture decisions that are not about a person.”</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT DISTINCT path FROM knowledge.tagged('architecture')
+INTERSECT
+SELECT DISTINCT path FROM knowledge.tagged('decision')
+EXCEPT
+SELECT DISTINCT path FROM knowledge.tagged('person');</code></pre>
+<pre class="out"><code class="out">     path      
+---------------
+ projects/auth
+ rfc/auth-01
+(2 rows)</code></pre>
+</div>
+    <p><code>tagged()</code> returns one row per tagged block, so <code>DISTINCT</code> before the set operators is what turns block hits into note hits. <code>INTERSECT</code>/<code>EXCEPT</code> then do the work you would otherwise write as three joins.</p>
+
+    <h3 id="r-glob">Filter by path glob and frontmatter property</h3>
+    <p><b>Problem.</b> Select notes by where they live and by what their frontmatter says.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, title, properties-&gt;&gt;'owner' AS owner, properties-&gt;'tags' AS fm_tags
+FROM knowledge.notes('**/auth*') ORDER BY path;</code></pre>
+<pre class="out"><code class="out">       path        |   title   |  owner   |          fm_tags           
+-------------------+-----------+----------+----------------------------
+ archive/auth-2018 | auth-2018 |          | 
+ projects/auth     | auth      | platform | ["architecture", "active"]
+ rfc/auth-01       | auth-01   |          | 
+(3 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, properties-&gt;&gt;'owner' AS owner
+FROM knowledge.notes('**')
+WHERE properties-&gt;&gt;'owner' IS NOT NULL OR properties ? 'tags'
+ORDER BY path;</code></pre>
+<pre class="out"><code class="out">         path         |  owner   
+----------------------+----------
+ projects/auth        | platform
+ runbooks/rotate-keys | 
+(2 rows)</code></pre>
+</div>
+    <p>Globs are git-style and nothing more: <code>*</code> inside one segment, <code>**</code> across segments. Note that <code>notes().title</code> is the path's last segment — the frontmatter <code>title</code> is in <code>properties-&gt;&gt;'title'</code>. See <a href="concepts.html#paths">paths and globs</a> and <a href="concepts.html#frontmatter">frontmatter</a>.</p>
+
+    <h3 id="r-transclusions">Expand transclusions into one document</h3>
+    <p><b>Problem.</b> A digest note is a list of <code>![[…]]</code> and you want the composed text.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('digests/auth-brief', $md$# Auth brief
+
+![[projects/auth#Decisions]]
+
+![[runbooks/rotate-keys]]
+$md$) AS created;
+
+SELECT l.kind, l.target, l.anchor, l.resolved_path
+FROM knowledge.links('digests/auth-brief') l
+JOIN knowledge.blocks('digests/auth-brief') b USING (block_id)
+ORDER BY b.ord;</code></pre>
+<pre class="out"><code class="out">               created                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+     kind     |        target        |  anchor   |    resolved_path     
+--------------+----------------------+-----------+----------------------
+ transclusion | projects/auth        | Decisions | projects/auth
+ transclusion | runbooks/rotate-keys |           | runbooks/rotate-keys
+(2 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH t AS (
+  SELECT b.ord, l.resolved_path, nullif(l.anchor, '') AS anchor
+  FROM knowledge.links('digests/auth-brief') l
+  JOIN knowledge.blocks('digests/auth-brief') b USING (block_id)
+  WHERE l.kind = 'transclusion' AND l.resolved_path IS NOT NULL
+)
+SELECT string_agg(x.body, E'\n\n' ORDER BY t.ord) AS composed
+FROM t
+CROSS JOIN LATERAL (
+  SELECT CASE
+    WHEN t.anchor IS NULL THEN knowledge.read(t.resolved_path)::text
+    ELSE (SELECT knowledge.read_section(t.resolved_path,
+                   h.heading_path || (h.attrs-&gt;&gt;'text'))::text
+          FROM knowledge.blocks(t.resolved_path) h
+          WHERE h.kind = 'heading' AND h.attrs-&gt;&gt;'text' = t.anchor
+          ORDER BY h.ord LIMIT 1)
+  END AS body
+) AS x;</code></pre>
+<pre class="out"><code class="out">## Decisions
+
+- [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
+- Refresh tokens rotate every 12h #decision ^rotation
+- Access tokens live 10 minutes, no exceptions
+
+
+
+---
+tags: runbook
+---
+
+# Rotate the signing keys
+
+1. Announce the maintenance window
+2. Generate the new key pair
+3. Roll [[projects/auth]] to the new key id
+4. Retire the old key once every token has expired
+
+&gt; Retiring the old key early invalidates live sessions.</code></pre>
+</div>
+    <p>A transclusion is an edge like any other, with the heading in <code>anchor</code>; resolving it is <code>read_section</code> against the resolved path, and pgmind deliberately does not do it for you. Note that <code>read</code> returns the frontmatter too — strip the preamble if you are composing prose.</p>
+
+    <h2 id="retrieval">Retrieval, until <code>context()</code> exists</h2>
+    <p>Everything in this section is <em>your</em> code sitting beside pgmind, not pgmind's. <code>knowledge.context()</code>, <code>search()</code> and <code>expand()</code> are <span class="badge next">Phase 5</span>; these recipes are what you build in the meantime, and each names the function that will replace it.</p>
+
+    <h3 id="r-fts-index">A full-text index over every block</h3>
+    <p><b>Problem.</b> You want ranked search across the vault and you do not have embeddings.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">CREATE MATERIALIZED VIEW app.block_fts AS
+SELECT n.path, n.head_revision, b.block_id, b.ord, b.kind, b.heading_path,
+       b.content, b.content_hash, b.block_ref_id,
+       to_tsvector('english', b.content) AS tsv
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.blocks(n.path) b
+WHERE b.kind &lt;&gt; 'list_item';
+
+CREATE UNIQUE INDEX block_fts_id  ON app.block_fts (block_id);
+CREATE INDEX        block_fts_tsv ON app.block_fts USING gin (tsv);</code></pre>
+<pre class="out"><code class="out">SELECT 54
+CREATE INDEX
+CREATE INDEX</code></pre>
+</div>
+    <p>The materialised view is built from <code>knowledge.blocks()</code>, so it stays on the public API and survives a schema change underneath. It is a snapshot: <code>REFRESH MATERIALIZED VIEW CONCURRENTLY app.block_fts;</code> after a batch of writes, or drive it from <a href="#r-listen-notify"><code>LISTEN</code>/<code>NOTIFY</code></a>.</p>
+
+    <h3 id="r-fts-search">Search blocks with highlighted fragments</h3>
+    <p><b>Problem.</b> Show the user which words matched, not only which note.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, round(ts_rank(tsv, q)::numeric, 4) AS rank,
+       ts_headline('english', content, q,
+         'StartSel=«, StopSel=», MaxFragments=1, MaxWords=12, MinWords=4') AS hit
+FROM app.block_fts, websearch_to_tsquery('english', 'rotate keys') q
+WHERE tsv @@ q ORDER BY rank DESC, path LIMIT 5;</code></pre>
+<pre class="out"><code class="out">         path         |  rank  |                                  hit                                  
+----------------------+--------+-----------------------------------------------------------------------
+ projects/auth        | 0.0991 | «Key» «rotation» is [[runbooks/rotate-keys|documented separately
+ agents/session-7f21  | 0.0974 | «rotate» the staging «key»
+ daily/2026-08-06     | 0.0974 | worker-a «rotated» the staging «key»
+ notes/identity-demo  | 0.0974 | signing «key» is now «rotated» every thirty days by the platform team
+ runbooks/rotate-keys | 0.0974 | «Rotate» the signing «keys»
+(5 rows)</code></pre>
+</div>
+    <p><code>ts_headline</code> works on the block's <code>content</code>, which is the block's own text with its <code>^id</code> marker stripped, so the highlighted fragment is safe to show. Ranking one block at a time is usually better than ranking notes — the block is the citable unit.</p>
+
+    <h3 id="r-search-function">Wrap search in a function that returns citations</h3>
+    <p><b>Problem.</b> Callers should get an address they can resolve later, not a row number.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">CREATE FUNCTION app.search(q text, k int DEFAULT 5)
+RETURNS TABLE(path text, citation text, rank real, excerpt text)
+LANGUAGE sql STABLE AS $body$
+  SELECT f.path,
+         f.path || '#' || coalesce('^' || f.block_ref_id, 'ord=' || f.ord)
+              || ' @ ' || f.head_revision,
+         ts_rank(f.tsv, tq),
+         left(f.content, 44)
+  FROM app.block_fts f, websearch_to_tsquery('english', q) tq
+  WHERE f.tsv @@ tq
+  ORDER BY ts_rank(f.tsv, tq) DESC, f.path, f.ord
+  LIMIT k;
+$body$;
+
+SELECT split_part(citation, ' @ ', 1) AS anchor,
+       round(rank::numeric, 4) AS rank, excerpt
+FROM app.search('token rotation', 3);</code></pre>
+<pre class="out"><code class="out">CREATE FUNCTION
+         anchor          |  rank  |                  excerpt                  
+-------------------------+--------+-------------------------------------------
+ facts/ledger#ord=2      | 0.0991 | Refresh tokens rotate every 12h.
+ projects/auth#^rotation | 0.0991 | Refresh tokens rotate every 12h #decision
+ rfc/auth-01#ord=0       | 0.0991 | # RFC-AUTH-01: token rotation
+(3 rows)</code></pre>
+</div>
+    <p>The citation is <code>path#^ref</code> (or <code>#ord=</code>) plus the head revision at the time of the search, which is exactly what <a href="#r-resolve-citation">resolving a citation</a> needs. <code>knowledge.search()</code> is the <a href="sql.html#not-yet">Phase 5</a> replacement.</p>
+
+    <h3 id="r-context-bundle">Hand-rolled context assembly with a character budget</h3>
+    <p><b>Problem.</b> Fill a context window with pinned notes, the anchor note and its neighbours, packed to a budget, every block cited.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('index', $md$---
+pgmind-pin: true
+---
+
+# Index
+
+- [[projects/auth]]
+- [[rfc/auth-01]]
+- [[runbooks/rotate-keys]]
+- [[people/ada]]
+- [[daily/2026-08-06]]
+- [[notes/scratch]]
+$md$) AS pinned;
+
+SELECT path, properties FROM knowledge.notes('index');</code></pre>
+<pre class="out"><code class="out">                pinned                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ path  |      properties      
+-------+----------------------
+ index | {"pgmind-pin": true}
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH RECURSIVE link AS (
+  SELECT s.path AS src, d.path AS dst
+  FROM pgmind.edge e
+  JOIN pgmind.note s ON s.id = e.src_note AND s.tombstoned_at IS NULL
+  JOIN pgmind.note d ON d.id = e.dst_note AND d.tombstoned_at IS NULL
+  WHERE e.dst_note IS NOT NULL AND s.path &lt;&gt; d.path
+), walk AS (
+  SELECT 'projects/auth'::text AS path, 0 AS hops
+  UNION ALL
+  SELECT CASE WHEN l.src = w.path THEN l.dst ELSE l.src END, w.hops + 1
+  FROM walk w JOIN link l ON w.path IN (l.src, l.dst) WHERE w.hops &lt; 1
+), dist AS (
+  SELECT path, min(hops) AS hops FROM walk GROUP BY path
+), cand AS (
+  SELECT n.path, n.head_revision, b.ord, b.block_ref_id, b.content,
+         CASE WHEN n.properties-&gt;&gt;'pgmind-pin' = 'true' THEN 0
+              ELSE d.hops + 1 END AS tier
+  FROM knowledge.notes() n
+  LEFT JOIN dist d ON d.path = n.path
+  CROSS JOIN LATERAL knowledge.blocks(n.path) b
+  WHERE b.kind = 'paragraph'
+    AND (d.hops IS NOT NULL OR n.properties-&gt;&gt;'pgmind-pin' = 'true')
+), packed AS (
+  SELECT *, sum(length(content) + 2)
+              OVER (ORDER BY tier, path, ord ROWS UNBOUNDED PRECEDING) AS chars
+  FROM cand
+)
+SELECT tier, chars,
+       path || '#' || coalesce('^' || block_ref_id, 'ord=' || ord)
+            || ' @ ' || left(head_revision::text, 8) || '…' AS citation,
+       left(content, 34) AS excerpt
+FROM packed WHERE chars &lt;= 420 ORDER BY tier, path, ord;</code></pre>
+<pre class="out"><code class="out"> tier | chars |              citation               |              excerpt               
+------+-------+-------------------------------------+------------------------------------
+    0 |    19 | index#ord=2 @ 019fd643…             | [[projects/auth]]
+    0 |    36 | index#ord=4 @ 019fd643…             | [[rfc/auth-01]]
+    0 |    62 | index#ord=6 @ 019fd643…             | [[runbooks/rotate-keys]]
+    0 |    78 | index#ord=8 @ 019fd643…             | [[people/ada]]
+    0 |   100 | index#ord=10 @ 019fd643…            | [[daily/2026-08-06]]
+    0 |   119 | index#ord=12 @ 019fd643…            | [[notes/scratch]]
+    1 |   194 | projects/auth#ord=1 @ 019fd643…     | The service that issues and rotate
+    1 |   262 | projects/auth#ord=4 @ 019fd643…     | [[oauth2]] over server sessions, s
+    1 |   305 | projects/auth#^rotation @ 019fd643… | Refresh tokens rotate every 12h #d
+    1 |   351 | projects/auth#ord=8 @ 019fd643…     | Access tokens live 10 minutes, no 
+    1 |   416 | projects/auth#ord=10 @ 019fd643…    | Key rotation is [[runbooks/rotate-
+(11 rows)</code></pre>
+</div>
+    <p><code>pgmind-pin</code> is a reserved frontmatter key, so pinning is a property rather than a side table; the running <code>sum()</code> window is the budget, and cutting on it means the bundle is deterministic for a given vault state. <code>knowledge.context()</code> (<span class="badge next">Phase 5</span>) replaces this whole query, with <code>context_explain()</code> for why each block made the cut.</p>
+
+    <h3 id="r-embedding-hook">Embed each distinct block once, ever</h3>
+    <p><b>Problem.</b> You want vectors, and you do not want to pay to re-embed a paragraph that did not change.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">-- pgmind never generates an embedding. This is your table and your pipeline.
+CREATE TABLE app.embedding_hook (
+  content_hash bytea  NOT NULL,
+  model        text   NOT NULL,
+  block_id     uuid   NOT NULL,   -- one block that last carried this content
+  embedding    real[] NOT NULL,   -- vector(1536) if pgvector is installed
+  computed_at  timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (content_hash, model)
+);
+
+CREATE VIEW app.needs_embedding AS
+SELECT DISTINCT ON (b.content_hash)
+       b.content_hash, b.block_id, n.path, b.content
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.blocks(n.path) b
+WHERE b.kind = 'paragraph'
+  AND NOT EXISTS (SELECT 1 FROM app.embedding_hook e
+                  WHERE e.content_hash = b.content_hash
+                    AND e.model = 'text-embedding-3-small');
+
+SELECT count(*) AS pending FROM app.needs_embedding;</code></pre>
+<pre class="out"><code class="out">CREATE TABLE
+CREATE VIEW
+ pending 
+---------
+      37
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">INSERT INTO app.embedding_hook (content_hash, model, block_id, embedding)
+SELECT content_hash, 'text-embedding-3-small', block_id, ARRAY[0.0, 0.0, 0.0]
+FROM app.needs_embedding;
+
+SELECT count(*) AS pending_after FROM app.needs_embedding;
+
+SELECT r.revision FROM knowledge.blocks('facts/ledger') b
+CROSS JOIN LATERAL knowledge.update_block(b.block_id,
+    $md$Refresh tokens rotate every 12 hours.$md$) r
+WHERE b.kind = 'paragraph' AND b.content LIKE 'Refresh tokens%';
+
+SELECT count(*) AS pending_after_one_edit FROM app.needs_embedding;</code></pre>
+<pre class="out"><code class="out">INSERT 0 37
+ pending_after 
+---------------
+             0
+(1 row)
+
+               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ pending_after_one_edit 
+------------------------
+                      1
+(1 row)</code></pre>
+</div>
+    <p>pgmind never generates an embedding and opens no sockets — that is an architecture law, not a gap. Keying your hook table on <code>content_hash</code> instead of <code>block_id</code> means an unchanged block is never re-embedded, an edited block reappears in <code>needs_embedding</code>, and two identical paragraphs in different notes share one vector. Use <code>vector(1536)</code> in place of <code>real[]</code> if pgvector is installed. See <a href="internals.html#boundary">the AI-free boundary</a>.</p>
+
+    <h3 id="r-fusion">Blend text rank, link distance and recency</h3>
+    <p><b>Problem.</b> One ranking from three weak signals.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH q AS (SELECT websearch_to_tsquery('english', 'key rotation') AS tq),
+hits AS (
+  SELECT f.path, max(ts_rank(f.tsv, q.tq)) AS fts, count(*) AS blocks
+  FROM app.block_fts f, q WHERE f.tsv @@ q.tq GROUP BY f.path
+),
+touched AS (
+  SELECT n.path, max(h.created_at) AS at
+  FROM knowledge.notes() n CROSS JOIN LATERAL knowledge.history(n.path, 1) h
+  GROUP BY n.path
+),
+recency AS (SELECT path, rank() OVER (ORDER BY at DESC) AS r FROM touched),
+near AS (
+  SELECT src_path AS path FROM knowledge.backlinks('projects/auth')
+  UNION SELECT 'projects/auth'
+)
+SELECT h.path, h.blocks, round(h.fts::numeric, 4) AS fts,
+       (near.path IS NOT NULL) AS linked, rc.r AS recency_rank,
+       round((h.fts + CASE WHEN near.path IS NOT NULL THEN 0.05 ELSE 0 END
+                    + 0.05 / rc.r)::numeric, 4) AS score
+FROM hits h
+LEFT JOIN near ON near.path = h.path
+JOIN recency rc ON rc.path = h.path
+ORDER BY score DESC, h.path LIMIT 5;</code></pre>
+<pre class="out"><code class="out">         path         | blocks |  fts   | linked | recency_rank | score  
+----------------------+--------+--------+--------+--------------+--------
+ projects/auth        |      1 | 0.0991 | t      |            7 | 0.1562
+ runbooks/rotate-keys |      1 | 0.0974 | t      |           11 | 0.1519
+ notes/identity-demo  |      1 | 0.0974 | f      |            5 | 0.1074
+ agents/session-7f21  |      1 | 0.0974 | f      |            6 | 0.1057
+ daily/2026-08-06     |      1 | 0.0974 | f      |            8 | 0.1036
+(5 rows)</code></pre>
+</div>
+    <p>Each signal is a CTE, so you can inspect and re-weight them independently — the point of the columns in the output is that you can see why a row won. On a vault this small recency barely separates anything; the shape is what transfers, not the constants.</p>
+
+    <h2 id="history-audit">History, audit and citations</h2>
+    <p>Every write is a revision, and every revision is reconstructable until you retain it away. This is where the version engine earns its keep.</p>
+
+    <h3 id="r-citation">Emit a citation an agent can hand back later</h3>
+    <p><b>Problem.</b> An answer needs a footnote that still means something next week.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT n.path || '#^' || b.block_ref_id || ' @ ' || n.head_revision AS citation
+FROM knowledge.notes('projects/auth') n
+CROSS JOIN LATERAL knowledge.blocks(n.path) b
+WHERE b.block_ref_id IS NOT NULL;</code></pre>
+<pre class="out"><code class="out">                            citation                            
+----------------------------------------------------------------
+ projects/auth#^rotation @ 019fd643-…
+(1 row)</code></pre>
+</div>
+    <p>A citation is a path, a block address and the revision it was read at; the <code>^id</code> form survives edits and rewrites, the <code>ord=</code> form does not. See <a href="concepts.html#identity">identity</a>.</p>
+
+    <h3 id="r-resolve-citation">Resolve a citation against the past</h3>
+    <p><b>Problem.</b> Show the reader exactly the text that was cited, not what it says now.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH cite AS (
+  SELECT 'projects/auth'::text AS path, 'rotation'::text AS ref,
+         (SELECT revision FROM knowledge.history('projects/auth')
+          WHERE seq = 0) AS rev
+)
+SELECT a.ord, a.kind, a.content AS content_at_that_revision
+FROM cite
+JOIN knowledge.blocks(cite.path) b     ON b.block_ref_id = cite.ref
+JOIN knowledge.blocks_as_of(cite.path, cite.rev) a ON a.block_id = b.block_id;</code></pre>
+<pre class="out"><code class="out"> ord |   kind    |         content_at_that_revision          
+-----+-----------+-------------------------------------------
+   6 | paragraph | Refresh tokens rotate every 24h #decision
+(1 row)</code></pre>
+</div>
+    <p><code>blocks_as_of</code> reconstructs the note at that revision and returns block ids, so joining on <code>block_id</code> gives you the same block's older text — here “24h”, while the head says “12h”. Reconstruction anchors on the nearest frame at or above the target and applies pre-images backwards; see <a href="internals.html#history">the history engine</a>.</p>
+
+    <h3 id="r-replay-read">Reconstruct exactly what an agent read</h3>
+    <p><b>Problem.</b> An agent did something odd and you want its input, byte for byte.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_as_of('projects/auth',
+         (SELECT revision FROM knowledge.history('projects/auth') WHERE seq = 0));</code></pre>
+<pre class="out"><code class="out">---
+title: Auth
+tags: [architecture, active]
+owner: platform
+---
+
+# Auth
+
+The service that issues and rotates credentials. Owned by [[people/ada]].
+
+## Decisions
+
+- [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
+- Refresh tokens rotate every 24h #decision ^rotation
+- Access tokens live 15 minutes, no exceptions
+
+## Runbook
+
+Key rotation is [[runbooks/rotate-keys|documented separately]].
+
+## Log
+
+Migrated the session store.</code></pre>
+</div>
+    <p><code>read_as_of</code> returns the document as it was, including frontmatter, from pre-images plus frames — not from a stored copy of every version. There are <code>uuid</code>, <code>bigint</code> (seq) and <code>timestamptz</code> overloads; the timestamp one raises PM011 if nothing existed that early.</p>
+
+    <h3 id="r-diff">Diff two revisions of a note</h3>
+    <p><b>Problem.</b> What changed between these two writes?</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT d.change, left(d.before, 32) AS before, left(d.after, 32) AS after
+FROM knowledge.diff('notes/identity-demo',
+       (SELECT revision FROM knowledge.history('notes/identity-demo') WHERE seq = 0),
+       (SELECT revision FROM knowledge.history('notes/identity-demo') WHERE seq = 1)) d;</code></pre>
+<pre class="out"><code class="out"> change  |              before              |              after               
+---------+----------------------------------+----------------------------------
+ changed | The signing key is rotated every | The signing key is now rotated e
+ removed | The session store was migrated t | 
+ added   |                                  | We moved the session store onto 
+(3 rows)</code></pre>
+</div>
+    <p><code>diff</code> is block-structured, not line-structured: <code>changed</code> means one block kept its id and changed its text, while <code>removed</code>&nbsp;+&nbsp;<code>added</code> means identity was not carried. That distinction is the whole point of <a href="internals.html#carry">the carry rules</a>.</p>
+
+    <h3 id="r-blame">Blame a note, block by block</h3>
+    <p><b>Problem.</b> Who last touched each paragraph, and how sure is pgmind that it is the same paragraph?</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/identity-demo', $md$# Identity demo
+
+The signing key is now rotated every thirty days by the platform team. ^keep
+
+We moved the session store onto Redis during August, and it stuck.
+$md$) AS v3;
+
+SELECT ord, left(block_id::text, 13) || '…' AS block_id, author, source,
+       confidence, history_floor
+FROM knowledge.blame('notes/identity-demo');</code></pre>
+<pre class="out"><code class="out">                  v3                  
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ ord |    block_id    | author | source | confidence | history_floor 
+-----+----------------+--------+--------+------------+---------------
+   0 | 019fd643-976f… | amin   | api    |            |             0
+   1 | 019fd643-976f… | amin   | api    |            |             0
+   2 | 019fd643-978c… | amin   | api    |  0.8695652 |             0
+(3 rows)</code></pre>
+</div>
+    <p><code>author</code> defaults to <code>current_user</code> and <code>source</code> is <code>'api'</code> for every shipped operation. <code>confidence</code> is <code>NULL</code> for a deterministic carry and a number when the heuristic rebinder inferred the match; <code>history_floor</code> is the oldest seq still reconstructable.</p>
+
+    <h3 id="r-inferred">Queue inferred identities for human review</h3>
+    <p><b>Problem.</b> Find every block whose identity was guessed rather than proved.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT n.path, bl.ord, round(bl.confidence::numeric, 3) AS confidence,
+       left(b.content, 40) AS content
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.blame(n.path) bl
+JOIN knowledge.blocks(n.path) b ON b.block_id = bl.block_id
+WHERE bl.confidence IS NOT NULL
+ORDER BY bl.confidence, n.path;</code></pre>
+<pre class="out"><code class="out">        path         | ord | confidence |                 content                  
+---------------------+-----+------------+------------------------------------------
+ notes/identity-demo |   2 |      0.870 | We moved the session store onto Redis du
+(1 row)</code></pre>
+</div>
+    <p>The rebinder only runs inside <code>write()</code>, never inside the block operations, and it records its Dice score on the block revision. Published recall is 0.951 at precision 0.980 with inferred-case recall 0.826 — good enough to be useful, not good enough to be unattended. See <a href="internals.html#rebinding">heuristic rebinding</a>.</p>
+
+    <h3 id="r-feed">A vault-wide activity feed</h3>
+    <p><b>Problem.</b> One list of what happened, newest first.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT n.path, h.seq, h.verb, h.author, h.blocks_changed, h.reconstructable
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.history(n.path, 3) h
+ORDER BY h.created_at DESC LIMIT 8;</code></pre>
+<pre class="out"><code class="out">        path         | seq |     verb     | author | blocks_changed | reconstructable 
+---------------------+-----+--------------+--------+----------------+-----------------
+ notes/identity-demo |   2 | write        | amin   |              1 | t
+ facts/ledger        |   2 | update_block | amin   |              1 | t
+ index               |   1 | write        | amin   |              0 | t
+ digests/auth-brief  |   0 | write        | amin   |              3 | t
+ archive/auth-2018   |   3 | move_note    | amin   |              0 | t
+ archive/auth-2018   |   2 | write        | amin   |              2 | t
+ archive/auth-2018   |   1 | delete_note  | amin   |              2 | t
+ notes/identity-demo |   1 | write        | amin   |              3 | t
+(8 rows)</code></pre>
+</div>
+    <p><code>history()</code> is per note, so the feed is a <code>LATERAL</code> fan-out with a small per-note limit; <code>reconstructable</code> tells you whether time travel to that revision still works. Note that <code>append_to_section</code> records <code>verb = 'insert_blocks'</code>, because that is what it delegates to.</p>
+
+    <h3 id="r-recent">What changed in the last day</h3>
+    <p><b>Problem.</b> A standup-sized answer.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT n.path, count(*) AS revisions, max(h.created_at) AS last_touch
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.history(n.path, 200) h
+WHERE h.created_at &gt; now() - interval '1 day'
+GROUP BY n.path ORDER BY revisions DESC, n.path LIMIT 5;</code></pre>
+<pre class="out"><code class="out">        path         | revisions |          last_touch           
+---------------------+-----------+-------------------------------
+ daily/2026-08-06    |         5 | 2026-08-06 16:49:41.244312+08
+ archive/auth-2018   |         4 | 2026-08-06 16:49:42.028292+08
+ facts/ledger        |         3 | 2026-08-06 16:49:42.375415+08
+ notes/identity-demo |         3 | 2026-08-06 16:49:42.502059+08
+ projects/auth       |         3 | 2026-08-06 16:49:41.562758+08
+(5 rows)</code></pre>
+</div>
+    <p>Revisions carry <code>created_at</code> from the transaction clock, so “last day” is an ordinary interval predicate. Raise the per-note limit if a note may have taken more than that many revisions in the window, or you will undercount it.</p>
+
+    <h3 id="r-restore">Restore a note to an earlier revision</h3>
+    <p><b>Problem.</b> Undo three bad writes without losing the record that they happened.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/identity-demo',
+         knowledge.read_as_of('notes/identity-demo', 0::bigint),
+         expected_head =&gt; (SELECT head_revision
+                           FROM knowledge.notes('notes/identity-demo'))) AS restored;
+
+SELECT seq, verb, blocks_changed FROM knowledge.history('notes/identity-demo');
+SELECT ord, block_ref_id, left(content, 40) AS content
+FROM knowledge.blocks('notes/identity-demo');</code></pre>
+<pre class="out"><code class="out">               restored               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ seq | verb  | blocks_changed 
+-----+-------+----------------
+   3 | write |              3
+   2 | write |              1
+   1 | write |              3
+   0 | write |              3
+(4 rows)
+
+ ord | block_ref_id |                 content                  
+-----+--------------+------------------------------------------
+   0 |              | # Identity demo
+   1 | keep         | The signing key is rotated every ninety 
+   2 |              | The session store was migrated to Redis 
+(3 rows)</code></pre>
+</div>
+    <p>There is no revert verb: reading the old bytes and writing them back is the revert, and it appends a revision rather than removing any. Passing <code>expected_head</code> keeps the restore from clobbering a write that landed between your read and your write.</p>
+
+    <h3 id="r-undelete">Bring a tombstoned note back</h3>
+    <p><b>Problem.</b> The delete was wrong.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.undelete_note('agents/worklog') AS revived;
+SELECT path, head_revision FROM knowledge.notes('agents/**');</code></pre>
+<pre class="out"><code class="out">               revived                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+        path         |            head_revision             
+---------------------+--------------------------------------
+ agents/session-7f21 | 019fd643-…
+ agents/worklog      | 019fd643-…
+(2 rows)</code></pre>
+</div>
+    <p><code>undelete_note</code> clears the tombstone and records a revision; it fails with PM015 if something else has since taken the path. It reconstructs the state from the revision before the delete and writes those bytes back through the ordinary write path, so the revision it records has verb <code>write</code> and every block is minted fresh: the history survives the round trip, the block ids do not. A citation taken before the delete will not resolve after the undelete — see <a href="#r-resolve-citation">resolving a citation</a>.</p>
+
+    <h3 id="r-rename">Rename a note and find the links it broke</h3>
+    <p><b>Problem.</b> You moved a note and want the list of references that now dangle.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.move_note('rfc/auth-01', 'rfc/2026-auth-01') AS renamed;
+
+SELECT n.path AS from_note, l.target, l.dangling_reason
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.links(n.path) l
+WHERE l.dangling_reason = 'missing' AND l.target = 'rfc/auth-01';</code></pre>
+<pre class="out"><code class="out">               renamed                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+   from_note   |   target    | dangling_reason 
+---------------+-------------+-----------------
+ index         | rfc/auth-01 | missing
+ projects/auth | rfc/auth-01 | missing
+(2 rows)</code></pre>
+</div>
+    <p><code>move_note</code> re-resolves edges for the old and the new path, but it does not rewrite anybody's markdown: a link spelled with the old path is now <code>missing</code>, correctly. A rename moves one note row but touches two names, so <code>move_note</code> takes an advisory lock on the old path and the new one in lexicographic order — two concurrent moves therefore cannot deadlock — and then exactly one note row lock, on the note being moved.</p>
+
+    <h3 id="r-rename-fix">Rewrite the links a rename broke</h3>
+    <p><b>Problem.</b> Fix every referring block in one statement.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">WITH stale AS (
+  SELECT n.path, b.block_id, b.content, b.content_hash
+  FROM knowledge.notes() n
+  CROSS JOIN LATERAL knowledge.links(n.path) l
+  JOIN knowledge.blocks(n.path) b ON b.block_id = l.block_id
+  WHERE l.target = 'rfc/auth-01' AND l.dangling_reason = 'missing'
+)
+SELECT s.path, r.revision
+FROM stale s
+CROSS JOIN LATERAL knowledge.update_block(s.block_id,
+    replace(s.content, '[[rfc/auth-01]]', '[[rfc/2026-auth-01]]')::markdown,
+    expected_hash =&gt; s.content_hash) r;
+
+SELECT src_path FROM knowledge.backlinks('rfc/2026-auth-01') ORDER BY src_path;</code></pre>
+<pre class="out"><code class="out">     path      |               revision               
+---------------+--------------------------------------
+ index         | 019fd643-…
+ projects/auth | 019fd643-…
+(2 rows)
+
+   src_path    
+---------------
+ index
+ projects/auth
+(2 rows)</code></pre>
+</div>
+    <p>Each block is patched with <code>expected_hash</code>, so a concurrent edit to one referring note fails that row instead of silently reverting it. <code>replace()</code> on <code>content</code> is safe here because the wiki-link grammar is closed — see <a href="concepts.html#dialect">the dialect</a>.</p>
+
+    <h2 id="tenancy">Multi-tenancy and access</h2>
+    <p>One column (<code>vault_id</code>), one setting, one policy set. The setting scopes; only the policies defend.</p>
+
+    <h3 id="r-tenant-txn">One vault per tenant, safely, behind a pooler</h3>
+    <p><b>Problem.</b> Serve many tenants from one database and one connection pool without leaking the previous request's vault.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">BEGIN;
+SET LOCAL pgmind.vault_id = '3f2b9c14-0000-4000-8000-000000000001';
+
+SELECT knowledge.write('projects/auth', $md$# Auth (tenant B)
+
+Nothing here is shared with the default vault.
+$md$) AS written;
+
+SELECT path, title FROM knowledge.notes();
+COMMIT;
+
+SELECT current_setting('pgmind.vault_id') AS vault_after_commit,
+       (SELECT count(*) FROM knowledge.notes()) AS notes_in_default_vault;</code></pre>
+<pre class="out"><code class="out">BEGIN
+SET
+               written                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+     path      | title 
+---------------+-------
+ projects/auth | auth
+(1 row)
+
+COMMIT
+          vault_after_commit          | notes_in_default_vault 
+--------------------------------------+------------------------
+ 00000000-0000-0000-0000-000000000000 |                     13
+(1 row)</code></pre>
+</div>
+    <p><code>SET LOCAL</code> is scoped to the transaction, so a pooled connection cannot carry a tenant into the next request the way a plain <code>SET</code> would. Note that the same path exists independently in each vault. See <a href="concepts.html#vaults">vaults</a>.</p>
+
+    <h3 id="r-enable-rls">Turn the scoping into a boundary</h3>
+    <p><b>Problem.</b> Make the database refuse cross-tenant reads instead of trusting your code to set the GUC.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT pgmind.enable_vault_rls();
+SELECT count(*) AS policies FROM pg_policies WHERE schemaname = 'pgmind';</code></pre>
+<pre class="out"><code class="out">psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.note" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.revision" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.tile" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.block" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.edge" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.tag" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.note_revision" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.block_revision" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.note_frame" does not exist, skipping
+psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not exist, skipping
+ enable_vault_rls 
+------------------
+ 
+(1 row)
+
+ policies 
+----------
+       10
+(1 row)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> <code>enable_vault_rls()</code> creates one policy per <code>vault_id</code>-carrying table — ten on this build — and is idempotent, which is why the first run narrates a <code>DROP POLICY IF EXISTS</code> per table. Table owners still bypass RLS unless you pass <code>force =&gt; true</code>, so an application should never connect as the owner.</p>
+
+    <h3 id="r-app-role">The grant set an application role actually needs</h3>
+    <p><b>Problem.</b> Give the app the least it can work with.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">DO $body$
+BEGIN
+  CREATE ROLE app_agent LOGIN;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END
+$body$;
+
+GRANT USAGE ON SCHEMA knowledge, pgmind TO app_agent;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgmind TO app_agent;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA pgmind TO app_agent;</code></pre>
+<pre class="out"><code class="out">DO
+GRANT
+GRANT
+GRANT</code></pre>
+</div>
+    <p>pgmind's functions are not <code>SECURITY DEFINER</code>, so they run as the caller and the caller needs DML on the <code>pgmind</code> tables — the policies, not the grants, are what confine it. Execute rights on <code>knowledge.*</code> come from <code>PUBLIC</code>; <code>pgmind.raise_error</code> is revoked and internal.</p>
+
+    <h3 id="r-prove-isolation">Prove the isolation</h3>
+    <p><b>Problem.</b> Do not take the policy's word for it.</p>
+<div class="code">
+  <div class="cap">shell</div>
+<pre><code class="shell">psql -U app_agent -Aqt -c \
+  "SELECT 'default vault: ' || count(*) FROM knowledge.notes();"
+
+psql -U app_agent -Aqt -c "BEGIN;
+  SET LOCAL pgmind.vault_id = '3f2b9c14-0000-4000-8000-000000000001';
+  SELECT 'tenant B: ' || count(*) FROM knowledge.notes();
+COMMIT;"
+
+psql -U app_agent -Aqt -c "BEGIN;
+  SET LOCAL pgmind.vault_id = '3f2b9c14-0000-4000-8000-000000000001';
+  SELECT 'wrote ' || knowledge.write('notes/tenant-b', \$md\$# Tenant B
+
+Written by app_agent inside tenant B.
+\$md\$);
+  SELECT 'tenant B now: ' || string_agg(path, ', ' ORDER BY path)
+    FROM knowledge.notes();
+COMMIT;"</code></pre>
+<pre class="out"><code class="out">default vault: 13
+tenant B: 1
+wrote 019fd643-…
+tenant B now: notes/tenant-b, projects/auth</code></pre>
+</div>
+    <p>The same role, the same query, two different <code>SET LOCAL</code> values, two different answers — and a write inside tenant B lands in tenant B. Run this as your application role, not as the owner, or you are testing the bypass rather than the policy.</p>
+
+    <h2 id="operations">Operations</h2>
+    <p>Verification, capacity, erasure, retention and getting markdown in and out before the CLI exists.</p>
+
+    <h3 id="r-verify-notes">Sweep every note for structural damage</h3>
+    <p><b>Problem.</b> Check that the byte lane and the semantic lane still agree.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT n.path, coalesce(v.problem, 'ok') AS result
+FROM knowledge.notes() n
+JOIN pgmind.note pn ON pn.path = n.path AND pn.tombstoned_at IS NULL
+LEFT JOIN LATERAL pgmind.verify_note(pn.id) AS v(problem) ON true
+ORDER BY (v.problem IS NULL), n.path LIMIT 6;</code></pre>
+<pre class="out"><code class="out">        path         | result 
+---------------------+--------
+ agents/session-7f21 | ok
+ agents/worklog      | ok
+ archive/auth-2018   | ok
+ daily/2026-08-06    | ok
+ digests/auth-brief  | ok
+ facts/ledger        | ok
+(6 rows)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> <code>verify_note</code> returns one row per problem, so an empty result is the pass condition. It re-parses the stored source and compares it with the stored blocks — the invariant the whole design rests on. See <a href="internals.html#verification">verification</a>.</p>
+
+    <h3 id="r-verify-history">Sweep the history engine</h3>
+    <p><b>Problem.</b> Check that every revision can still be reconstructed.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT count(*) FILTER (WHERE v.problem IS NULL)     AS clean_notes,
+       count(*) FILTER (WHERE v.problem IS NOT NULL) AS problems
+FROM pgmind.note pn
+LEFT JOIN LATERAL pgmind.verify_history(pn.id) AS v(problem) ON true
+WHERE pn.tombstoned_at IS NULL;</code></pre>
+<pre class="out"><code class="out"> clean_notes | problems 
+-------------+----------
+          15 |        0
+(1 row)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> <code>verify_history</code> walks the pre-image chain and the frames for one note. It is O(history), so run it on a schedule rather than in a request, and expect it to report nothing below a retention floor you set yourself.</p>
+
+    <h3 id="r-capacity">Where the bytes are</h3>
+    <p><b>Problem.</b> Find out what the vault costs before it surprises you.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT c.relname AS table,
+       pg_size_pretty(pg_total_relation_size(c.oid)) AS total,
+       (SELECT n_live_tup FROM pg_stat_user_tables s WHERE s.relid = c.oid) AS rows
+FROM pg_class c JOIN pg_namespace ns ON ns.oid = c.relnamespace
+WHERE ns.nspname = 'pgmind' AND c.relkind = 'r'
+ORDER BY pg_total_relation_size(c.oid) DESC LIMIT 6;</code></pre>
+<pre class="out"><code class="out">     table      | total  | rows 
+----------------+--------+------
+ block          | 160 kB |   86
+ revision       | 128 kB |   45
+ note_revision  | 112 kB |   45
+ block_revision | 104 kB |  135
+ note_frame     | 96 kB  |   16
+ edge           | 96 kB  |   21
+(6 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT notes, blocks, edges_resolved, edges_dangling, tags, revisions, bytes
+FROM knowledge.stats();</code></pre>
+<pre class="out"><code class="out"> notes | blocks | edges_resolved | edges_dangling | tags | revisions | bytes 
+-------+--------+----------------+----------------+------+-----------+-------
+    13 |     82 |             19 |              2 |    9 |        38 |  2116
+(1 row)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> The published capacity model measures a 10,000-note, 230,000-block vault. Over that same denominator, <code>pgmind.block</code> costs 429.9&nbsp;B a block (98,877,440&nbsp;B of heap, index and toast), and every pgmind table together — current state, revisions, frames, the excision log — costs 975.7&nbsp;B a block (224,419,840&nbsp;B). The model projects 9.76&nbsp;GB at 100k notes and 10M blocks on the assumption that it stays linear in blocks. <code>knowledge.stats().bytes</code> counts source bytes, not storage — the two answer different questions. See <a href="internals.html#capacity">capacity</a>.</p>
+
+    <h3 id="r-path-check">Validate a path before you write it</h3>
+    <p><b>Problem.</b> Reject a bad path in your own code instead of catching PM001.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT p AS candidate, pgmind.path_is_valid(p) AS valid_as_given,
+       pgmind.path_normalize(p) AS normalized,
+       pgmind.path_is_valid(pgmind.path_normalize(p)) AS valid_after
+FROM unnest(ARRAY['projects/auth', 'Projects/Auth', ' projects/auth ',
+                  '/bad/', 'a//b', 'notes/../etc']) AS p;</code></pre>
+<pre class="out"><code class="out">    candidate    | valid_as_given |  normalized   | valid_after 
+-----------------+----------------+---------------+-------------
+ projects/auth   | t              | projects/auth | t
+ Projects/Auth   | t              | Projects/Auth | t
+  projects/auth  | f              | projects/auth | t
+ /bad/           | f              | /bad/         | f
+ a//b            | f              | a//b          | f
+ notes/../etc    | f              | notes/../etc  | f
+(6 rows)</code></pre>
+</div>
+    <p><code>path_normalize</code> never raises and never rejects: it trims the surrounding whitespace, converts to NFC, and hands back whatever is left — <code>/bad/</code> comes back as <code>/bad/</code>. That is the only repair it does, and it is enough to rescue a padded path but not a malformed one. Judging is <code>path_is_valid</code>'s job, and the write path runs them in that order: normalise, then validate, then PM001. Paths are case-<em>sensitive</em>: <code>Projects/Auth</code> is a different note. See <a href="concepts.html#paths">paths</a>.</p>
+
+    <h3 id="r-excise-workflow">Erase a person, with an audit trail</h3>
+    <p><b>Problem.</b> A right-to-erasure request names a note whose <em>path</em> is itself identifying data.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT pgmind.excise('{"path":"people/ada"}'::jsonb,
+                     'erasure request 2026-08-06');</code></pre>
+<pre class="out"><code class="out">psql:blocks/62_excise_refuse.sql:2: ERROR:  pgmind: target is still live at head
+DETAIL:  pgmind_excision_refused — 1 live row(s); pass and_head =&gt; true to remove it first
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE
+SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT pgmind.excise('{"path":"people/ada"}'::jsonb,
+                     'erasure request 2026-08-06', and_head =&gt; true) AS dry_run;</code></pre>
+<pre class="out"><code class="out">psql:blocks/63_excise_dry.sql:2: WARNING:  pgmind: dry run — would erase 1 live and touch 8 history surface(s) for note target
+               dry_run                
+--------------------------------------
+ 00000000-0000-0000-0000-000000000000
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT pgmind.excise('{"path":"people/ada"}'::jsonb,
+                     'erasure request 2026-08-06',
+                     and_head =&gt; true, dry_run =&gt; false) AS excision;</code></pre>
+<pre class="out"><code class="out">               excision               
+--------------------------------------
+ 019fd643-…
+(1 row)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM pgmind.verify_excision(
+  (SELECT id FROM pgmind.excision_log ORDER BY requested_at DESC LIMIT 1));</code></pre>
+<pre class="out"><code class="out"> verify_excision 
+-----------------
+(0 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT id, requested_by, reason, target_kind, scope, escalations,
+       verified_at, survivors
+FROM pgmind.excision_log ORDER BY requested_at DESC LIMIT 1;</code></pre>
+<pre class="out"><code class="out">-[ RECORD 1 ]+----------------------------------------
+id           | 019fd643-…
+requested_by | amin
+reason       | erasure request 2026-08-06
+target_kind  | note
+scope        | {"live_rows": 1, "history_surfaces": 8}
+escalations  | []
+verified_at  | 2026-08-06 16:49:42.99902+08
+survivors    | 0</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> <code>dry_run</code> defaults to <code>true</code> and the refusal is evaluated <em>before</em> it, so a dry run against live content raises PM012 rather than reporting; <code>and_head =&gt; true</code> says “remove it from head first” and makes the dry run report instead. Verification runs inside the same transaction and aborts it if anything survives — an empty <code>verify_excision</code> is the pass. See <a href="internals.html#erasure">erasure</a>.</p>
+
+    <h3 id="r-excise-effect">What an excised note leaves behind</h3>
+    <p><b>Problem.</b> Know what the surviving notes look like afterwards.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_section('projects/auth', ARRAY['Auth']);</code></pre>
+<pre class="out"><code class="out"># Auth
+
+The service that issues and rotates credentials. Owned by [[⟨redacted pgmind:019fd643-…⟩]].
+
+## Decisions
+
+- [[oauth2]] over server sessions, see [[rfc/2026-auth-01]] #architecture
+- Refresh tokens rotate every 12h #decision ^rotation
+- Access tokens live 10 minutes, no exceptions
+
+## Runbook
+
+Key rotation is [[runbooks/rotate-keys|documented separately]].
+
+## Log
+
+Migrated the session store.</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> The note row is renamed to <code>⟨redacted pgmind:…⟩</code> and tombstoned, and every live wiki-link that pointed at it is rewritten to that marker — referring notes keep their shape and lose the name. <code>pgmind.excision_replay</code> is deliberately excluded from the dump, so restoring an old backup resurrects erased content and there is no shipped <code>enforce_excisions()</code> to replay it yet.</p>
+
+    <h3 id="r-excise-literal">Erase a string an agent logged by mistake</h3>
+    <p><b>Problem.</b> A contact detail ended up in a daily log and must leave both head and history.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.append_to_section('daily/2026-08-06', ARRAY['2026-08-06','Log'],
+    $md$- Paged ada@example.com about the window$md$) IS NOT NULL AS logged;
+
+SELECT pgmind.excise('{"literal":"ada@example.com"}'::jsonb,
+                     'contact detail logged in error',
+                     and_head =&gt; true, dry_run =&gt; false) AS excision;
+
+SELECT seq, verb, blocks_changed FROM knowledge.history('daily/2026-08-06', 2);</code></pre>
+<pre class="out"><code class="out"> logged 
+--------
+ t
+(1 row)
+
+               excision               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ seq |     verb      | blocks_changed 
+-----+---------------+----------------
+   6 | write         |              2
+   5 | insert_blocks |              3
+(2 rows)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> A <code>literal</code> target splices the string out of live content and redacts it in the pre-images rather than nulling whole rows, so surrounding history stays reconstructable. The live removal is recorded as an ordinary audited <code>write</code>, not as its own verb.</p>
+
+    <h3 id="r-retain">Bound history growth</h3>
+    <p><b>Problem.</b> Keep the last N revisions per note and drop the pre-images below that.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT pgmind.retain(keep_revisions =&gt; 2)                    AS would_drop;
+SELECT pgmind.retain(keep_revisions =&gt; 2, dry_run =&gt; false)  AS dropped;
+
+SELECT n.path, min(b.history_floor) AS history_floor
+FROM knowledge.notes() n CROSS JOIN LATERAL knowledge.blame(n.path) b
+GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5;</code></pre>
+<pre class="out"><code class="out"> would_drop 
+------------
+         88
+(1 row)
+
+ dropped 
+---------
+      88
+(1 row)
+
+        path         | history_floor 
+---------------------+---------------
+ agents/worklog      |             5
+ daily/2026-08-06    |             5
+ archive/auth-2018   |             2
+ notes/identity-demo |             2
+ projects/auth       |             2
+(5 rows)</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> <code>retain</code> defaults to <code>dry_run =&gt; true</code> and returns the row count it would drop. It raises a per-note history floor and writes a floor frame; revisions themselves are never deleted, so <code>history()</code> keeps its shape and only <code>reconstructable</code> flips. Reads below the floor raise <a href="#r-pm011">PM011</a>.</p>
+
+    <h3 id="r-import">Import a folder of markdown</h3>
+    <p><b>Problem.</b> You have a vault on disk and the CLI does not exist yet.</p>
+<div class="code">
+  <div class="cap">shell</div>
+<pre><code class="shell">mkdir -p /tmp/vault-in/projects
+printf '# Auth\n\nOwned by [[people/ada]].\n' &gt; /tmp/vault-in/projects/auth.md
+printf '# One\n\nSee [[projects/auth]].\n'    &gt; /tmp/vault-in/one.md
+
+dropdb --if-exists vault
+createdb vault
+psql -q -d vault -c "CREATE EXTENSION pgmind;"
+
+cd /tmp/vault-in
+find . -name '*.md' | sed 's|^\./||' | while read -r f; do
+  psql -qt -d vault -v ON_ERROR_STOP=1 &lt;&lt;SQL
+\set doc \`cat "$f"\`
+SELECT knowledge.write('${f%.md}', (:'doc' || E'\n')::markdown);
+SQL
+done
+psql -d vault -c "SELECT path, head_revision FROM knowledge.notes();"</code></pre>
+<pre class="out"><code class="out">NOTICE:  database "vault" does not exist, skipping
+WARNING:  pgmind: lz4 toast compression unavailable on this server; using default
+ 019fd643-…
+
+ 019fd643-…
+
+     path      |            head_revision             
+---------------+--------------------------------------
+ one           | 019fd643-…
+ projects/auth | 019fd643-…
+(2 rows)</code></pre>
+</div>
+    <p><span class="badge next">Phase 4</span> <code>pgmind import</code> replaces this. Two things to watch: psql's backtick <code>\set</code> strips trailing newlines, which is why the <code>|| E'\n'</code> is there, and the extension emits the <code>lz4</code> warning at <code>CREATE EXTENSION</code> on servers without lz4 — a warning, not an error.</p>
+
+    <h3 id="r-export">Export the vault back to files</h3>
+    <p><b>Problem.</b> Round-trip the whole thing to disk and check it is the same bytes.</p>
+<div class="code">
+  <div class="cap">shell</div>
+<pre><code class="shell">rm -rf /tmp/vault-out &amp;&amp; mkdir -p /tmp/vault-out
+psql -Aqt -d vault -c "SELECT path FROM knowledge.notes()" | while read -r p; do
+  mkdir -p "/tmp/vault-out/$(dirname "$p")"
+  psql -Aqt -d vault -c "SELECT knowledge.read('$p')" \
+    | perl -0777 -pe 's/\n\z//' &gt; "/tmp/vault-out/$p.md"
+done
+diff -r /tmp/vault-in /tmp/vault-out &amp;&amp; echo "round trip is byte-exact"</code></pre>
+<pre class="out"><code class="out">round trip is byte-exact</code></pre>
+</div>
+    <p><span class="badge next">Phase 4</span> <code>knowledge.read</code> returns <code>preamble‖tiles</code> concatenated, which is the source byte for byte; the <code>perl</code> filter removes the record separator <code>psql</code> adds, and <code>diff -r</code> is the assertion. See <a href="internals.html#lanes">the two lanes</a>.</p>
+
+    <h3 id="r-backup">A backup checklist</h3>
+    <p><b>Problem.</b> Know what a dump does and does not carry.</p>
+<div class="code">
+  <div class="cap">shell — illustrative</div>
+<pre><code class="shell"># Everything pgmind stores lives in ordinary tables registered with
+# pg_extension_config_dump, so a plain dump is a complete backup —
+# with one deliberate exception, noted below.
+pg_dump --format=custom --file=vault.dump mydb
+
+# Restore needs the same extension build present first: the tables are
+# restored into the schema CREATE EXTENSION creates, and a dump taken on a
+# newer build will fail partway through on an older one.
+createdb restored
+psql -d restored -c "CREATE EXTENSION pgmind;"
+pg_restore --data-only --dbname=restored vault.dump
+
+# Check what you got back.
+psql -d restored -c "SELECT pgmind_version();"
+psql -d restored -c "SELECT * FROM knowledge.stats();"</code></pre>
+</div>
+    <p><code>pgmind.excision_replay</code> is <em>not</em> in the dump set, by design: an erasure request must not be re-derivable from a backup. The consequence is the honest one — restoring a dump taken before an excision brings the erased content back, and nothing replays the erasure for you. See <a href="internals.html#backup">backup and restore</a>.</p>
+
+    <h2 id="integration">Application integration</h2>
+    <p>pgmind is a set of SQL functions, so integration is whatever your driver already does. Two things are worth getting right: parameter binding, and catching PM SQLSTATEs.</p>
+
+    <h3 id="r-tool-wrappers">Wrap the API in tool-shaped functions</h3>
+    <p><b>Problem.</b> Give an agent framework a narrow surface that returns JSON.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">CREATE FUNCTION app.tool_read_section(p_path text, p_heading text[])
+RETURNS jsonb LANGUAGE sql STABLE AS $body$
+  SELECT jsonb_build_object(
+    'path', p_path, 'heading_path', to_jsonb(p_heading),
+    'revision', (SELECT head_revision FROM knowledge.notes(p_path)),
+    'markdown', knowledge.read_section(p_path, p_heading)::text);
+$body$;
+
+CREATE FUNCTION app.tool_append(p_path text, p_heading text[], p_md text)
+RETURNS jsonb LANGUAGE sql AS $body$
+  SELECT jsonb_build_object('revision', r.revision, 'block_ids', to_jsonb(r.block_ids))
+  FROM knowledge.append_to_section(p_path, p_heading, p_md::markdown) r;
+$body$;
+
+SELECT jsonb_pretty(app.tool_read_section('projects/auth', ARRAY['Auth','Runbook']));</code></pre>
+<pre class="out"><code class="out">CREATE FUNCTION
+CREATE FUNCTION
+                                             jsonb_pretty                                             
+------------------------------------------------------------------------------------------------------
+ {                                                                                                   +
+     "path": "projects/auth",                                                                        +
+     "markdown": "## Runbook\n\nKey rotation is [[runbooks/rotate-keys|documented separately]].\n\n",+
+     "revision": "019fd643-…",                                                                       +
+     "heading_path": [                                                                               +
+         "Auth",                                                                                     +
+         "Runbook"                                                                                   +
+     ]                                                                                               +
+ }
+(1 row)</code></pre>
+</div>
+    <p>Wrapping in SQL keeps the tool definition next to the data and gives you one place to add authorisation. Shape them like the future MCP tools (<span class="badge next">Phase 5</span>) and the migration is a rename; note the write wrapper calls the composite from <code>FROM</code>, as everything must.</p>
+
+    <h3 id="r-listen-notify">Push a signal on every new revision</h3>
+    <p><b>Problem.</b> Invalidate a cache, or refresh the search view, the moment something changes.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">CREATE FUNCTION app.notify_revision() RETURNS trigger
+LANGUAGE plpgsql AS $body$
+BEGIN
+  PERFORM pg_notify('pgmind_revision', json_build_object(
+    'note_id', NEW.note_id, 'seq', NEW.seq,
+    'verb', NEW.verb, 'author', NEW.author)::text);
+  RETURN NULL;
+END;
+$body$;
+
+CREATE TRIGGER revision_notify AFTER INSERT ON pgmind.revision
+  FOR EACH ROW EXECUTE FUNCTION app.notify_revision();
+
+LISTEN pgmind_revision;
+
+SELECT r.revision FROM knowledge.append_to_section(
+    'projects/auth', ARRAY['Auth','Log'], $md$- trigger check$md$) r;</code></pre>
+<pre class="out"><code class="out">CREATE FUNCTION
+CREATE TRIGGER
+LISTEN
+               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+Asynchronous notification "pgmind_revision" with payload "{"note_id" : "019fd643-…", "seq" : 4, "verb" : "insert_blocks", "author" : "amin"}" received from server process with PID 70892.</code></pre>
+</div>
+    <p><span class="badge admin">Admin</span> pgmind ships no triggers and no background workers; this one is yours, on <code>pgmind.revision</code>, and it fires for every write that records a revision — including the live-removal step of an excision, which goes through the ordinary write path. It does not fire for <code>pgmind.retain</code>: retention writes a floor frame and deletes history rows without recording a revision at all, so a cache that only listens here will not learn that history was compacted. <code>pg_notify</code> is transactional — the payload arrives only if the write commits.</p>
+
+    <h3 id="r-outline-view">A materialised outline for fast UI loads</h3>
+    <p><b>Problem.</b> Render a note list without calling a set-returning function per note.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">CREATE MATERIALIZED VIEW app.note_outline AS
+SELECT n.path, n.head_revision, b.ord, b.kind, b.heading_path,
+       left(b.content, 120) AS preview
+FROM knowledge.notes() n
+CROSS JOIN LATERAL knowledge.blocks(n.path) b
+WHERE b.parent_block IS NULL;
+
+CREATE INDEX note_outline_path ON app.note_outline (path, ord);
+
+SELECT path, ord, kind, preview FROM app.note_outline
+WHERE path = 'runbooks/rotate-keys' ORDER BY ord LIMIT 4;</code></pre>
+<pre class="out"><code class="out">SELECT 58
+CREATE INDEX
+         path         | ord |   kind    |                 preview                  
+----------------------+-----+-----------+------------------------------------------
+ runbooks/rotate-keys |   0 | heading   | # Rotate the signing keys
+ runbooks/rotate-keys |   1 | list_item | Announce the maintenance window
+ runbooks/rotate-keys |   3 | list_item | Generate the new key pair
+ runbooks/rotate-keys |   5 | list_item | Roll [[projects/auth]] to the new key id
+(4 rows)</code></pre>
+</div>
+    <p>Built from <code>knowledge.blocks()</code>, so it depends on the public API rather than the storage schema. It is a snapshot: refresh it from <a href="#r-listen-notify">the revision trigger</a>, and remember that <code>knowledge.blocks()</code> against head is already an indexed lookup if you only need one note.</p>
+
+    <h3 id="r-psycopg">psycopg 3, with parameter binding and PM handling</h3>
+    <p><b>Problem.</b> Call pgmind from Python without string-formatting markdown into SQL.</p>
+<div class="code">
+  <div class="cap">python — illustrative</div>
+<pre><code class="shell">import psycopg
+
+LINE = "- 09:20 rotation window reviewed\n"
+NOTE = "daily/2026-08-06"
+
+with psycopg.connect("dbname=vault") as conn, conn.cursor() as cur:
+    # Bind markdown as an ordinary text parameter and cast in SQL. Never
+    # interpolate it: the markdown type has nothing special at the protocol
+    # level, and a note full of quotes will find any hole you leave.
+    cur.execute(
+        "SELECT revision FROM knowledge.append_to_section(%s, %s, %s::markdown)",
+        (NOTE, ["2026-08-06", "Log"], LINE),
+    )
+    revision = cur.fetchone()[0]
+
+    # A whole-note rewrite, guarded. PM009 means somebody else got there
+    # first: re-read and re-apply, do not force.
+    cur.execute("SELECT knowledge.read(%s)", (NOTE,))
+    doc = cur.fetchone()[0] + "\n- 09:21 window closed\n"
+    try:
+        cur.execute(
+            "SELECT knowledge.write(%s, %s::markdown, expected_head =&gt; %s)",
+            (NOTE, doc, revision),
+        )
+    except psycopg.errors.Error as e:
+        if e.sqlstate == "PM009":
+            conn.rollback()          # caller retries the read-modify-write
+        else:
+            raise                    # e.diag.message_detail names the value
+    conn.commit()</code></pre>
+</div>
+    <p>A Python list binds to <code>text[]</code>, which is what <code>heading_path</code> wants; the <code>::markdown</code> cast happens server-side so the driver never needs to know the type. <code>e.sqlstate</code> carries the PM code verbatim — that is the whole point of a custom SQLSTATE class. See <a href="sql.html#errors">the error table</a>.</p>
+
+    <h3 id="r-node-postgres">node-postgres, same shape</h3>
+    <p><b>Problem.</b> Call pgmind from Node with the same guarantees.</p>
+<div class="code">
+  <div class="cap">javascript — illustrative</div>
+<pre><code class="shell">import { Pool } from 'pg';
+
+const pool = new Pool({ database: 'vault' });
+const md = '- 09:20 rotation window reviewed\n';
+
+const client = await pool.connect();
+try {
+  await client.query('BEGIN');
+  // SET LOCAL keeps the tenant inside this transaction, which is what
+  // makes the recipe pool-safe.
+  await client.query('SET LOCAL pgmind.vault_id = $1', [tenantId]);
+
+  const { rows } = await client.query(
+    `SELECT revision, block_ids
+       FROM knowledge.append_to_section($1, $2, $3::markdown)`,
+    ['daily/2026-08-06', ['2026-08-06', 'Log'], md],
+  );
+
+  await client.query('COMMIT');
+  return rows[0];
+} catch (err) {
+  await client.query('ROLLBACK');
+  if (err.code === 'PM009' || err.code === 'PM016') {
+    return null;                 // caller re-reads and retries
+  }
+  throw err;                     // err.detail carries the offending value
+} finally {
+  client.release();
+}</code></pre>
+</div>
+    <p><code>err.code</code> is the SQLSTATE and <code>err.detail</code> is the <code>DETAIL:</code> line, which always names the offending value — the head that was expected, the hash that was current. A JavaScript array binds to <code>text[]</code> the same way psycopg's list does.</p>
+
+    <h2 id="sharp-edges">Sharp edges, demonstrated</h2>
+    <p>Each of these bit somebody. They are shown running, with the real error where there is one, rather than described. <a href="#r-stable-ids">Whole-note rewrite versus block ops</a> and <a href="#r-repair">delete-does-not-repair</a> are two more, demonstrated earlier on this page.</p>
+
+    <h3 id="r-double-edit"><code>SELECT (f(x)).*</code> applies the edit twice</h3>
+    <p><b>Problem.</b> One statement, one call in the SQL text, two edits in the note.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/trap', $md$# Trap
+
+## Log
+
+Baseline paragraph.
+$md$) AS created;
+
+SELECT count(*) AS blocks_before FROM knowledge.blocks('notes/trap');
+
+SELECT (knowledge.append_to_section('notes/trap', ARRAY['Trap','Log'],
+                                    $md$One appended line.$md$)).*;
+
+SELECT count(*) AS blocks_after FROM knowledge.blocks('notes/trap');
+SELECT seq, verb, blocks_changed FROM knowledge.history('notes/trap');</code></pre>
+<pre class="out"><code class="out">               created                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ blocks_before 
+---------------
+             3
+(1 row)
+
+               revision               |               block_ids                
+--------------------------------------+----------------------------------------
+ 019fd643-…                           | {019fd643-…}
+(1 row)
+
+ blocks_after 
+--------------
+            5
+(1 row)
+
+ seq |     verb      | blocks_changed 
+-----+---------------+----------------
+   2 | insert_blocks |              1
+   1 | insert_blocks |              1
+   0 | write         |              3
+(3 rows)</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read('notes/trap');</code></pre>
+<pre class="out"><code class="out"># Trap
+
+## Log
+
+Baseline paragraph.
+
+One appended line.
+
+One appended line.</code></pre>
+</div>
+    <p>PostgreSQL expands <code>(f(x)).*</code> into one call per output column, and <code>op_result</code> has two — so the function ran twice and both runs committed. Three blocks became five, and the history shows two revisions. Call composite-returning operations from <code>FROM</code>, always.</p>
+
+    <h3 id="r-empty-section">You cannot append to an empty section</h3>
+    <p><b>Problem.</b> The heading is right there, and <code>append_to_section</code> says the section does not exist.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/empty-section', $md$# Empty section demo
+
+## Findings
+$md$) AS created;
+
+SELECT knowledge.append_to_section('notes/empty-section',
+    ARRAY['Empty section demo','Findings'], $md$First finding.$md$);</code></pre>
+<pre class="out"><code class="out">               created                
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+psql:blocks/76_empty_section.sql:7: ERROR:  pgmind: no section with that heading path
+DETAIL:  pgmind_section_not_found — ["Empty section demo", "Findings"] in "notes/empty-section"
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE
+SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
+</div>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT r.revision
+FROM knowledge.blocks('notes/empty-section') b
+CROSS JOIN LATERAL knowledge.insert_blocks('notes/empty-section',
+    $md$First finding.$md$, after =&gt; b.block_id) r
+WHERE b.kind = 'heading' AND b.attrs-&gt;&gt;'text' = 'Findings';
+
+SELECT ord, kind, heading_path, content FROM knowledge.blocks('notes/empty-section');</code></pre>
+<pre class="out"><code class="out">               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)
+
+ ord |   kind    |          heading_path           |       content        
+-----+-----------+---------------------------------+----------------------
+   0 | heading   | {}                              | # Empty section demo
+   1 | heading   | {"Empty section demo"}          | ## Findings
+   2 | paragraph | {"Empty section demo",Findings} | First finding.
+(3 rows)</code></pre>
+</div>
+    <p>A heading's own <code>heading_path</code> lists its ancestors, not itself, so a section with no content blocks has no rows to match and raises PM007 rather than PM005. Seed it once with <code>insert_blocks(after =&gt; ‹the heading's block_id›)</code> and every later append works.</p>
+
+    <h3 id="r-list-section">A section that ends in a list appends fine</h3>
+    <p><b>Problem.</b> The commonest shape a vault has, and the one that used to fail.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT revision FROM knowledge.append_to_section(
+    'projects/auth', ARRAY['Auth','Decisions'],
+    $md$- Sessions are never resumed across regions #decision$md$);</code></pre>
+<pre class="out"><code class="out">               revision               
+--------------------------------------
+ 019fd643-…
+(1 row)</code></pre>
+</div>
+    <p><code>append_to_section</code> walks back to the last <em>anchorable</em> row rather than taking the last row outright, so a trailing list is an anchor. A section ending in a bare blockquote has no anchor and raises PM005 — “section has no block an append can anchor to” — not PM007.</p>
+
+    <h3 id="r-table-cell">A wiki-link alias breaks a table cell</h3>
+    <p><b>Problem.</b> <code>[[a|b]]</code> inside a GFM table is not a link.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, alias FROM knowledge.links($md$| note | why |
+| --- | --- |
+| [[projects/auth|the auth note]] | ownership |
+$md$::markdown);
+
+SELECT kind, target, alias FROM knowledge.links($md$| note | why |
+| --- | --- |
+| [[projects/auth\|the auth note]] | ownership |
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> kind | target | alias 
+------+--------+-------
+(0 rows)
+
+   kind   |    target     |     alias     
+----------+---------------+---------------
+ wikilink | projects/auth | the auth note
+(1 row)</code></pre>
+</div>
+    <p>GFM splits table cells on <code>|</code> before any inline parsing happens, so the alias pipe ends the cell and the wiki-link never forms. Escape it as <code>[[a\|b]]</code> and both the cell and the link survive. See <a href="concepts.html#dialect">the dialect</a>.</p>
+
+    <h3 id="r-refdef">A link reference definition eats a wiki-link</h3>
+    <p><b>Problem.</b> <code>[[oauth2]]</code> stops being a link because of a line elsewhere in the document.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target FROM knowledge.links($md$See [[oauth2]] for detail.
+$md$::markdown);
+
+SELECT kind, target FROM knowledge.links($md$See [[oauth2]] for detail.
+
+[oauth2]: https://example.com/oauth2
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">   kind   | target 
+----------+--------
+ wikilink | oauth2
+(1 row)
+
+ kind | target 
+------+--------
+(0 rows)</code></pre>
+</div>
+    <p>CommonMark inline parsing runs first: with <code>[oauth2]: url</code> defined anywhere in the document, <code>[[oauth2]]</code> parses as a bracket around a reference link and no wiki-link edge is produced. The target is an external URL, so it is not an edge either — the link vanishes from the graph.</p>
+
+    <h3 id="r-tag-traps">What is and is not a tag</h3>
+    <p><b>Problem.</b> <code>**bold**#tag</code> looks like a tag and is not.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.tags($md$**bold**#tag, a real #tag2, and #Tag2 again$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> tag  | block 
+------+-------
+ tag2 |     0
+ Tag2 |     0
+(2 rows)</code></pre>
+</div>
+    <p>A <code>#</code> only starts a tag when preceded by whitespace or a block start <em>in the source</em>, so emphasis immediately before it kills the tag. Note also that <code>tags(doc)</code> lists occurrences with their original case, while vault-wide <code>tags()</code> groups case-insensitively and reports one spelling.</p>
+
+    <h3 id="r-code-ref">The <code>^id</code> marker does not work on every block</h3>
+    <p><b>Problem.</b> The marker on a code block is text and nothing more.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, attrs-&gt;&gt;'block_ref_id' AS block_ref_id, left(content, 24) AS content
+FROM knowledge.blocks($md$```sql
+SELECT 1;
+```
+
+A paragraph. ^para
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> ord |    kind    | block_ref_id |   content    
+-----+------------+--------------+--------------
+   0 | code_block |              | ```sql      +
+     |            |              | SELECT 1;   +
+     |            |              | ```
+   1 | paragraph  | para         | A paragraph.
+(2 rows)</code></pre>
+</div>
+    <p><code>code_block</code>, <code>table</code>, <code>html_block</code> and <code>thematic_break</code> cannot carry a block reference, so their identity rests on the content hash and the carry passes alone. If you need to cite one, put it under a heading you can address instead.</p>
+
+    <h3 id="r-pm011">PM011 after retention, and why it is not PM010</h3>
+    <p><b>Problem.</b> Time travel that worked yesterday now raises.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_as_of('daily/2026-08-06', 0::bigint);</code></pre>
+<pre class="out"><code class="out">psql:blocks/83_pm011.sql:1: ERROR:  pgmind: history below the retention floor was compacted or excised
+DETAIL:  pgmind_history_unavailable — seq 0 &lt; floor 5 on daily/2026-08-06
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE
+SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
+</div>
+    <p>PM010 means “there is no such revision” — a client bug. PM011 means “there was, and an operator retained or excised it away” — data policy. They are deliberately different codes because the fix is deliberately different. The floor is per note and visible in <code>blame().history_floor</code>.</p>
+
+    <h3 id="r-vault-scope"><code>vault_id</code> scopes; it does not defend</h3>
+    <p><b>Problem.</b> The GUC is set, and the other tenant's rows are still right there.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SET pgmind.vault_id = '00000000-0000-0000-0000-000000000000';
+
+SELECT count(*) AS notes_visible_through_the_api FROM knowledge.notes();
+
+SELECT vault_id, count(*) AS note_rows
+FROM pgmind.note WHERE tombstoned_at IS NULL GROUP BY 1 ORDER BY 1;</code></pre>
+<pre class="out"><code class="out">SET
+ notes_visible_through_the_api 
+-------------------------------
+                            14
+(1 row)
+
+               vault_id               | note_rows 
+--------------------------------------+-----------
+ 00000000-0000-0000-0000-000000000000 |        14
+ 3f2b9c14-…                           |         2
+(2 rows)</code></pre>
+</div>
+    <p>The API filters on the current <code>vault_id</code>, so <code>knowledge.notes()</code> tells the truth — but a role with table privileges reads across vaults unless a policy stops it, and a table owner bypasses policies unless you pass <code>force =&gt; true</code>. The boundary is <a href="#r-enable-rls">RLS plus grants</a>, never the setting on its own.</p>
+    <nav class="page-nav" aria-label="Page">
+      <a href="sql.html">
+        <span>Previous</span>
+        SQL reference
+      </a>
+      <a class="next" href="index.html">
+        <span>Next</span>
+        The manual
+      </a>
+    </nav>
+  </main>
+
+  <aside class="docs-toc" aria-label="On this page"><nav id="toc"></nav></aside>
+</div>
+
+<footer class="site-foot">
+  <div class="foot-inner">
+    <p><b>pgmind</b>: files hold notes, PostgreSQL holds the brain.</p>
+    <p class="foot-links">
+      <a href="../">Overview</a>
+      <a href="https://github.com/MarosiLabs/pgmind">Repository</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/LICENSE">PostgreSQL License</a>
+    </p>
+  </div>
+</footer>
+
+<script src="docs.js" defer></script>
+</body>
+</html>

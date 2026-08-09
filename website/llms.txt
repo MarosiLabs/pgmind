@@ -1,0 +1,35 @@
+# pgmind
+
+> A PostgreSQL extension that stores a markdown knowledge vault as relational rows: notes, sections, blocks, wiki-links and tags, with append-only revisions, compare-and-swap writes and block-level history. No model is invoked anywhere inside it.
+
+pgmind is pre-alpha; the first release is 0.1.0. It runs on PostgreSQL 16, 17 and 18, is written in Rust with pgrx, is distributed under the PostgreSQL License, and does no network I/O.
+
+The API is SQL. One public schema, `knowledge`, holds the nouns a vault already has: notes, sections, blocks, links, tags. Markdown goes in and the same bytes come out. Three artifacts ship: the `pgmind` extension (vault model, storage, identity, versioning, retrieval, context assembly), the `pgmind` CLI (`import`, `export`, and two-way `sync` against a real folder of markdown), and `pgmind-mcp` (the vault as MCP tools: read, write, append, search, context, history).
+
+Where it does not fit: one writer, one machine, offline. That case should stay on files.
+
+## Manual
+
+- [The manual](https://marosilabs.github.io/pgmind/docs/): map of the five pages, the badge and example conventions, and the shared demo vault.
+- [Quick start](https://marosilabs.github.io/pgmind/docs/quickstart.html): what pgmind is for, how to build and install it, and a first vault from `CREATE EXTENSION` to a cited paragraph.
+- [Concepts](https://marosilabs.github.io/pgmind/docs/concepts.html): notes, paths, tiles, blocks, edges, tags and revisions, plus the exact markdown dialect — wiki-links, tags, block-id markers, frontmatter, content hashing.
+- [Internals](https://marosilabs.github.io/pgmind/docs/internals.html): the two storage lanes, the write path, deterministic identity carry and heuristic rebinding, the pre-image history engine, locking and compare-and-swap, erasure and retention.
+- [SQL reference](https://marosilabs.github.io/pgmind/docs/sql.html): every function in the `knowledge` and `pgmind` schemas with signatures, return columns and error codes; the three GUCs; the PM001-PM016 error table.
+- [Cookbook](https://marosilabs.github.io/pgmind/docs/cookbook.html): recipes for concurrent agent memory, backlinks and graph walks, retrieval without embeddings, citations, multi-tenancy, erasure and operations.
+
+## Docs
+
+- [Handbook](https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md): the architecture laws.
+- [Product plan](https://github.com/MarosiLabs/pgmind/blob/main/docs/PRODUCT-PLAN.md): the operating blueprint.
+- [RFCs](https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs): one decides each phase before it is implemented.
+- [Audit](https://github.com/MarosiLabs/pgmind/blob/main/docs/archive/AUDIT.md): the evidence the whole thing was argued against.
+
+## Source
+
+- [Repository](https://github.com/MarosiLabs/pgmind): Rust, pgrx, PostgreSQL 16-18.
+- [README](https://github.com/MarosiLabs/pgmind/blob/main/README.md): the problem, the SQL that solves it, and how to run it.
+- [License](https://github.com/MarosiLabs/pgmind/blob/main/LICENSE): PostgreSQL License.
+
+## Optional
+
+- [Landing page](https://marosilabs.github.io/pgmind/): the same material as prose, with SQL examples.

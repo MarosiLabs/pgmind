@@ -131,9 +131,42 @@ enum (`wikilink|transclusion|blockref|mdlink`), `pgmind.op_result` composite
 
 **GUCs:** `pgmind.max_document_bytes` (int, default 8 MiB, min 1024, USERSET),
 `pgmind.frame_every` (int, default 50, range 1–1 000 000, USERSET), `pgmind.vault_id` (string,
-default `00000000-0000-0000-0000-000000000000`, USERSET).
+default `00000000-0000-0000-0000-000000000000`, USERSET), `pgmind.author` (string, default
+unset, USERSET — see §2.5).
 
-**Errors:** PM001–PM016, from `extension/src/errors.rs`.
+**Errors:** PM001–PM017, from `extension/src/errors.rs`.
+
+### 2.5 AMENDED 2026-08-06 — RFC-011 provenance landed mid-authoring
+
+Five commits (`36910ca`…`035b658`) landed on `main` **after** the inventory in §2.1 was
+captured. Slice 9 (block-granular CAS) was already in the working tree and is already reflected
+above. Slice 10 — **RFC-011 provenance** — is not. It adds **no new SQL functions**; it adds:
+
+- **`pgmind.author` (GUC, USERSET, default unset).** The writer's own claim about who it is,
+  recorded as `revision.author`. Verified in `extension/src/write.rs`:
+  - unset **or empty or whitespace-only** ⇒ the column falls back to `current_user`;
+  - the limit is **200 characters, counted in chars not bytes** (`AUTHOR_MAX_CHARS`);
+  - over the limit raises **PM017** *before* the revision row is inserted, so an over-long
+    author writes nothing at all;
+  - it is **never authenticated**. Any session that can write can claim any author. The manual
+    must say so plainly wherever it appears — that is the RFC's own framing, not a caveat we
+    are adding.
+- **PM017 `pgmind_invalid_author`.** Extends the error table to PM001–PM017.
+- **`revision.meta` no longer carries `minted` / `removed`.** RFC-005 D11 declared them retired
+  in favour of typed `block_revision` rows (`bind = 'mint'` / `'remove'`); the deletion has now
+  shipped. `meta` keeps `op`, `carried` and the `rebind` / `split` / `merge` objects. **Any page
+  documenting `meta.minted` or `meta.removed` is wrong.**
+
+Consequence for authors and verifiers: the extension binary installed at the start of this
+session predates slice 10, so `SHOW pgmind.author` in that build only appeared to work via
+PostgreSQL's placeholder handling for unknown `foo.bar` settings. **Rebuild and reinstall before
+verifying anything about `pgmind.author` or PM017:**
+
+```bash
+cd extension && SDKROOT=$(xcrun --show-sdk-path) \
+  cargo pgrx install --pg-config ~/.pgrx/18.4/pgrx-install/bin/pg_config \
+                     --no-default-features --features pg18
+```
 
 ### 2.2 Gaps between the RFCs and the code — document the CODE
 

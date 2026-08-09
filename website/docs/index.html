@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>The pgmind manual</title>
+<meta name="description" content="The pgmind user manual: quick start, the vault model, how it works inside, a complete SQL reference, and a cookbook of recipes.">
+<link rel="canonical" href="https://marosilabs.github.io/pgmind/docs/">
+<meta name="author" content="Marosi Labs">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+
+<meta name="theme-color" content="#0a0c10">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.png" type="image/png" sizes="180x180">
+<link rel="apple-touch-icon" href="../assets/favicon.png">
+<link rel="stylesheet" href="docs.css">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="pgmind">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://marosilabs.github.io/pgmind/docs/">
+<meta property="og:title" content="The pgmind manual">
+<meta property="og:description" content="Quick start, the vault model, the internals, a complete SQL reference, and a cookbook — for a markdown knowledge vault stored as PostgreSQL rows.">
+<meta property="og:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="The pgmind manual">
+<meta name="twitter:description" content="Quick start, the vault model, the internals, a complete SQL reference, and a cookbook.">
+<meta name="twitter:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+</head>
+<body>
+
+<a class="skip" href="#doc">Skip to content</a>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="gh" viewBox="0 0 16 16">
+    <path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27s-1.36.09-2 .27c-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+  </symbol>
+  <symbol id="copy" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
+          d="M5.7 5.7h7.1v7.1H5.7zM10.3 5.7V3.2H3.2v7.1h2.5"/>
+  </symbol>
+  <symbol id="check" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+          stroke-linejoin="round" d="m3.4 8.4 3 3 6.2-7"/>
+  </symbol>
+  <symbol id="menu" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+          d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+  </symbol>
+</svg>
+
+<header class="site-head">
+  <div class="head-inner">
+    <button class="side-toggle" type="button" aria-expanded="false" aria-controls="side" aria-label="Navigation">
+      <svg width="16" height="16" aria-hidden="true"><use href="#menu"/></svg>
+    </button>
+    <a class="brand" href="../" aria-label="pgmind home">
+      <img src="../assets/mark.png" alt="" width="28" height="24">
+      <span><b>pg</b>mind</span>
+      <span class="in">manual</span>
+    </a>
+    <nav class="head-nav">
+      <a href="../">Overview</a>
+      <a href="quickstart.html">Quick start</a>
+      <a class="icon-link" href="https://github.com/MarosiLabs/pgmind" aria-label="Repository on GitHub">
+        <svg width="18" height="18" aria-hidden="true"><use href="#gh"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-side" id="side">
+    <nav aria-label="Manual">
+      <h2>Start</h2>
+      <ul>
+        <li><a href="index.html">The manual</a></li>
+        <li><a href="quickstart.html">Quick start</a></li>
+      </ul>
+
+      <h2>Learn</h2>
+      <ul>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="internals.html">Internals</a></li>
+      </ul>
+
+      <h2>Look up</h2>
+      <ul>
+        <li><a href="sql.html">SQL reference</a></li>
+        <li><a href="cookbook.html">Cookbook</a></li>
+      </ul>
+
+      <h2>Elsewhere</h2>
+      <ul>
+        <li><a href="https://github.com/MarosiLabs/pgmind">Repository</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">RFCs</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published">Benchmarks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="docs-main" id="doc">
+    <p class="crumbs">Manual</p>
+    <h1>The pgmind manual</h1>
+    <p class="lede">
+      pgmind keeps a markdown vault — notes, sections, paragraphs, links, tags —
+      as PostgreSQL rows, so many agents can write to it at once and every
+      paragraph has an address you can cite.
+    </p>
+
+    <div class="note-box warn">
+      <p>
+        <b>Research pre-alpha.</b> Everything here runs today, but the SQL surface
+        is unstable and there is no upgrade path between builds. Anything not
+        built yet is marked <span class="badge next">Phase 5</span> and never
+        shown as working SQL.
+      </p>
+    </div>
+
+    <h2 id="start">Start here</h2>
+
+    <div class="cards">
+      <a href="quickstart.html">
+        <b>Quick start</b>
+        <span>Install it, write your first note, and end holding a citation.
+              Ten minutes.</span>
+      </a>
+      <a href="concepts.html">
+        <b>Concepts</b>
+        <span>The nouns — notes, blocks, links, revisions — and exactly what the
+              markdown dialect means.</span>
+      </a>
+      <a href="internals.html">
+        <b>Internals</b>
+        <span>How it works inside: storage, the write path, identity, history,
+              locking, erasure.</span>
+      </a>
+      <a href="sql.html">
+        <b>SQL reference</b>
+        <span>Every function, with its signature, columns, errors and an
+              example.</span>
+      </a>
+      <a href="cookbook.html">
+        <b>Cookbook</b>
+        <span>Fifty recipes: concurrent memory, backlinks, graph walks,
+              retrieval, citations, tenancy.</span>
+      </a>
+      <a href="../">
+        <b>Overview</b>
+        <span>Why this exists, in one page, with no SQL.</span>
+      </a>
+    </div>
+
+    <h2 id="shape">What it looks like</h2>
+    <p>
+      The whole API in one screen. Markdown goes in, the same bytes come out, and
+      everything in between is a row.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">CREATE EXTENSION pgmind;
+
+-- A note is markdown at a path.
+SELECT knowledge.write('projects/auth', $md$# Auth
+
+## Decisions
+
+- [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
+- Refresh tokens rotate every 24h #decision ^rotation
+$md$);
+
+SELECT knowledge.read('projects/auth');            -- byte for byte
+SELECT * FROM knowledge.blocks('projects/auth');   -- every piece, as rows
+SELECT * FROM knowledge.backlinks('projects/auth');-- what points here
+
+-- Add a line under a heading. Two agents doing this at once both succeed.
+SELECT * FROM knowledge.append_to_section(
+    'projects/auth', ARRAY['Auth','Decisions'],
+    $md$- Access tokens live 15 minutes #decision$md$);
+
+-- Nothing was overwritten.
+SELECT seq, verb, author FROM knowledge.history('projects/auth');
+SELECT knowledge.read_as_of('projects/auth', 0::bigint);</code></pre>
+    </div>
+
+    <h2 id="how-to-read">How to read this</h2>
+
+    <p>
+      Every SQL example was run against PostgreSQL&nbsp;18 and its output pasted
+      back. UUIDs are shortened to <code>019fd618-…</code> because yours will
+      differ. Badges say what is real:
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th scope="col">Badge</th><th scope="col">Means</th></tr></thead>
+      <tbody>
+        <tr><td><span class="badge ok">In main</span></td>
+            <td>Runs today.</td></tr>
+        <tr><td><span class="badge next">Phase 5</span></td>
+            <td>Designed, not built. Shown so you can plan around it.</td></tr>
+        <tr><td><span class="badge admin">Admin</span></td>
+            <td>Lives in the <code>pgmind</code> schema, below the public API.
+                Several are destructive.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="note-box trap">
+      <span class="lbl">One rule to learn before your first write</span>
+      <p>
+        The six block operations return a composite. Call them from
+        <code>FROM</code>, never from the select list —
+        <code>SELECT (knowledge.update_block(…)).*</code> evaluates the function
+        once per output column and applies your edit twice.
+      </p>
+    </div>
+
+    <h2 id="deeper">Going deeper</h2>
+    <p>
+      This manual describes the code. Behind it sit the design documents, in
+      order of precedence: the
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">handbook</a>
+      (the architecture laws), the accepted
+      <a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">RFCs</a>
+      (one per phase), the
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PRODUCT-PLAN.md">product plan</a>,
+      and then the code. Measurements are published in
+      <a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published">eval/</a>,
+      including the unflattering ones.
+    </p>
+    <p>
+      Where this manual disagrees with the code, the manual is wrong —
+      <a href="https://github.com/MarosiLabs/pgmind/issues">please say so</a>.
+    </p>
+
+    <nav class="page-nav" aria-label="Page">
+      <a class="next" href="quickstart.html">
+        <span>Next</span>
+        Quick start
+      </a>
+    </nav>
+  </main>
+
+  <aside class="docs-toc" aria-label="On this page"><nav id="toc"></nav></aside>
+</div>
+
+<footer class="site-foot">
+  <div class="foot-inner">
+    <p><b>pgmind</b>: files hold notes, PostgreSQL holds the brain.</p>
+    <p class="foot-links">
+      <a href="../">Overview</a>
+      <a href="https://github.com/MarosiLabs/pgmind">Repository</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/LICENSE">PostgreSQL License</a>
+    </p>
+  </div>
+</footer>
+
+<script src="docs.js" defer></script>
+</body>
+</html>

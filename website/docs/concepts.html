@@ -1,0 +1,1909 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Concepts · pgmind manual</title>
+<meta name="description" content="The nouns pgmind stores — vaults, notes, paths, tiles, blocks, edges, tags, revisions — and exactly what its markdown dialect means, down to what counts as a tag.">
+<link rel="canonical" href="https://marosilabs.github.io/pgmind/docs/concepts.html">
+<meta name="author" content="Marosi Labs">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+
+<meta name="theme-color" content="#0a0c10">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.png" type="image/png" sizes="180x180">
+<link rel="apple-touch-icon" href="../assets/favicon.png">
+<link rel="stylesheet" href="docs.css">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="pgmind">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://marosilabs.github.io/pgmind/docs/concepts.html">
+<meta property="og:title" content="Concepts · pgmind manual">
+<meta property="og:description" content="Vaults, notes, paths, tiles, blocks, edges, tags and revisions — and exactly what pgmind's markdown dialect means, down to what counts as a tag.">
+<meta property="og:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Concepts · pgmind manual">
+<meta name="twitter:description" content="The vault model, the markdown dialect, content hashes, block identity, link resolution and the errors you will meet.">
+<meta name="twitter:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+</head>
+<body>
+
+<a class="skip" href="#doc">Skip to content</a>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="gh" viewBox="0 0 16 16">
+    <path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27s-1.36.09-2 .27c-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+  </symbol>
+  <symbol id="copy" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
+          d="M5.7 5.7h7.1v7.1H5.7zM10.3 5.7V3.2H3.2v7.1h2.5"/>
+  </symbol>
+  <symbol id="check" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+          stroke-linejoin="round" d="m3.4 8.4 3 3 6.2-7"/>
+  </symbol>
+  <symbol id="menu" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+          d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+  </symbol>
+</svg>
+
+<header class="site-head">
+  <div class="head-inner">
+    <button class="side-toggle" type="button" aria-expanded="false" aria-controls="side" aria-label="Navigation">
+      <svg width="16" height="16" aria-hidden="true"><use href="#menu"/></svg>
+    </button>
+    <a class="brand" href="../" aria-label="pgmind home">
+      <img src="../assets/mark.png" alt="" width="28" height="24">
+      <span><b>pg</b>mind</span>
+      <span class="in">manual</span>
+    </a>
+    <nav class="head-nav">
+      <a href="../">Overview</a>
+      <a href="quickstart.html">Quick start</a>
+      <a class="icon-link" href="https://github.com/MarosiLabs/pgmind" aria-label="Repository on GitHub">
+        <svg width="18" height="18" aria-hidden="true"><use href="#gh"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-side" id="side">
+    <nav aria-label="Manual">
+      <h2>Start</h2>
+      <ul>
+        <li><a href="index.html">The manual</a></li>
+        <li><a href="quickstart.html">Quick start</a></li>
+      </ul>
+
+      <h2>Learn</h2>
+      <ul>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="internals.html">Internals</a></li>
+      </ul>
+
+      <h2>Look up</h2>
+      <ul>
+        <li><a href="sql.html">SQL reference</a></li>
+        <li><a href="cookbook.html">Cookbook</a></li>
+      </ul>
+
+      <h2>Elsewhere</h2>
+      <ul>
+        <li><a href="https://github.com/MarosiLabs/pgmind">Repository</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">RFCs</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published">Benchmarks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="docs-main" id="doc">
+    <p class="crumbs"><a href="index.html">Manual</a> / Concepts</p>
+    <h1>Concepts</h1>
+    <p class="lede">
+      Everything pgmind stores has a name, and most of the surprises come from
+      not knowing which name means what. This page defines the nouns — vault,
+      note, path, tile, block, edge, tag, revision — and then spells out the
+      markdown dialect exactly, because that is where a vault stops being
+      &ldquo;markdown&rdquo; and starts being data you can query.
+    </p>
+
+    <div class="note-box">
+      <span class="lbl">How to read this page</span>
+      <p>
+        Every example was executed against the seven-note demo vault that
+        <a href="quickstart.html#first-note">Quick start</a> builds, in the
+        order they appear. A few of them write, and each says so; the writes
+        clean up after themselves except where a later section depends on them.
+        UUIDs and content hashes are elided — yours will differ.
+      </p>
+    </div>
+
+    <h2 id="model">The vault model</h2>
+    <p>
+      A vault is a set of notes. A note is markdown at a path. Everything below
+      the note is derived from the note's bytes on every write, and everything
+      above it is one <code>uuid</code> column.
+    </p>
+
+    <div class="code">
+      <div class="cap">the shape of the data</div>
+<pre><code>vault                  one uuid, on every row (GUC: pgmind.vault_id)
+ └── note              path, preamble, properties, head_revision
+      ├── tile[]       byte lane   — the source spans of the top-level nodes
+      │                              preamble ‖ tile[0] ‖ tile[1] ‖ … == the file
+      ├── block[]      semantic lane — one row per addressable unit
+      │     ├── edge[] wikilink | transclusion | blockref | mdlink
+      │     └── tag[]
+      └── revision[]   append-only: seq, verb, author, source, message</code></pre>
+    </div>
+
+    <p>
+      The two lanes are the whole design. The <strong>byte lane</strong> exists
+      so that <code>knowledge.read()</code> can hand back the file the writer
+      handed in, byte for byte, without re-rendering anything. The
+      <strong>semantic lane</strong> exists so that a paragraph has an id, a
+      hash, a section, a position and a history. Neither lane is a view over
+      the other; both are written in the same transaction from the same parse.
+      <a href="internals.html#lanes">Internals</a> covers why.
+    </p>
+
+    <p>
+      The seeded vault, counted:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT notes, blocks, edges_resolved, edges_dangling, tags, revisions, bytes
+  FROM knowledge.stats();</code></pre>
+<pre class="out"><code class="out"> notes | blocks | edges_resolved | edges_dangling | tags | revisions | bytes
+-------+--------+----------------+----------------+------+-----------+-------
+     7 |     48 |             16 |              2 |    9 |         7 |  1383
+(1 row)</code></pre>
+    </div>
+
+    <div class="note-box">
+      <span class="lbl">Why seven short notes are 48 blocks</span>
+      <p>
+        A bulleted list item produces <em>two</em> rows: the
+        <code>list_item</code> and the <code>paragraph</code> inside it. That is
+        deliberate — the item is the thing you cite and reorder, the paragraph
+        is the thing whose text changed — but it doubles the row count of any
+        list-heavy note, and it means a block count is not a &ldquo;paragraph
+        count&rdquo;. See <a href="#blocks">Blocks</a>.
+      </p>
+    </div>
+
+    <h2 id="paths">Notes and paths</h2>
+    <p>
+      A path is the note's identity to a human and to a link. It is not the
+      note's identity to the database — that is a uuid, and a
+      <code>move_note</code> keeps it — but every public function addresses
+      notes by path.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Rule</th><th scope="col">Legal</th><th scope="col">Rejected</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>UTF-8, Unicode NFC</td><td><code>café/notes</code> in NFC</td>
+            <td>the same text in NFD (<code>e</code> + combining acute)</td></tr>
+        <tr><td>Case-<strong>sensitive</strong></td><td><code>projects/auth</code></td>
+            <td>nothing — but <code>Projects/Auth</code> is a different note</td></tr>
+        <tr><td><code>/</code>-separated, no empty segment</td><td><code>a/b/c</code></td>
+            <td><code>/a</code>, <code>a/</code>, <code>a//b</code></td></tr>
+        <tr><td>No <code>.</code> or <code>..</code> segment</td><td><code>a/dot.name</code></td>
+            <td><code>a/./b</code>, <code>a/../b</code>, <code>.</code></td></tr>
+        <tr><td>No control characters, no <code>\</code></td><td><code>a/b</code></td>
+            <td><code>a\b</code></td></tr>
+        <tr><td>No leading or trailing whitespace, in any segment</td>
+            <td><code>a/b</code></td><td><code>&nbsp;a</code>, <code>a&nbsp;</code>,
+            <code>a/&nbsp;b</code></td></tr>
+        <tr><td>At most 1024 bytes total</td><td>1024 bytes</td><td>1025 bytes</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      Two functions, and they do different jobs.
+      <code>pgmind.path_normalize</code> trims and NFC-canonicalizes and
+      validates nothing; <code>pgmind.path_is_valid</code> validates and
+      normalizes nothing. The write path runs them in that order, which is why
+      a path that is only <em>almost</em> legal — surrounding whitespace, NFD
+      from a macOS filename — is accepted after normalization while a
+      structurally broken one is not:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT p AS candidate, octet_length(p) AS bytes,
+       pgmind.path_is_valid(p) AS valid,
+       pgmind.path_is_valid(pgmind.path_normalize(p)) AS valid_normalized
+  FROM unnest(ARRAY['projects/auth', ' projects/auth ', '/bad/', 'a//b',
+                    'a/../b', 'a\b', '.', 'cafe' || U&'\0301']) AS p;</code></pre>
+<pre class="out"><code class="out">    candidate    | bytes | valid | valid_normalized
+-----------------+-------+-------+------------------
+ projects/auth   |    13 | t     | t
+  projects/auth  |    15 | f     | t
+ /bad/           |     5 | f     | f
+ a//b            |     4 | f     | f
+ a/../b          |     6 | f     | f
+ a\b             |     3 | f     | f
+ .               |     1 | f     | f
+ café            |     6 | f     | t
+(8 rows)</code></pre>
+    </div>
+
+    <p>
+      The last row is the NFD case: six bytes for a five-byte word, invalid as
+      written, valid once normalized. This is not cosmetic — an NFD path and an
+      NFC path are different strings to PostgreSQL, so without normalization a
+      vault imported from a macOS filesystem would contain two notes that look
+      identical in every editor.
+    </p>
+
+    <h3 id="basenames-and-globs">Basenames and globs</h3>
+    <p>
+      The last segment is the <strong>basename</strong>. It is what
+      <code>knowledge.notes().title</code> reports, and it is the unit of
+      basename link resolution (<a href="#resolution">below</a>).
+    </p>
+    <p>
+      <code>knowledge.notes()</code> takes a git-style glob, and only a
+      git-style glob: <code>*</code> matches within one segment,
+      <code>**</code> matches zero or more whole segments, and nothing else is
+      special. There are no character classes, no <code>?</code>, no braces.
+      A <code>**</code> is only recognized as a complete segment.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT g AS glob, (SELECT count(*) FROM knowledge.notes(g)) AS matches
+  FROM unnest(ARRAY['**', '*', 'projects/*', 'projects/**',
+                    '**/a*', 'Projects/**']) AS g;</code></pre>
+<pre class="out"><code class="out">    glob     | matches
+-------------+---------
+ **          |       7
+ *           |       1
+ projects/*  |       1
+ projects/** |       1
+ **/a*       |       3
+ Projects/** |       0
+(6 rows)</code></pre>
+    </div>
+
+    <p>
+      Three things in that output are worth naming. <code>*</code> matches only
+      the single-segment note (<code>index</code>), because <code>*</code> never
+      crosses a <code>/</code>. <code>projects/**</code> matches
+      <code>projects/auth</code> even though <code>**</code> stands for zero
+      segments there. And <code>Projects/**</code> matches nothing: globs are as
+      case-sensitive as paths.
+    </p>
+    <p>
+      Globs are capped at 4096 bytes, and an empty glob is an error — a pattern
+      is matched against every candidate path, so an unbounded pattern would be
+      an unbounded per-row cost. pgmind computes the glob's longest literal
+      prefix (<code>projects/</code> for <code>projects/*</code>, the empty
+      string for <code>**</code>) and pushes it down to the path index before
+      matching, so a prefixed glob does not scan the vault.
+    </p>
+
+    <div class="note-box warn">
+      <span class="lbl">One place the spec and the code disagree</span>
+      <p>
+        RFC-002 D8 lists &ldquo;no <code>.md</code> suffix&rdquo; as part of the
+        path grammar, on the grounds that filename mapping is a different
+        concern. <code>pgmind.path_is_valid('notes/a.md')</code> returns true.
+        The suffix is a convention here, not a constraint; if you import a
+        folder of files, strip it yourself.
+      </p>
+    </div>
+
+    <h2 id="anatomy">A note's anatomy</h2>
+    <p>
+      A note is stored as a <strong>preamble</strong> followed by a list of
+      <strong>tiles</strong>. The preamble is the frontmatter plus any leading
+      trivia. A tile is the source span of one top-level child of the document —
+      one heading, one paragraph, one whole list, one whole blockquote — including
+      the blank lines that follow it. Concatenating the preamble and the tiles in
+      order reproduces the input exactly:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read('rfc/auth-01')::text = $md$# RFC-AUTH-01: token rotation
+
+Rotation policy for [[projects/auth]]. #architecture #decision
+
+The operational steps live in the [rotation runbook](runbooks/rotate-keys.md).
+$md$ AS byte_identical;</code></pre>
+<pre class="out"><code class="out"> byte_identical
+----------------
+ t
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      That property holds for every input, including tabs, setext headings,
+      indented code, CRLF line endings and trailing whitespace. pgmind never
+      &ldquo;cleans up&rdquo; markdown. Normalization happens only inside the
+      <a href="#hashing">content hash</a>, where it cannot be observed by a
+      reader.
+    </p>
+    <p>
+      The preamble is available without storing anything, over a
+      <code>markdown</code> value:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.preamble($md$---
+title: Auth
+tags: [architecture]
+---
+
+# Auth
+$md$) AS preamble;</code></pre>
+<pre class="out"><code class="out">       preamble
+----------------------
+ ---                 +
+ title: Auth         +
+ tags: [architecture]+
+ ---                 +
+                     +
+
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Tiles are a storage and serialization unit, not an addressing unit: no
+      public function exposes them, and you never cite one. The reason they
+      exist is that <em>nested</em> blocks cannot be serialized on their own:
+      a paragraph inside a blockquote has a span whose bytes still contain the
+      <code>&gt;&nbsp;</code> prefixes, so re-emitting that slice would not be a
+      faithful standalone document. Anything that rewrites a nested block
+      re-serializes the whole tile that contains it.
+    </p>
+
+    <h2 id="blocks">Blocks</h2>
+    <p>
+      A block is the addressable unit: the thing that carries an id, a content
+      hash, a citation and a revision. There are seven kinds, and two markdown
+      constructs that are deliberately <em>not</em> blocks.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Kind</th><th scope="col">Block?</th>
+          <th scope="col">Can carry <code>^id</code></th><th scope="col">Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>heading</code></td><td>yes</td><td>yes</td>
+            <td>levels 1&ndash;6; ATX and setext both, preserved as written.
+                <code>attrs</code>: <code>level</code>, <code>setext</code>,
+                <code>text</code></td></tr>
+        <tr><td><code>paragraph</code></td><td>yes</td><td>yes</td><td></td></tr>
+        <tr><td><code>list_item</code></td><td>yes</td><td>yes</td>
+            <td>each item is a block; <code>attrs</code>: <code>ordered</code>,
+                <code>start</code>, <code>tight</code>, and
+                <code>task</code>/<code>checked</code> for task items</td></tr>
+        <tr><td><code>code_block</code></td><td>yes</td><td>no</td>
+            <td>fenced and indented; <code>attrs</code>: <code>fenced</code>,
+                <code>info</code></td></tr>
+        <tr><td><code>table</code></td><td>yes</td><td>no</td>
+            <td>one block per table; rows are not separately addressable in v1</td></tr>
+        <tr><td><code>thematic_break</code></td><td>yes</td><td>no</td><td></td></tr>
+        <tr><td><code>html_block</code></td><td>yes</td><td>no</td>
+            <td>opaque; never interpreted</td></tr>
+        <tr><td><code>block_quote</code></td><td>container</td><td>&mdash;</td>
+            <td>no row of its own; its children are blocks, and quotes nest</td></tr>
+        <tr><td><code>list</code></td><td>container</td><td>&mdash;</td>
+            <td>no row of its own; carries its style in each item's
+                <code>attrs</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      Containers having no rows is the single most load-bearing choice here. It
+      means a quoted paragraph is a first-class, citable, patchable paragraph;
+      it also means a whole blockquote cannot be cited or updated as a unit.
+      Here is a document containing every shape at once, parsed without being
+      stored:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, parent, heading_path, content
+  FROM knowledge.blocks($md$# Title
+
+A paragraph.
+
+- an item
+  - a nested item
+
+&gt; A quoted line.
+
+| a | b |
+|---|---|
+| 1 | 2 |
+
+***
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> ord |      kind      | parent | heading_path |    content
+-----+----------------+--------+--------------+----------------
+   0 | heading        |        | {}           | # Title
+   1 | paragraph      |        | {Title}      | A paragraph.
+   2 | list_item      |        | {Title}      | an item
+   3 | paragraph      |      2 | {Title}      | an item
+   4 | list_item      |      2 | {Title}      | a nested item
+   5 | paragraph      |      4 | {Title}      | a nested item
+   6 | paragraph      |        | {Title}      | A quoted line.
+   7 | table          |        | {Title}      | | a | b |     +
+     |                |        |              | |---|---|     +
+     |                |        |              | | 1 | 2 |
+   8 | thematic_break |        | {Title}      | ***
+(9 rows)</code></pre>
+    </div>
+
+    <ul>
+      <li><strong><code>ord</code></strong> is document order over all blocks,
+          nested ones included. It is recomputed on every write; it is a
+          position, never an identity.</li>
+      <li><strong><code>parent</code></strong> (called
+          <code>parent_block</code> in the stored form) points at the enclosing
+          <em>addressable</em> block. The nested item's parent is the outer
+          item, not the inner list. The quoted paragraph has no parent at all,
+          because a blockquote is not addressable.</li>
+      <li><strong><code>content</code></strong> is the normalized logical text
+          that was hashed, not the raw bytes. The quoted line arrives without
+          its <code>&gt;&nbsp;</code>; the item arrives without its
+          <code>-&nbsp;</code>. Raw bytes are recoverable from
+          <code>span_start</code>/<code>span_end</code>.</li>
+      <li>ATX markers survive into <code>content</code>
+          (<code>#&nbsp;Title</code>): the marker is the heading's syntax, not
+          container decoration.</li>
+    </ul>
+
+    <div class="note-box trap">
+      <span class="lbl">Cast your markdown literals</span>
+      <p>
+        <code>blocks</code>, <code>links</code> and <code>tags</code> each have
+        two overloads — one taking a note <code>path</code>, one taking a
+        <code>markdown</code> value. An unadorned string literal is
+        <code>unknown</code>, and PostgreSQL resolves it to the
+        <code>text</code> overload, so pgmind goes looking for a note whose path
+        is your entire document:
+      </p>
+<pre class="out"><code class="out">ERROR:  pgmind: note not found
+DETAIL:  pgmind_note_not_found — path "A [[projects/auth]] link."</code></pre>
+      <p>
+        Write <code>$md$…$md$::markdown</code> whenever you mean the parser.
+        Every parse-only example on this page does.
+      </p>
+    </div>
+
+    <h2 id="sections">Sections and heading paths</h2>
+    <p>
+      There is no section table. A section is a query: every block whose
+      <code>heading_path</code> starts with the headings you care about.
+      <code>heading_path</code> is the heading text of the enclosing headings,
+      outermost first, and it is recomputed on every write.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, heading_path FROM knowledge.blocks('projects/auth') ORDER BY ord;</code></pre>
+<pre class="out"><code class="out"> ord |   kind    |   heading_path
+-----+-----------+------------------
+   0 | heading   | {}
+   1 | paragraph | {Auth}
+   2 | heading   | {Auth}
+   3 | list_item | {Auth,Decisions}
+   4 | paragraph | {Auth,Decisions}
+   5 | list_item | {Auth,Decisions}
+   6 | paragraph | {Auth,Decisions}
+   7 | list_item | {Auth,Decisions}
+   8 | paragraph | {Auth,Decisions}
+   9 | heading   | {Auth}
+  10 | paragraph | {Auth,Runbook}
+  11 | heading   | {Auth}
+  12 | paragraph | {Auth,Log}
+(13 rows)</code></pre>
+    </div>
+
+    <p>
+      A heading is not inside itself: the <code>## Decisions</code> heading at
+      <code>ord&nbsp;2</code> has <code>heading_path</code>
+      <code>{Auth}</code>, and its contents have <code>{Auth,Decisions}</code>.
+    </p>
+
+    <h3 id="heading-text">What counts as heading text</h3>
+    <p>
+      One definition serves <code>heading_path</code>, <code>#Heading</code>
+      anchors and <code>append_to_section</code>: the heading's concatenated
+      plain inline text, with formatting markers dropped, wiki-links
+      contributing their alias if they have one and their target otherwise,
+      code spans contributing their literal text, any <code>^id</code> marker
+      stripped, then NFC-normalized and trimmed. It is what a reader of the
+      rendered heading would type.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, heading_path, content
+  FROM knowledge.blocks($md$## *Important* [[decisions|Decisions]]
+
+Body.
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> ord |   kind    |      heading_path       |                content
+-----+-----------+-------------------------+----------------------------------------
+   0 | heading   | {}                      | ## *Important* [[decisions|Decisions]]
+   1 | paragraph | {"Important Decisions"} | Body.
+(2 rows)</code></pre>
+    </div>
+
+    <h3 id="duplicate-sections">Duplicate heading paths</h3>
+    <p>
+      <code>heading_path</code> is <strong>not unique</strong>. Two sibling
+      headings with the same text are legal markdown, and pgmind stores them
+      without complaint. Everything that addresses a section by heading path —
+      <code>read_section</code>, <code>append_to_section</code> — takes the
+      <strong>first match in document order</strong> and does not warn you that
+      there was a second. This example writes a note and deletes it again:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/dupes', $md$# Dupes
+
+## Log
+
+first
+
+## Log
+
+second
+$md$);
+
+SELECT knowledge.read_section('notes/dupes', ARRAY['Dupes','Log']);
+
+SELECT knowledge.delete_note('notes/dupes');</code></pre>
+<pre class="out"><code class="out">                write
+--------------------------------------
+ 019fd630-bcab-…
+(1 row)
+
+ read_section
+--------------
+ ## Log      +
+             +
+ first       +
+             +
+
+(1 row)
+
+             delete_note
+--------------------------------------
+ 019fd630-bcb0-…
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      If you need the second one, address its blocks by id. If you control the
+      note's shape, keep sibling headings distinct.
+    </p>
+
+    <h2 id="dialect">The markdown dialect</h2>
+
+    <p>
+      pgmind parses CommonMark with exactly three GFM extensions enabled —
+      tables, task lists, strikethrough — and then makes a second, deterministic
+      pass over the result to find vault syntax: wiki-links, transclusions,
+      tags and block-id markers. Autolinking, footnotes, superscript,
+      description lists and smart punctuation are all off.
+    </p>
+
+    <div class="note-box">
+      <span class="lbl">The precedence rule, before anything else</span>
+      <p>
+        <strong>CommonMark inline parsing wins.</strong> Vault syntax is
+        recognized only in the plain-text nodes that survive it, and never
+        inside code spans, code blocks or HTML. The consequence people meet
+        first: a link-reference definition anywhere in the document makes the
+        matching <code>[[…]]</code> parse as a bracketed reference link, and no
+        wiki-link is produced.
+      </p>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target FROM knowledge.links($md$A [[projects/auth]] link.
+$md$::markdown);
+
+SELECT kind, target FROM knowledge.links($md$A [[projects/auth]] link.
+
+[projects/auth]: https://example.com/elsewhere
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">   kind   |    target
+----------+---------------
+ wikilink | projects/auth
+(1 row)
+
+ kind | target
+------+--------
+(0 rows)</code></pre>
+    </div>
+
+    <p>
+      The second document produces no edge at all — not a dangling one. The
+      definition turned the brackets into an ordinary reference link whose
+      destination has a scheme, and a scheme-ful target is external. This is
+      deterministic and golden-cased, and it is the price of not maintaining a
+      private fork of CommonMark. If a note of yours mysteriously has no
+      backlinks, grep it for <code>]:</code>.
+    </p>
+
+    <h3 id="wiki-links">Wiki-links</h3>
+    <p>
+      A wiki-link is a closed grammar on a single line, inside
+      <code>[[&nbsp;…&nbsp;]]</code>:
+    </p>
+    <ul>
+      <li><strong>target</strong> — everything up to the first unescaped
+          <code>#</code>, <code>|</code> or <code>]]</code>;</li>
+      <li><strong>anchor</strong> — after the first unescaped <code>#</code>, up
+          to the first unescaped <code>|</code> or <code>]]</code>. Later
+          <code>#</code> characters are part of the anchor text;</li>
+      <li><strong>alias</strong> — everything after the first unescaped
+          <code>|</code>, and it may contain <code>#</code>.</li>
+    </ul>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, anchor, alias, block
+  FROM knowledge.links($md$See [[projects/auth]], [[projects/auth#Decisions]],
+[[projects/auth|the auth note]] and [[projects/auth#Decisions|why]].
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">   kind   |    target     |  anchor   |     alias     | block
+----------+---------------+-----------+---------------+-------
+ wikilink | projects/auth |           |               |     0
+ wikilink | projects/auth | Decisions |               |     0
+ wikilink | projects/auth |           | the auth note |     0
+ wikilink | projects/auth | Decisions | why           |     0
+(4 rows)</code></pre>
+    </div>
+
+    <p>
+      Targets and anchors are whitespace-trimmed and NFC-normalized at
+      extraction, so an NFD target typed on a Mac still matches its NFC-stored
+      note. Aliases are trimmed but not normalized — they are display text.
+      <code>\#</code>, <code>\|</code> and <code>\]</code> escape in all three
+      parts. An anchor beginning with <code>^</code> makes the edge a
+      <code>blockref</code>; a leading <code>!</code> makes it a
+      <code>transclusion</code>. And an empty target with no anchor —
+      <code>[[]]</code>, <code>[[&nbsp;]]</code>, <code>[[|alias]]</code> — is
+      not a wiki-link at all: the bracket pair is consumed and nothing is
+      emitted.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, anchor, alias
+  FROM knowledge.links($md$Trimmed: [[  projects/auth  #  Decisions  |  why  ]].
+Escaped: [[a\|b]] and [[c\#d]].
+Block ref: [[projects/auth#^rotation]].
+Not a link: [[]], [[ ]], [[|alias]].
+Embedded: ![[projects/auth#Log]].
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">     kind     |    target     |  anchor   | alias
+--------------+---------------+-----------+-------
+ wikilink     | projects/auth | Decisions | why
+ wikilink     | a|b           |           |
+ wikilink     | c#d           |           |
+ blockref     | projects/auth | ^rotation |
+ transclusion | projects/auth | Log       |
+(5 rows)</code></pre>
+    </div>
+
+    <p>
+      Five rows for eight bracket pairs. The three empty-target forms produced
+      nothing, which is the point: they are the shape a half-typed link has, and
+      turning them into dangling edges would fill every vault with noise.
+    </p>
+    <p>
+      A transclusion is an edge, not an expansion. pgmind records that
+      <code>![[projects/auth#Log]]</code> points at that section; composing the
+      target's text into the document is your query's job, and there is a
+      <a href="cookbook.html#navigation">recipe</a> for it.
+    </p>
+
+    <h3 id="table-cells">Wiki-links inside table cells</h3>
+    <p>
+      The GFM table extension splits cells on unescaped <code>|</code>
+      <em>before</em> inline parsing runs. An aliased wiki-link in a cell is
+      therefore two cells and no link. Escaping the pipe fixes it — the
+      <code>\|</code> survives cell splitting and then behaves as the ordinary
+      alias separator, which is what Obsidian does too:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, alias FROM knowledge.links($md$| note | why |
+|---|---|
+| [[projects/auth|auth]] | one cell became two |
+| [[projects/auth\|auth]] | escaped, so it survives |
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">   kind   |    target     | alias
+----------+---------------+-------
+ wikilink | projects/auth | auth
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      One row from two rows of table. The surviving link is the escaped one.
+      Note also that cell text is scanned as GFM-reconstructed content rather
+      than raw source bytes, because cell source positions do not map back to
+      the original — so a link found in a cell has no usable byte span.
+    </p>
+
+    <h3 id="markdown-links">Markdown links</h3>
+    <p>
+      An ordinary <code>[text](target)</code> is classified by its target. A
+      target with a URL scheme is external and produces no vault edge. A
+      scheme-less target is a candidate vault path: an optional
+      <code>#fragment</code> is split off into the anchor first, then an
+      optional <code>.md</code> suffix is stripped, then the result resolves
+      like any other target and becomes an edge of kind <code>mdlink</code>.
+      A pure-fragment link is a self-reference and is out of scope in v1.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, anchor
+  FROM knowledge.links($md$External: [docs](https://example.com/x) and [mail](mailto:a@b.c).
+Internal: [runbook](runbooks/rotate-keys.md) and [sec](projects/auth#Decisions).
+Fragment only: [here](#Decisions).
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">  kind  |        target        |  anchor
+--------+----------------------+-----------
+ mdlink | runbooks/rotate-keys |
+ mdlink | projects/auth        | Decisions
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      Two of the five links produced edges. Since autolinking is off, a bare URL
+      in the text is plain text and is never a link of any kind.
+    </p>
+
+    <h3 id="tags">Tags</h3>
+    <p>
+      A tag is <code>#</code> followed by one or more characters from
+      <code>[A-Za-z0-9_/-]</code>, of which at least one must not be a digit.
+      The <code>#</code> must be preceded by whitespace or by the start of the
+      block's inline content <em>in the original source</em> — which is checked
+      across inline-node boundaries, so <code>**bold**#tag</code> is not a tag
+      even though the <code>#</code> begins a text node.
+    </p>
+    <p>
+      There is no collision with ATX headings: CommonMark requires a space after
+      the <code>#</code> run for a heading, so a line-initial <code>#tag</code>
+      is a paragraph containing a tag.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT tag, block
+  FROM knowledge.tags($md$#architecture at block start, and mid-line #ops/on-call here.
+
+**bold**#tag is not a tag, but **bold** #tag is. Nor is #123.
+
+# A heading, not a tag
+
+Hyphens-and_underscores: #v1-2_final.
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">     tag      | block
+--------------+-------
+ architecture |     0
+ ops/on-call  |     0
+ tag          |     1
+ v1-2_final   |     3
+(4 rows)</code></pre>
+    </div>
+
+    <p>
+      Block 0 is the first paragraph, which starts with a tag; block 2 is the
+      heading, which contributes nothing. <code>#123</code> is rejected for
+      being all digits — that rule exists so issue numbers and Markdown-style
+      anchors do not become tags. Tags are stored exactly as written; the index
+      matches them case-insensitively (see <a href="#edges">Sharp edges</a>).
+    </p>
+
+    <h3 id="id-markers">Block-id markers</h3>
+    <p>
+      A trailing <code>&nbsp;^id</code> — where <code>id</code> matches
+      <code>[A-Za-z0-9-]+</code> — pins a label onto a block. It is recognized
+      at the end of the block's last content line, after container decoration is
+      stripped and before trailing blank lines; for a setext heading, the content
+      line is the one above the underline. Only <code>heading</code>,
+      <code>paragraph</code> and <code>list_item</code> can carry one, and where
+      a line is shared between nested eligible blocks the
+      <strong>innermost</strong> block carries it.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, content, attrs-&gt;&gt;'block_ref_id' AS block_ref_id
+  FROM knowledge.blocks($md$# A heading ^h1
+
+A paragraph. ^para
+
+- an item ^item
+
+```
+code ^nope
+```
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> ord |    kind    |   content    | block_ref_id
+-----+------------+--------------+--------------
+   0 | heading    | # A heading  | h1
+   1 | paragraph  | A paragraph. | para
+   2 | list_item  | an item      |
+   3 | paragraph  | an item      | item
+   4 | code_block | ```         +|
+     |            | code ^nope  +|
+     |            | ```          |
+(5 rows)</code></pre>
+    </div>
+
+    <p>
+      Three things happened there. The marker is <strong>stripped from
+      <code>content</code></strong>, so adding one never changes a block's
+      hash — that is what makes it usable as a stable label. The
+      <code>list_item</code> at <code>ord&nbsp;2</code> did not claim
+      <code>^item</code>; its inner paragraph did, because the paragraph is the
+      innermost block whose last content line the marker sits on. And the code
+      block kept <code>^nope</code> as content: <code>code_block</code>,
+      <code>table</code>, <code>html_block</code> and
+      <code>thematic_break</code> cannot carry a marker in v1, which is an
+      acknowledged gap — those are also the kinds where automatic identity
+      matching is weakest, so they lack the escape hatch precisely where it
+      would help most.
+    </p>
+
+    <h3 id="not-special">Not special in v1</h3>
+    <p>
+      Obsidian callouts (<code>&gt; [!note]</code> is an ordinary blockquote),
+      comments (<code>%%…%%</code>), inline queries and Dataview syntax are all
+      plain content. pgmind implements a documented subset of the Obsidian
+      dialect rather than chasing bug-compatibility with a tool that has no
+      specification, and everything in that subset is pinned by a golden corpus.
+    </p>
+
+    <h2 id="frontmatter">Frontmatter</h2>
+    <p>
+      A leading <code>---</code> … <code>---</code> block containing a YAML
+      <strong>mapping</strong> becomes the note's <code>properties</code>
+      (jsonb). It is part of the preamble, not a block, so it has no id, no hash
+      and no history of its own beyond the note's.
+    </p>
+    <p>
+      Two keys are reserved. <code>tags</code> — a string or a list — is merged
+      into the tag index at note level, with a NULL block. <code>pgmind-pin</code>
+      is a boolean reserved for the context assembler that has not shipped yet;
+      today it is stored and otherwise ignored.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.properties($md$---
+title: Auth
+tags: [architecture, active]
+pgmind-pin: true
+owner: platform
+---
+
+# Auth
+$md$::markdown);
+
+SELECT tag, block FROM knowledge.tags($md$---
+tags: [architecture, active]
+---
+
+# Auth #inline
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out">                                   properties
+------------------------------------------------------------------------------
+ {"tags": ["architecture", "active"], "owner": "platform", "title": "Auth", "pgmind-pin": true}
+(1 row)
+
+     tag      | block
+--------------+-------
+ inline       |     0
+ architecture |
+ active       |
+(3 rows)</code></pre>
+    </div>
+
+    <p>
+      Invalid YAML is never an error. A malformed or non-mapping frontmatter
+      block is treated as ordinary CommonMark content — which is what Obsidian
+      does, and what makes importing somebody else's vault survivable. It does
+      mean the content parses as whatever those characters happen to be:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, content FROM knowledge.blocks($md$---
+title: [unclosed
+---
+
+# Auth
+$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> ord |      kind      |     content
+-----+----------------+------------------
+   0 | thematic_break | ---
+   1 | heading        | title: [unclosed+
+     |                | ---
+   2 | heading        | # Auth
+(3 rows)</code></pre>
+    </div>
+
+    <p>
+      The opening <code>---</code> became a thematic break and the next two
+      lines became a setext heading. <code>knowledge.properties()</code> on that
+      document returns <code>{}</code>. If a note's properties are unexpectedly
+      empty, its frontmatter did not parse.
+    </p>
+    <p>
+      What survives into <code>properties</code> is what the YAML loader has
+      already resolved by the time pgmind sees it, so several constructs people
+      expect to be rejected are not. Anchors and aliases <strong>resolve</strong>:
+      <code>b:&nbsp;*v</code> stores the anchored value. A tag is dropped and its
+      scalar kept, so <code>!!str&nbsp;1</code> and <code>!mytag&nbsp;1</code>
+      both store the string <code>"1"</code>. A merge key is not merged —
+      <code>&lt;&lt;</code> is stored as an ordinary key holding the aliased
+      mapping. What does count as invalid, and therefore as content, is a
+      top-level sequence or scalar, a mapping with a non-string key, an alias
+      with no anchor, and an empty block. A second YAML document never arises:
+      the frontmatter ends at the first line that is exactly <code>---</code>,
+      so anything after it is markdown.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.properties($md$---
+a: &amp;v 1
+b: *v
+n: !!str 1
+---
+$md$::markdown) AS resolved,
+       knowledge.properties($md$---
+c: *nope
+---
+$md$::markdown) AS rejected;</code></pre>
+<pre class="out"><code class="out">          resolved          | rejected
+----------------------------+----------
+ {"a": 1, "b": 1, "n": "1"} | {}
+(1 row)</code></pre>
+    </div>
+
+    <h2 id="hashing">The content hash</h2>
+    <p>
+      Every block carries <code>content_hash</code>: BLAKE3 over the block's
+      kind tag, a zero byte, and its <em>normalized logical content</em>.
+      Normalization is exactly seven steps, and nothing else:
+    </p>
+
+    <ol>
+      <li>start from the block's source span;</li>
+      <li>strip enclosing container decoration the way CommonMark strips it —
+          <code>&gt;</code> prefixes, list-item markers, continuation indentation
+          (the marker's style lives in <code>attrs</code>, not in content);</li>
+      <li>for a <code>list_item</code>, exclude container children and their
+          descendants: an item's content is its own direct non-container
+          children;</li>
+      <li>strip a trailing <code>^id</code> marker together with the whitespace
+          before it, searching content lines bottom-up;</li>
+      <li>normalize CRLF and CR line endings to LF;</li>
+      <li>apply Unicode NFC — including inside code blocks, which is a
+          deliberate exception to &ldquo;code is untouched&rdquo;: it affects the
+          hash only, never the stored bytes;</li>
+      <li>strip trailing newline runs.</li>
+    </ol>
+
+    <p>
+      Trailing spaces are <strong>kept</strong>, because two of them are a
+      CommonMark hard break and therefore semantic. Nothing else is collapsed,
+      lowercased or reordered.
+    </p>
+    <p>
+      Steps 2 and 3 are what make the hash useful. The same sentence hashes the
+      same whether it sits at top level, inside a quote, or three list levels
+      deep:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT 'quoted' AS source, encode(content_hash, 'hex') AS content_hash
+  FROM knowledge.blocks($md$&gt; foo$md$::markdown)
+UNION ALL
+SELECT 'plain', encode(content_hash, 'hex')
+  FROM knowledge.blocks($md$foo$md$::markdown);</code></pre>
+<pre class="out"><code class="out"> source |                           content_hash
+--------+------------------------------------------------------------------
+ quoted | 13a4c35e980e4b98f3026ef55f9b5e59559efe9710cf5ae2c784c97b46f20780
+ plain  | 13a4c35e980e4b98f3026ef55f9b5e59559efe9710cf5ae2c784c97b46f20780
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      What that buys is concrete. When you indent a paragraph into a list, or
+      pull it out of a blockquote, or move it into a deeper sub-item, its hash
+      does not move — so the write path's exact-match pass carries its block id,
+      its citations keep resolving, and an embedding keyed on the hash is not
+      recomputed. Without container invariance, reformatting a document would
+      look like rewriting it.
+    </p>
+    <p>
+      The same reasoning gives three more invariants, and one deliberate
+      non-invariant:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT (SELECT content_hash FROM knowledge.blocks($md$- foo$md$::markdown)
+          WHERE kind = 'paragraph')
+     = (SELECT content_hash FROM knowledge.blocks($md$foo$md$::markdown))
+       AS list_invariant,
+       (SELECT content_hash FROM knowledge.blocks($md$foo ^x$md$::markdown))
+     = (SELECT content_hash FROM knowledge.blocks($md$foo$md$::markdown))
+       AS marker_invariant,
+       (SELECT content_hash FROM knowledge.blocks($md$# foo$md$::markdown))
+     = (SELECT content_hash FROM knowledge.blocks($md$foo$md$::markdown))
+       AS kind_matters;</code></pre>
+<pre class="out"><code class="out"> list_invariant | marker_invariant | kind_matters
+----------------+------------------+--------------
+ t              | t                | f
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      <code>kind_matters</code> is false because the kind tag is hashed in:
+      a heading and a paragraph with the same words are different content.
+    </p>
+
+    <div class="note-box warn">
+      <span class="lbl">What the hash is not</span>
+      <p>
+        The hash answers <em>did this change?</em> It does not answer <em>is
+        this the same block?</em> Two identical paragraphs are two blocks with
+        one hash; one edited paragraph is one block with two hashes. Using a
+        content hash as an identity is the mistake this whole design exists to
+        avoid — see below.
+      </p>
+    </div>
+
+    <h2 id="identity">Identity</h2>
+    <p>
+      A block id is a UUIDv7, minted by the extension at the moment a write
+      creates the block. Never by the parser, never by the client, never
+      <code>gen_random_uuid()</code> in SQL. Ids are <strong>opaque</strong>:
+      the v7 time prefix exists to keep the primary-key index append-friendly,
+      and you must not read anything out of it. Order comes from
+      <code>ord</code>, time from revisions.
+    </p>
+
+    <p>The invariant, in one sentence, and it has two halves:</p>
+    <ul>
+      <li>Two blocks with identical content are still two blocks — same hash,
+          different ids.</li>
+      <li>One block whose content changes is still one block — same id,
+          different hash.</li>
+    </ul>
+
+    <p>The first half, written and then cleaned up:</p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/twins', $md$# Twins
+
+Same words.
+
+Same words.
+$md$);
+
+SELECT count(*) AS paragraphs, count(DISTINCT block_id) AS ids,
+       count(DISTINCT content_hash) AS hashes
+  FROM knowledge.blocks('notes/twins') WHERE kind = 'paragraph';
+
+SELECT knowledge.delete_note('notes/twins');</code></pre>
+<pre class="out"><code class="out"> paragraphs | ids | hashes
+------------+-----+--------
+          2 |   2 |      1
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      The second half. This one <strong>changes the demo vault</strong>, and the
+      <a href="#revisions">Revisions</a> section below reads the history it
+      creates:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT block_id, left(encode(content_hash,'hex'), 12) AS hash, content
+  FROM knowledge.blocks('projects/auth') WHERE heading_path = ARRAY['Auth','Log'];
+
+SELECT block_ids FROM knowledge.update_block(
+         (SELECT block_id FROM knowledge.blocks('projects/auth')
+           WHERE heading_path = ARRAY['Auth','Log']),
+         $md$Rotated the signing key too.$md$);
+
+SELECT block_id, left(encode(content_hash,'hex'), 12) AS hash, content
+  FROM knowledge.blocks('projects/auth') WHERE heading_path = ARRAY['Auth','Log'];</code></pre>
+<pre class="out"><code class="out">               block_id               |     hash     |           content
+--------------------------------------+--------------+-----------------------------
+ 019fd630-bc5a-…                      | 1374666798d0 | Migrated the session store.
+(1 row)
+
+               block_ids
+----------------------------------------
+ {019fd630-bc5a-…}
+(1 row)
+
+               block_id               |     hash     |           content
+--------------------------------------+--------------+------------------------------
+ 019fd630-bc5a-…                      | 038f65016052 | Rotated the signing key too.
+(1 row)</code></pre>
+    </div>
+
+    <h3 id="id-vs-hash-vs-label">Id, hash and <code>^id</code> label</h3>
+    <p>
+      Three different things, routinely confused:
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col"></th><th scope="col">Answers</th>
+          <th scope="col">Who sets it</th><th scope="col">Stable across</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>block_id</code></td><td>is this the same block?</td>
+          <td>the extension, on write</td>
+          <td>edits, moves, section renames, note renames</td>
+        </tr>
+        <tr>
+          <td><code>content_hash</code></td><td>did the content change?</td>
+          <td>the parser, from the bytes</td>
+          <td>container nesting, quoting, <code>^id</code> markers, CRLF</td>
+        </tr>
+        <tr>
+          <td><code>block_ref_id</code> (<code>^id</code>)</td>
+          <td>what does the <em>text</em> call this block?</td>
+          <td>whoever typed it</td>
+          <td>nothing — it is editable text like any other</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      The <code>^id</code> marker is a <strong>label</strong>, never an
+      identity. It can be duplicated, deleted or moved to another block, and each
+      of those is honoured exactly as written (ties break by document order). It
+      does two jobs: it resolves <code>#^id</code> anchors, and it lets a
+      whole-note rewrite assert &ldquo;this block is that block&rdquo; without
+      pgmind having to guess. Conflating it with identity would hand id minting
+      to whoever types in an editor.
+    </p>
+    <p>
+      The seeded note shows both the label and the kind-in-hash rule at once.
+      <code>ord&nbsp;5</code> is a list item and <code>ord&nbsp;6</code> is the
+      paragraph inside it — the same words, two blocks, two hashes, and the
+      marker on the inner one:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, block_ref_id, left(encode(content_hash,'hex'), 12) AS hash, content
+  FROM knowledge.blocks('projects/auth') WHERE ord IN (5, 6) ORDER BY ord;</code></pre>
+<pre class="out"><code class="out"> ord |   kind    | block_ref_id |     hash     |                  content
+-----+-----------+--------------+--------------+-------------------------------------------
+   5 | list_item |              | d7b89e8d6858 | Refresh tokens rotate every 24h #decision
+   6 | paragraph | rotation     | 5b67c1e4e458 | Refresh tokens rotate every 24h #decision
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      An anchor such as <code>[[projects/auth#^rotation]]</code> therefore
+      resolves to the <em>paragraph</em>, not the item. After a
+      <code>split_block</code> the id goes to the first fragment while the
+      marker goes wherever your fragment text puts it, so the two can diverge —
+      lawfully, and recorded in the revision's provenance.
+      <a href="internals.html#carry">Internals</a> has the full carry rules.
+    </p>
+
+    <h2 id="resolution">Link resolution</h2>
+    <p>
+      Every link is a row whether or not it points anywhere. Resolution runs at
+      write time and is recomputed incrementally when a note is created or
+      renamed. The rules, in order:
+    </p>
+    <ol>
+      <li>the target is whitespace-trimmed and NFC-normalized;</li>
+      <li>if it fails the path grammar, the edge is dangling with
+          <code>reason = 'invalid'</code>;</li>
+      <li>exact path match against a live note in this vault;</li>
+      <li>otherwise, if the target contains no <code>/</code>: a unique live
+          note with that <strong>basename</strong>. More than one candidate is
+          dangling with <code>reason = 'ambiguous'</code>;</li>
+      <li>otherwise dangling with <code>reason = 'missing'</code>. The target
+          text is preserved either way.</li>
+    </ol>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT kind, target, resolved_path, dangling_reason
+  FROM knowledge.links('notes/scratch') ORDER BY target;</code></pre>
+<pre class="out"><code class="out">   kind   | target  | resolved_path | dangling_reason
+----------+---------+---------------+-----------------
+ wikilink | auth    | projects/auth |
+ wikilink | nowhere |               | missing
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      <code>[[auth]]</code> resolved by basename because exactly one live note
+      ends in that segment. Create a second one and the link becomes ambiguous —
+      without anyone editing <code>notes/scratch</code>. That is edge repair on
+      creation doing its job:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('archive/auth', $md$# Archived auth
+
+An unparseable target: [[/bad/]].
+$md$);
+
+SELECT target, resolved_path, dangling_reason
+  FROM knowledge.links('notes/scratch') ORDER BY target;
+
+SELECT target, resolved_path, dangling_reason FROM knowledge.links('archive/auth');</code></pre>
+<pre class="out"><code class="out"> target  | resolved_path | dangling_reason
+---------+---------------+-----------------
+ auth    |               | ambiguous
+ nowhere |               | missing
+(2 rows)
+
+ target | resolved_path | dangling_reason
+--------+---------------+-----------------
+ /bad/  |               | invalid
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Renaming the newcomer repairs the ambiguity, again without touching the
+      linking note. This restores the demo vault:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.move_note('archive/auth', 'archive/legacy-auth');
+
+SELECT target, resolved_path, dangling_reason
+  FROM knowledge.links('notes/scratch') ORDER BY target;
+
+SELECT knowledge.delete_note('archive/legacy-auth');</code></pre>
+<pre class="out"><code class="out"> target  | resolved_path | dangling_reason
+---------+---------------+-----------------
+ auth    | projects/auth |
+ nowhere |               | missing
+(2 rows)</code></pre>
+    </div>
+
+    <div class="note-box warn">
+      <span class="lbl">Deletion does not repair</span>
+      <p>
+        Repair runs on note <em>creation</em> and <em>rename</em>. It does not
+        run on <code>delete_note</code>: if you delete one of two ambiguous
+        candidates, the ambiguous edges stay ambiguous until something else
+        touches them. Rewriting or renaming the linking note re-resolves its
+        edges. This is measured behaviour, not an inference.
+      </p>
+    </div>
+
+    <p>
+      Anchors are different from targets: they are stored as text and resolved
+      at query time, not at write time. <code>#Heading</code> matches heading
+      text (the <a href="#heading-text">normalized</a> definition) first in
+      document order; <code>#^id</code> matches <code>block_ref_id</code>. A
+      link whose <em>note</em> resolves but whose anchor does not is not
+      dangling — <code>dangling_reason</code> is about the note.
+    </p>
+
+    <h2 id="revisions">Revisions</h2>
+    <p>
+      A write that changes the note's bytes appends a revision row and swaps the
+      note's <code>head_revision</code>. Revisions are per-note, numbered by
+      <code>seq</code> from zero, and never deleted.
+    </p>
+
+    <div class="note-box warn">
+      <span class="lbl">A byte-identical write records nothing</span>
+      <p>
+        <code>knowledge.write</code> compares the incoming source against the
+        stored preamble and tiles before parsing anything. If they match byte
+        for byte it returns the current head and appends no revision, so
+        re-sending the same document does not pad the history.
+        <code>expected_head</code> is still checked <em>before</em> that
+        comparison: a stale writer whose rewrite happens to be a no-op gets
+        <code>PM009</code>, not a silent success. CAS answers &ldquo;did you see
+        what you were changing?&rdquo;; the short-circuit only answers &ldquo;did
+        anything change?&rdquo;.
+      </p>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT seq, verb, author, source, blocks_changed, reconstructable
+  FROM knowledge.history('projects/auth');</code></pre>
+<pre class="out"><code class="out"> seq |     verb     | author | source | blocks_changed | reconstructable
+-----+--------------+--------+--------+----------------+-----------------
+   1 | update_block | amin   | api    |              1 | t
+   0 | write        | amin   | api    |             13 | t
+(2 rows)</code></pre>
+    </div>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Column</th><th scope="col">Means</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>seq</code></td>
+            <td>per-note counter from 0. Usable directly as a time-travel
+                argument: <code>read_as_of(path, 0::bigint)</code>.</td></tr>
+        <tr><td><code>verb</code></td>
+            <td>which operation wrote it. <code>append_to_section</code> records
+                <code>insert_blocks</code>, because it resolves the anchor and
+                then delegates.</td></tr>
+        <tr><td><code>author</code></td>
+            <td>the writer's own claim, from the <code>pgmind.author</code> GUC;
+                <code>current_user</code> when the GUC is unset. It is never
+                verified — see below.</td></tr>
+        <tr><td><code>source</code></td>
+            <td><code>'api'</code> for every shipped operation.
+                <code>'sync'</code> and <code>'rebind'</code> are reserved for
+                the file bridge and the rebinder.</td></tr>
+        <tr><td><code>blocks_changed</code></td>
+            <td>how many block-level effects this revision recorded.</td></tr>
+        <tr><td><code>reconstructable</code></td>
+            <td>whether this revision can still be reconstructed. It is exactly
+                <code>seq</code> &ge; the note's history floor, and nothing else
+                makes it false. Only <code>pgmind.retain</code> raises that
+                floor; <code>pgmind.excise</code> redacts payloads in place and
+                leaves it alone, so an excised revision still reads as
+                reconstructable and reconstructs with a redaction marker where
+                the erased text was.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      <code>pgmind.author</code> is a plain string, capped at 200 characters
+      (<code>PM017</code> above that). Any session that can write can claim any
+      author. Dressing that up — a registry, a required prefix, a foreign key to
+      a principals table — would make an unverified claim look verified, which is
+      worse than a string. Treat it as a label for your own audit trail, and put
+      real authorization in grants and RLS.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SET pgmind.author = 'agent:indexer';
+
+SELECT knowledge.write('daily/2026-08-06', $md$# 2026-08-06
+
+## Log
+
+Reviewed the rotation window with [[people/ada]]. #decision
+
+Rotated the signing key. #decision
+$md$);
+
+RESET pgmind.author;
+
+SELECT seq, verb, author, source, blocks_changed
+  FROM knowledge.history('daily/2026-08-06');</code></pre>
+<pre class="out"><code class="out"> seq | verb  |    author     | source | blocks_changed
+-----+-------+---------------+--------+----------------
+   1 | write | agent:indexer | api    |              1
+   0 | write | amin          | api    |              3
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      <code>knowledge.blame()</code> answers the per-block version of the same
+      question, and adds two columns worth knowing about.
+      <code>confidence</code> is NULL when the block's identity was carried
+      deterministically — by an exact hash match, by an <code>^id</code> claim,
+      or by an explicit block operation — and carries a score between 0 and 1
+      when it was <em>inferred</em> by the rebinder. <code>history_floor</code>
+      is the oldest <code>seq</code> still reconstructable for this note.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, author, source, confidence, history_floor
+  FROM knowledge.blame('projects/auth') WHERE ord IN (11, 12) ORDER BY ord;</code></pre>
+<pre class="out"><code class="out"> ord | author | source | confidence | history_floor
+-----+--------+--------+------------+---------------
+  11 | amin   | api    |            |             0
+  12 | amin   | api    |            |             0
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      Time travel reads a note, or its blocks, as of a revision id, a
+      <code>seq</code>, or (for <code>read_as_of</code> only) a timestamp. Block
+      ids are stable across time, which is what makes a citation of the form
+      <code>path#block @ revision</code> resolvable years later:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, block_id, content
+  FROM knowledge.blocks_as_of('projects/auth', 0::bigint) WHERE ord = 12;
+
+SELECT change, before, after
+  FROM knowledge.diff('projects/auth',
+         (SELECT revision FROM knowledge.history('projects/auth') WHERE seq = 0),
+         (SELECT revision FROM knowledge.history('projects/auth') WHERE seq = 1));</code></pre>
+<pre class="out"><code class="out"> ord |               block_id               |           content
+-----+--------------------------------------+-----------------------------
+  12 | 019fd630-bc5a-…                      | Migrated the session store.
+(1 row)
+
+ change  |           before            |            after
+---------+-----------------------------+------------------------------
+ changed | Migrated the session store. | Rotated the signing key too.
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Same id at <code>seq&nbsp;0</code> as at head, different content. History
+      is stored as pre-images rather than snapshots, so old revisions cost
+      roughly a fifth of current state rather than a copy of it; the
+      reconstruction algorithm and the frame cadence are in
+      <a href="internals.html#history">Internals</a>.
+    </p>
+
+    <h2 id="vaults">Vaults and tenancy</h2>
+    <p>
+      A vault is one <code>uuid</code> column on every row, selected by the
+      <code>pgmind.vault_id</code> GUC. Every function in
+      <code>knowledge</code> filters by it. Paths are unique per vault, so two
+      tenants can each own <code>projects/auth</code>:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SHOW pgmind.vault_id;
+
+SET pgmind.vault_id = '3f2a0000-0000-0000-0000-000000000001';
+SELECT count(*) AS notes_visible FROM knowledge.notes();
+
+SELECT knowledge.write('projects/auth', $md$# Auth, in another tenant$md$);
+SELECT path, title FROM knowledge.notes();
+
+RESET pgmind.vault_id;
+SELECT count(*) AS notes_visible FROM knowledge.notes();</code></pre>
+<pre class="out"><code class="out">           pgmind.vault_id
+--------------------------------------
+ 00000000-0000-0000-0000-000000000000
+(1 row)
+
+ notes_visible
+---------------
+             0
+(1 row)
+
+     path      | title
+---------------+-------
+ projects/auth | auth
+(1 row)
+
+ notes_visible
+---------------
+             7
+(1 row)</code></pre>
+    </div>
+
+    <div class="note-box warn">
+      <span class="lbl">The GUC scopes; it does not defend</span>
+      <p>
+        <code>SET pgmind.vault_id</code> is <code>USERSET</code>. Any session
+        that can run SQL can set it to any value and read that tenant's notes.
+        The actual boundary is <code>pgmind.enable_vault_rls()</code> plus the
+        grants you give your application role; the GUC then selects which
+        policy-permitted vault you are working in. In a connection pool use
+        <code>SET LOCAL</code> inside the transaction, or the next borrower
+        inherits your tenant. <a href="cookbook.html#tenancy">Recipes</a>.
+      </p>
+    </div>
+
+    <p>
+      A malformed <code>pgmind.vault_id</code> is <code>PM001</code>, not a
+      silent fallback to the nil uuid.
+    </p>
+
+    <div class="note-box">
+      <span class="lbl">The GUCs do not exist until the library loads</span>
+      <p>
+        In a fresh session <code>SHOW pgmind.frame_every</code> fails with
+        <em>unrecognized configuration parameter</em>. Call any pgmind function
+        first — or <code>LOAD 'pgmind';</code> — and all four settings
+        (<code>vault_id</code>, <code>author</code>, <code>frame_every</code>,
+        <code>max_document_bytes</code>) appear. <code>SET</code> works before
+        the load, because PostgreSQL accepts a placeholder, and the value is
+        honoured once the library initializes.
+      </p>
+    </div>
+
+    <h2 id="errors">Errors</h2>
+    <p>
+      pgmind raises errors in SQLSTATE class <code>PM</code>. Every one carries
+      a message, and a <code>DETAIL</code> line naming the condition and the
+      offending value. Agents are expected to repair by re-reading, never by
+      forcing.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Code</th><th scope="col">Condition</th>
+          <th scope="col">Raised when</th><th scope="col">What to do</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td><code>PM001</code></td><td><code>pgmind_invalid_path</code></td>
+            <td>a path fails the grammar after normalization; also a bad
+                <code>notes()</code> glob or a malformed
+                <code>pgmind.vault_id</code></td>
+            <td>run <code>pgmind.path_normalize</code>, check with
+                <code>pgmind.path_is_valid</code>, retry</td></tr>
+        <tr><td><code>PM002</code></td><td><code>pgmind_note_not_found</code></td>
+            <td>no live note at that path in this vault</td>
+            <td>check the path and the vault GUC; create the note. Reads of a
+                <em>syntactically invalid</em> path report this rather than
+                PM001</td></tr>
+        <tr><td><code>PM003</code></td><td><code>pgmind_block_not_found</code></td>
+            <td>block uuid absent, in another vault, or a <code>merge</code>
+                <code>keep</code> outside the set</td>
+            <td>re-read <code>knowledge.blocks()</code>; ids do not survive
+                their note</td></tr>
+        <tr><td><code>PM004</code></td><td><code>pgmind_fragment_arity</code></td>
+            <td>the fragment parsed to the wrong number of top-level blocks</td>
+            <td><code>update_block</code> and <code>merge_blocks</code> want
+                exactly one; <code>split_block</code> wants two or more</td></tr>
+        <tr><td><code>PM005</code></td><td><code>pgmind_invalid_anchor</code></td>
+            <td><code>before</code> and <code>after</code> both given, or the
+                anchor is not a legal v1 position</td>
+            <td>give one or neither — neither appends after the last top-level
+                block</td></tr>
+        <tr><td><code>PM006</code></td><td><code>pgmind_container_constraint</code></td>
+            <td>a v1 structural limit: non-contiguous merge set, cross-container
+                move, container children in a fragment</td>
+            <td>restructure the edit, or rewrite the note with
+                <code>write()</code></td></tr>
+        <tr><td><code>PM007</code></td><td><code>pgmind_section_not_found</code></td>
+            <td>the heading path matched nothing</td>
+            <td>read the real heading paths from
+                <code>knowledge.blocks()</code></td></tr>
+        <tr><td><code>PM008</code></td><td><code>pgmind_splice_restructures</code></td>
+            <td>the spliced note re-parses differently outside the fragment —
+                an unclosed fence or HTML block swallowing its neighbours</td>
+            <td>close the construct in the fragment, or rewrite the note</td></tr>
+        <tr><td><code>PM009</code></td><td><code>pgmind_stale_head</code></td>
+            <td><code>expected_head</code> is not the note's current head, or
+                there is no live note to compare against</td>
+            <td>re-read, re-derive the edit, retry. This is the ordinary
+                optimistic-concurrency outcome</td></tr>
+        <tr><td><code>PM010</code></td><td><code>pgmind_unknown_revision</code></td>
+            <td>that revision uuid is not this note's</td>
+            <td>a client bug — check where the id came from</td></tr>
+        <tr><td><code>PM011</code></td><td><code>pgmind_history_unavailable</code></td>
+            <td>the revision is below the retention floor, or no revision exists
+                at or before that time</td>
+            <td>nothing: the data was retained or excised away. Opposite meaning
+                to PM010</td></tr>
+        <tr><td><code>PM012</code></td><td><code>pgmind_excision_refused</code></td>
+            <td>the excision target is still live at head</td>
+            <td>pass <code>and_head =&gt; true</code>, or remove the content
+                first</td></tr>
+        <tr><td><code>PM013</code></td><td><code>pgmind_excision_incomplete</code></td>
+            <td>in-transaction verification found residue after erasing</td>
+            <td>nothing to retry — the transaction aborted and erased nothing.
+                Report it</td></tr>
+        <tr><td><code>PM014</code></td><td><code>pgmind_note_tombstoned</code></td>
+            <td>the note was deleted by a concurrent transaction</td>
+            <td>re-read; <code>undelete_note</code> if you want it back</td></tr>
+        <tr><td><code>PM015</code></td><td><code>pgmind_path_taken</code></td>
+            <td>a live note already occupies the destination path</td>
+            <td>pick another path, or delete the occupant first</td></tr>
+        <tr><td><code>PM016</code></td><td><code>pgmind_stale_block</code></td>
+            <td><code>expected_hash</code> is not the block's current content
+                hash</td>
+            <td>re-read the block. Unlike PM009 this fires only when
+                <em>your</em> block changed</td></tr>
+        <tr><td><code>PM017</code></td><td><code>pgmind_invalid_author</code></td>
+            <td><code>pgmind.author</code> is longer than 200 characters</td>
+            <td>shorten it</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      Here is what four of them actually look like. Every PM error arrives with
+      the same <code>CONTEXT</code> line, because custom SQLSTATEs are raised
+      through a plpgsql helper; it is shown once and elided afterwards.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('/bad/', $md$# x$md$);</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: invalid note path
+DETAIL:  pgmind_invalid_path — path "/bad/"
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE
+SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read('/bad/');
+SELECT knowledge.read_section('projects/auth', ARRAY['Nope']);</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: note not found
+DETAIL:  pgmind_note_not_found — path "/bad/"
+
+ERROR:  pgmind: section not found
+DETAIL:  pgmind_section_not_found — heading path ["Nope"] in note "projects/auth"</code></pre>
+    </div>
+
+    <p>
+      Note the first one: reading a path that could never be legal reports
+      <em>not found</em>, not <em>invalid</em>. The read path looks the note up
+      rather than validating first, so PM001 is a write-side answer.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', $md$# Auth$md$,
+       expected_head =&gt; '00000000-0000-0000-0000-000000000000');</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: expected_head is not the note's current head
+DETAIL:  pgmind_stale_head — note projects/auth: expected 00000000-…, head is 019fd630-bcb5-…</code></pre>
+    </div>
+
+    <p>
+      Catch them the way you catch any SQLSTATE — <code>WHEN sqlstate
+      'PM009'</code> in plpgsql, or by reading <code>e.sqlstate</code> in a
+      client library. pgmind never raises a serialization failure (40001) and
+      never retries internally; the retry policy is yours.
+    </p>
+
+    <h2 id="edges">Sharp edges</h2>
+    <p>
+      Everything here is real, reachable from SQL, and surprises people. The
+      operational traps — the double-evaluation trap, appending to a
+      list-terminated section, concurrent writers — live in
+      <a href="cookbook.html#sharp-edges">the cookbook</a>. These are the ones
+      about <em>meaning</em>.
+    </p>
+
+    <h3 id="edge-heading-path"><code>heading_path</code> is not unique</h3>
+    <p>
+      Two sibling headings may share text. <code>read_section</code> and
+      <code>append_to_section</code> take the first match in document order,
+      silently. <a href="#duplicate-sections">Shown above.</a>
+    </p>
+
+    <h3 id="edge-paths">Paths are case-sensitive, and NFC</h3>
+    <p>
+      <code>Projects/Auth</code> and <code>projects/auth</code> are two notes,
+      and a glob for one will not match the other. Meanwhile a path typed in NFD
+      is normalized on write but rejected by <code>path_is_valid</code> as
+      given — the two functions do different jobs on purpose.
+      <a href="#paths">Shown above.</a>
+    </p>
+
+    <h3 id="edge-titles"><code>notes().title</code> is the basename</h3>
+    <p>
+      It is the path's last segment, not the frontmatter <code>title</code>. The
+      frontmatter value is in <code>properties</code>, where you can query it
+      with the rest of them:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, title, properties-&gt;&gt;'title' AS frontmatter_title
+  FROM knowledge.notes('projects/*');</code></pre>
+<pre class="out"><code class="out">     path      | title | frontmatter_title
+---------------+-------+-------------------
+ projects/auth | auth  | Auth
+(1 row)</code></pre>
+    </div>
+
+    <h3 id="edge-tags">Tags group case-insensitively</h3>
+    <p>
+      Tags are stored exactly as typed, but the index groups by
+      <code>lower(tag)</code> and reports the lexicographically smallest
+      spelling. <code>#Decision</code> and <code>#decision</code> are one row in
+      <code>knowledge.tags()</code>, and <code>tagged()</code> matches either
+      spelling from either query:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, tag FROM knowledge.tagged('DECISION');
+
+SELECT tag, notes, blocks FROM knowledge.tags();</code></pre>
+<pre class="out"><code class="out">       path       |   tag
+------------------+----------
+ daily/2026-08-06 | decision
+ daily/2026-08-06 | decision
+ projects/auth    | decision
+ rfc/auth-01      | decision
+(4 rows)
+
+     tag      | notes | blocks
+--------------+-------+--------
+ active       |     1 |      0
+ architecture |     2 |      2
+ decision     |     3 |      4
+ person       |     1 |      1
+ runbook      |     1 |      0
+(5 rows)</code></pre>
+    </div>
+
+    <p>
+      <code>blocks</code> is zero for <code>active</code> and
+      <code>runbook</code> because those came from frontmatter: a note-level tag
+      has no block. So <code>notes</code> and <code>blocks</code> are not two
+      views of the same number, and neither of them is
+      <code>stats().tags</code>, which counts raw tag rows — 10 by this point in
+      the page, the 7 block-level rows above plus 3 note-level ones, for 5
+      distinct tags.
+    </p>
+
+    <h3 id="edge-orphans"><code>orphans()</code> ignores self-links and dangling edges</h3>
+    <p>
+      An orphan is a live note with no inbound edge <em>from another note</em>.
+      Linking to yourself does not rescue you, and being the target of a
+      dangling link does not either, since a dangling edge resolves to no note
+      at all. In the demo vault only the hub is an orphan — it links to
+      everything and nothing links back to it:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.orphans();</code></pre>
+<pre class="out"><code class="out"> path
+-------
+ index
+(1 row)</code></pre>
+    </div>
+
+    <h3 id="edge-rewrite">A whole-note rewrite runs the rebinder</h3>
+    <p>
+      Block operations assert identity: <code>update_block</code> keeps the id
+      because you said so. <code>write()</code> cannot be told, so it works the
+      identity out. Two deterministic passes run first — <code>^id</code> claims,
+      then exact-hash matches within the same section and then anywhere — and
+      whatever they cannot match is handed to a similarity aligner, which carries
+      ids with a <em>confidence score</em> instead of certainty.
+    </p>
+    <p>
+      This example rewrites the whole of <code>projects/auth</code> with one
+      sentence changed. The paragraph's id survives, with a score:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', $md$---
+title: Auth
+tags: [architecture, active]
+owner: platform
+---
+
+# Auth
+
+The service that issues and rotates credentials. Owned by [[people/ada]].
+
+## Decisions
+
+- [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
+- Refresh tokens rotate every 24h #decision ^rotation
+- Access tokens live 15 minutes, no exceptions
+
+## Runbook
+
+Key rotation is [[runbooks/rotate-keys|documented separately]].
+
+## Log
+
+Rotated the signing key and the refresh secret.
+$md$);
+
+SELECT b.block_id, bl.confidence, left(encode(b.content_hash,'hex'), 12) AS hash
+  FROM knowledge.blocks('projects/auth') b
+  JOIN knowledge.blame('projects/auth') bl USING (block_id)
+ WHERE b.heading_path = ARRAY['Auth','Log'];</code></pre>
+<pre class="out"><code class="out">               block_id               | confidence |     hash
+--------------------------------------+------------+--------------
+ 019fd630-bc5a-…                      |  0.5833333 | 089cc9ae1e3c
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Same id as the block in <a href="#identity">Identity</a> — carried, not
+      minted — with a new hash and a confidence of 0.58. Measured over the
+      published edit corpus the aligner recovers 19 of 23 inferred bindings at
+      recall 0.951 and precision 0.980, and it produces no mis-binding of its
+      own beyond one genuinely undecidable duplicate case
+      (<a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published">rebinding-v2</a>).
+      That is good, and it is not a guarantee. If a block's identity must
+      survive an external round trip, give it an <code>^id</code> marker or edit
+      it with a block operation; those two are deterministic, and everything
+      else is a score you can read in <code>blame()</code>.
+    </p>
+
+    <nav class="page-nav" aria-label="Page">
+      <a href="quickstart.html">
+        <span>Previous</span>
+        Quick start
+      </a>
+      <a class="next" href="internals.html">
+        <span>Next</span>
+        Internals
+      </a>
+    </nav>
+  </main>
+
+  <aside class="docs-toc" aria-label="On this page"><nav id="toc"></nav></aside>
+</div>
+
+<footer class="site-foot">
+  <div class="foot-inner">
+    <p><b>pgmind</b>: files hold notes, PostgreSQL holds the brain.</p>
+    <p class="foot-links">
+      <a href="../">Overview</a>
+      <a href="https://github.com/MarosiLabs/pgmind">Repository</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/LICENSE">PostgreSQL License</a>
+    </p>
+  </div>
+</footer>
+
+<script src="docs.js" defer></script>
+</body>
+</html>

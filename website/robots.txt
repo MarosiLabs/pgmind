@@ -1,0 +1,12 @@
+# pgmind — https://marosilabs.github.io/pgmind/
+#
+# Crawlers only read robots.txt from a host root, and this file is served at
+# /pgmind/robots.txt because the site is a GitHub Pages *project* page. It is
+# therefore advisory today and becomes authoritative the moment the site moves
+# to its own domain. The <meta name="robots"> tag in index.html is what
+# actually governs indexing in the meantime.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://marosilabs.github.io/pgmind/sitemap.xml

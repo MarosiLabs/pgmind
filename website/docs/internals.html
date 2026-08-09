@@ -1,0 +1,2304 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Internals · pgmind manual</title>
+<meta name="description" content="How pgmind actually works: the two storage lanes, the eleven tables, the write path step by step, identity carry and heuristic rebinding, the history engine, locking, erasure, and the published capacity numbers.">
+<link rel="canonical" href="https://marosilabs.github.io/pgmind/docs/internals.html">
+<meta name="author" content="Marosi Labs">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+
+<meta name="theme-color" content="#0a0c10">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="../assets/favicon.png" type="image/png" sizes="180x180">
+<link rel="apple-touch-icon" href="../assets/favicon.png">
+<link rel="stylesheet" href="docs.css">
+
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="pgmind">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://marosilabs.github.io/pgmind/docs/internals.html">
+<meta property="og:title" content="Internals · pgmind manual">
+<meta property="og:description" content="Two storage lanes, eleven tables, the write path in fourteen steps, identity carry, rebinding, the history engine, locking, and audited erasure — every claim cited to a file or an RFC decision.">
+<meta property="og:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Internals · pgmind manual">
+<meta name="twitter:description" content="How pgmind stores, versions, locks and erases a markdown vault — cited to the source.">
+<meta name="twitter:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+</head>
+<body>
+
+<a class="skip" href="#doc">Skip to content</a>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="gh" viewBox="0 0 16 16">
+    <path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27s-1.36.09-2 .27c-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/>
+  </symbol>
+  <symbol id="copy" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"
+          d="M5.7 5.7h7.1v7.1H5.7zM10.3 5.7V3.2H3.2v7.1h2.5"/>
+  </symbol>
+  <symbol id="check" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"
+          stroke-linejoin="round" d="m3.4 8.4 3 3 6.2-7"/>
+  </symbol>
+  <symbol id="menu" viewBox="0 0 16 16">
+    <path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+          d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
+  </symbol>
+</svg>
+
+<header class="site-head">
+  <div class="head-inner">
+    <button class="side-toggle" type="button" aria-expanded="false" aria-controls="side" aria-label="Navigation">
+      <svg width="16" height="16" aria-hidden="true"><use href="#menu"/></svg>
+    </button>
+    <a class="brand" href="../" aria-label="pgmind home">
+      <img src="../assets/mark.png" alt="" width="28" height="24">
+      <span><b>pg</b>mind</span>
+      <span class="in">manual</span>
+    </a>
+    <nav class="head-nav">
+      <a href="../">Overview</a>
+      <a href="quickstart.html">Quick start</a>
+      <a class="icon-link" href="https://github.com/MarosiLabs/pgmind" aria-label="Repository on GitHub">
+        <svg width="18" height="18" aria-hidden="true"><use href="#gh"/></svg>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<div class="docs-shell">
+
+  <aside class="docs-side" id="side">
+    <nav aria-label="Manual">
+      <h2>Start</h2>
+      <ul>
+        <li><a href="index.html">The manual</a></li>
+        <li><a href="quickstart.html">Quick start</a></li>
+      </ul>
+
+      <h2>Learn</h2>
+      <ul>
+        <li><a href="concepts.html">Concepts</a></li>
+        <li><a href="internals.html">Internals</a></li>
+      </ul>
+
+      <h2>Look up</h2>
+      <ul>
+        <li><a href="sql.html">SQL reference</a></li>
+        <li><a href="cookbook.html">Cookbook</a></li>
+      </ul>
+
+      <h2>Elsewhere</h2>
+      <ul>
+        <li><a href="https://github.com/MarosiLabs/pgmind">Repository</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">RFCs</a></li>
+        <li><a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published">Benchmarks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="docs-main" id="doc">
+    <p class="crumbs"><a href="index.html">Manual</a> / Internals</p>
+    <h1>Internals</h1>
+    <p class="lede">
+      How pgmind stores a vault, how a write becomes rows, how identity survives
+      an edit, what history costs, what two writers do to each other, and what
+      happens when you have to erase something. This page is for deciding
+      whether to trust it, so every non-obvious claim names the file or the RFC
+      decision it comes from.
+    </p>
+
+    <div class="note-box">
+      <span class="lbl">How to read the citations</span>
+      <p>
+        <code>extension/src/write.rs:899</code> is a line in this repository at
+        the commit this manual was written against; line numbers drift, the
+        function names do not. <code>RFC-005 D5.2</code> is a numbered decision
+        in an <a href="https://github.com/MarosiLabs/pgmind/tree/main/docs/rfcs">accepted RFC</a>.
+        Where an RFC and the code disagree, this page documents the
+        <strong>code</strong> and says that it does.
+      </p>
+    </div>
+
+    <div class="note-box warn">
+      <span class="lbl">What this page shows you</span>
+      <p>
+        Several examples below read and write <code>pgmind.*</code> tables
+        directly. That is <em>admin reach</em> — Law&nbsp;11 permits it for
+        debugging and operations, and forbids building on it. Direct DML into
+        <code>pgmind.*</code> bypasses every maintenance path on this page and is
+        unsupported; <code>pgmind.verify_note()</code> exists to detect it.
+        Everything an application should depend on lives in
+        <a href="sql.html"><code>knowledge.*</code></a>.
+      </p>
+    </div>
+
+    <h2 id="laws">The eleven laws</h2>
+    <p>
+      The <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">handbook</a>
+      §6.2 states eleven architecture laws — constraints, not preferences. An RFC
+      that violates one has to say so in its title. Most of the design decisions
+      further down this page are downstream of one of them, so here they are with
+      the thing each one <em>forbids</em>, which is the part that actually binds.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Law</th><th scope="col">What it forbids</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><b>1. AI-free core</b></td>
+            <td>Any model invocation anywhere in the extension or the tools. No
+                embedding is computed here, no summary, no extraction. External
+                enrichment gets hook tables, not a home.</td></tr>
+        <tr><td><b>2. No synchronous network I/O</b></td>
+            <td>Opening a socket inside a transaction or an API call — including
+                to resolve a link, check a URL, or call an embedding service on
+                write.</td></tr>
+        <tr><td><b>3. Markdown is a boundary</b></td>
+            <td>Storing a parsed AST as the system of record. The record is
+                per-block relational rows; the AST is transient.</td></tr>
+        <tr><td><b>4. Parsing yields structure, not identity</b></td>
+            <td>Deriving a block's id from its content. The parser produces
+                kinds, hashes and positions; the write path mints identity.</td></tr>
+        <tr><td><b>5. IDs and hashes are different things</b></td>
+            <td>Collapsing the two. The id answers "same block"; the hash answers
+                "same bytes", and it is what lets an embedding pipeline skip an
+                unchanged block.</td></tr>
+        <tr><td><b>6. Compose with incumbents</b></td>
+            <td>A bespoke vector index or search engine inside pgmind. pgvector
+                and PostgreSQL FTS already exist.</td></tr>
+        <tr><td><b>7. Incremental maintenance only</b></td>
+            <td>Any operation that rebuilds the link graph or the tag index for
+                the whole vault. Edits update from block diffs.</td></tr>
+        <tr><td><b>8. Append-only with audited excision</b></td>
+            <td>An unlogged deletion of history, and any background job that
+                deletes when nobody is watching.</td></tr>
+        <tr><td><b>9. Feel like PostgreSQL — and like a vault</b></td>
+            <td>Triggers, rules and hidden behaviour; ontology jargon where
+                "note", "link" and "tag" would do.</td></tr>
+        <tr><td><b>10. <code>context()</code> is a mode, not a monopoly</b></td>
+            <td>A planner primitive reachable only through the one big function.
+                <span class="badge next">Phase 5</span></td></tr>
+        <tr><td><b>11. Layers by contract, not by wall</b></td>
+            <td>A public API depending on undocumented internals — and an
+                admin/debug interface that reaches deeper without being marked as
+                one. That is why the <code>pgmind</code> schema exists and why
+                this page labels it.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2 id="lanes">Two lanes</h2>
+    <p>
+      A note is stored twice, in two lanes that answer different questions
+      (RFC-003 D2).
+    </p>
+    <ul>
+      <li>The <strong>byte lane</strong> is <code>note.preamble</code> plus an
+          ordered array of <code>tile</code> rows. A <em>tile</em> is one
+          top-level child of the document — a heading, a paragraph, an entire
+          list, an entire table. Concatenating the preamble and the tiles in
+          <code>ord</code> order reproduces the source byte for byte. That
+          concatenation is the <code>source_of()</code> invariant
+          (<code>extension/src/store.rs:220</code>), and it is what
+          <code>knowledge.read()</code> returns.</li>
+      <li>The <strong>semantic lane</strong> is one <code>block</code> row per
+          addressable block, with its kind, normalised content, BLAKE3 content
+          hash, <code>heading_path</code>, parent, and its position expressed
+          <em>relative to its tile</em> (<code>tile_ord</code>,
+          <code>start_in_tile</code>, <code>end_in_tile</code>).</li>
+    </ul>
+    <p>
+      Tile-relative spans are the reason an edit is cheap: editing one paragraph
+      rewrites one tile's bytes and leaves every other tile's stored text —
+      and every other block's stored span — untouched. Absolute offsets would
+      make every block after an edit dirty.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT t.ord, length(t.raw) AS bytes,
+       (SELECT count(*) FROM pgmind.block b
+         WHERE b.note_id = t.note_id AND b.tile_ord = t.ord) AS blocks,
+       left(regexp_replace(t.raw, E'\n', '/', 'g'), 34) AS starts_with
+  FROM pgmind.tile t JOIN pgmind.note n ON n.id = t.note_id
+ WHERE n.path = 'projects/auth' ORDER BY t.ord;</code></pre>
+<pre class="out"><code class="out"> ord | bytes | blocks |            starts_with
+-----+-------+--------+------------------------------------
+   0 |     8 |      1 | # Auth//
+   1 |    75 |      1 | The service that issues and rotate
+   2 |    14 |      1 | ## Decisions//
+   3 |   171 |      6 | - [[oauth2]] over server sessions,
+   4 |    12 |      1 | ## Runbook//
+   5 |    65 |      1 | Key rotation is [[runbooks/rotate-
+   6 |     8 |      1 | ## Log//
+   7 |    28 |      1 | Migrated the session store./
+(8 rows)</code></pre>
+    </div>
+
+    <p>
+      Eight tiles, thirteen blocks. Tile 3 is the entire Decisions list and holds
+      six of them — three <code>list_item</code> rows and the three
+      <code>paragraph</code> rows nested inside them. The two lanes are not two
+      copies of the same shape; they are two different decompositions of the same
+      bytes, and the invariant that joins them is exact:
+    </p>
+
+    <div class="code">
+<pre><code class="sql">SELECT n.preamble || string_agg(t.raw, '' ORDER BY t.ord)
+       = knowledge.read('projects/auth')::text AS byte_exact
+  FROM pgmind.note n JOIN pgmind.tile t ON t.note_id = n.id
+ WHERE n.path = 'projects/auth' GROUP BY n.preamble;</code></pre>
+<pre class="out"><code class="out"> byte_exact
+------------
+ t
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      There is a third lane in the schema, and it is deliberately not part of
+      this pair: <strong>history stores pre-images</strong>, in its own tables,
+      and current state never reads them. A note at head costs exactly what it
+      would cost with no versioning at all — the head read in the published
+      capacity run is 0.33&nbsp;ms p95 whether the note has one revision or
+      twenty-five. See <a href="#history">the history engine</a>.
+    </p>
+
+    <h2 id="schema">The storage schema</h2>
+    <p>
+      Eleven tables in schema <code>pgmind</code>, created in one
+      <code>extension_sql!</code> block (<code>extension/src/schema.rs</code>).
+      Creation order is FK-topological and load-bearing in two separate
+      places — the RLS lock order and the write path's own statement order — so
+      the list below is in <code>pg_class.oid</code> order, not alphabetical.
+      It does <em>not</em> determine dump ordering — <code>pg_dump</code> decides
+      that for itself; see <a href="#backup">backup and restore</a>.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT c.relname AS "table", count(a.attname) AS cols,
+       (SELECT count(*) FROM pg_index i WHERE i.indrelid = c.oid) AS indexes,
+       c.oid IN (SELECT unnest(extconfig) FROM pg_extension WHERE extname = 'pgmind')
+         AS in_dump
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum &gt; 0 AND NOT a.attisdropped
+ WHERE n.nspname = 'pgmind' AND c.relkind = 'r'
+ GROUP BY c.oid, c.relname ORDER BY c.oid;</code></pre>
+<pre class="out"><code class="out">      table      | cols | indexes | in_dump
+-----------------+------+---------+---------
+ note            |   10 |       4 | t
+ revision        |   11 |       5 | t
+ tile            |    4 |       2 | t
+ block           |   15 |       6 | t
+ edge            |   12 |       5 | t
+ tag             |    5 |       4 | t
+ note_revision   |   15 |       4 | t
+ block_revision  |   14 |       3 | t
+ note_frame      |   15 |       3 | t
+ excision_log    |   10 |       1 | t
+ excision_replay |    2 |       1 | f
+(11 rows)</code></pre>
+    </div>
+
+    <h3 id="tables">What each table holds</h3>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Table</th><th scope="col">Role, and the columns that carry the design</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>note</code></td>
+          <td>The vault namespace. <code>path</code> with a
+              <code>CHECK (pgmind.path_is_valid(path))</code> backstop;
+              <code>basename</code> is a <code>STORED</code> generated column so
+              basename link resolution is an index lookup;
+              <code>preamble</code> and <code>properties</code> are the byte lane's
+              head; <code>head_revision</code>; <code>tombstoned_at</code>;
+              <code>history_floor</code> (RFC-005 D3) — the oldest
+              <code>seq</code> still reconstructable.</td>
+        </tr>
+        <tr>
+          <td><code>revision</code></td>
+          <td>Append-only. <code>seq</code> is per-note, dense and ascending,
+              assigned under the note row lock — it is what makes "before" a
+              total order without trusting clocks, since two revisions written in
+              one transaction share <code>created_at</code>. <code>verb</code> is
+              a <code>CHECK</code>-constrained enum of the twelve operation names,
+              so <code>knowledge.history()</code> is readable without
+              reconstructing anything. <code>source</code> is
+              <code>'api' | 'sync' | 'rebind'</code>; today every shipped
+              operation writes <code>'api'</code>.</td>
+        </tr>
+        <tr>
+          <td><code>tile</code></td>
+          <td>The byte lane. <code>(note_id, ord)</code> primary key, declared
+              <code>DEFERRABLE INITIALLY DEFERRED</code> so a reconcile may shuffle
+              positions inside one statement.</td>
+        </tr>
+        <tr>
+          <td><code>block</code></td>
+          <td>The semantic lane. <code>content_hash bytea CHECK
+              (octet_length(...) = 32)</code>; <code>block_ref_id</code> for
+              <code>^id</code> markers; the three tile-relative placement columns;
+              <code>attrs jsonb</code>. <code>block_note_ord</code> is
+              <code>UNIQUE (note_id, ord) DEFERRABLE INITIALLY DEFERRED</code>,
+              for the same reason as <code>tile</code>.</td>
+        </tr>
+        <tr>
+          <td><code>edge</code></td>
+          <td>One row per extracted reference. Two <code>CHECK</code> constraints
+              make the resolution state a closed set:
+              <code>(dst_note IS NULL) = (dangling_reason IS NOT NULL)</code> and
+              <code>(dst_note IS NULL) = (resolved_via IS NULL)</code>. A dangling
+              link is a first-class row, never a missing one.</td>
+        </tr>
+        <tr>
+          <td><code>tag</code></td>
+          <td>Note-level tags (from frontmatter) have <code>block_id IS
+              NULL</code>; inline tags carry their block.</td>
+        </tr>
+        <tr>
+          <td><code>note_revision</code></td>
+          <td>History H1 — one row per revision, always. Carries the note-lane
+              pre-images and the KEEP/INS scripts for the tile and id vectors,
+              plus the changed positional slots. See
+              <a href="#history">the history engine</a>.</td>
+        </tr>
+        <tr>
+          <td><code>block_revision</code></td>
+          <td>History H2 — one row per block whose <em>content-visible</em>
+              columns changed. <code>block_id</code> deliberately has no FK: the
+              block may already be gone. <code>redacted</code> distinguishes
+              "erased" from "unchanged"; <code>bind</code> and
+              <code>confidence</code> record how identity was decided.</td>
+        </tr>
+        <tr>
+          <td><code>note_frame</code></td>
+          <td>History H3 — a periodic absolute snapshot of <em>both</em> lanes,
+              so a deep <code>as_of</code> is bounded by the cadence rather than
+              the note's depth.</td>
+        </tr>
+        <tr>
+          <td><code>excision_log</code></td>
+          <td>The audit trail Law 8 owes. Content-free by construction: only
+              <code>target_kind</code>, a reason, counts, and the verification
+              outcome.</td>
+        </tr>
+        <tr>
+          <td><code>excision_replay</code></td>
+          <td>The executable erasure target — which for the <code>literal</code>
+              and <code>path</code> forms <em>is</em> the identifying data. The
+              one table not registered for dump, and the sweep's one named
+              exception.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3 id="indexes">Indexes</h3>
+    <p>
+      Twenty-four <code>CREATE INDEX</code> statements, all in the install script
+      from <code>schema.rs:248</code> onward, none added by a migration afterwards.
+      (The <code>indexes</code> column above counts more, because it also sees
+      primary keys and unique constraints.) The ones worth knowing about:
+    </p>
+    <ul>
+      <li><code>note_live_path</code> is <code>UNIQUE (vault_id, path) WHERE
+          tombstoned_at IS NULL</code> — a partial unique index, so a tombstone
+          does not block re-creating the path, and <code>undelete_note</code> has
+          to check occupancy itself (PM015).</li>
+      <li><code>note_basename</code> and <code>note_path_prefix</code>
+          (<code>text_pattern_ops</code>) serve the two halves of link
+          resolution and glob prefix pushdown.</li>
+      <li><code>block_note_hash</code> on <code>(note_id, content_hash)</code> is
+          what makes the carry's pass-2 lookup a probe rather than a scan.</li>
+      <li><code>tag_lookup</code> is on <code>(vault_id, lower(tag))</code> —
+          tags group case-insensitively, so the index has to as well.</li>
+      <li><code>block_vault</code>, <code>revision_vault</code> and
+          <code>tile_vault</code> exist because <code>vault_id</code> is the
+          predicate on every <code>knowledge.stats()</code> count and on the RLS
+          policy. Without them <code>stats()</code> sequentially scans three
+          heaps.</li>
+      <li><code>revision_parent</code> was deferred by RFC-003 D4 by name and
+          added by RFC-005: Phase 2 had no deletion path, Phase 3 has several.</li>
+    </ul>
+
+    <h3 id="omissions">Three deliberate omissions</h3>
+    <ol>
+      <li><strong>No foreign key on <code>note.head_revision</code></strong>
+          (<code>schema.rs:59</code>). A circular note↔revision FK makes
+          <code>pg_dump</code> warn and makes a plain-<code>psql</code> restore
+          impossible. The constraint is real; it is enforced by
+          <code>pgmind.verify_note()</code> instead of by the catalog, which is a
+          trade the RFC states rather than hides.</li>
+      <li><strong><code>NO ACTION</code>, not <code>CASCADE</code>, on
+          <code>block.parent_block</code></strong> (<code>schema.rs:106</code>).
+          A wrong reconcile order then fails loudly instead of quietly cascading
+          away carried children. The write path's INSERT/UPDATE-before-DELETE
+          rule (<a href="#write-path">step 11</a>) is what keeps it from
+          firing.</li>
+      <li><strong>No partitioning.</strong> RFC-005 D9 tested it and refused it
+          for v1: extension-script partitions vanish from <code>pg_dump</code>
+          entirely; a partitioned index on an extension-owned parent breaks plain
+          <code>psql</code> restore; and RLS on a partitioned parent is bypassed
+          by selecting from a leaf. Retention is therefore
+          <code>DELETE</code>-based, with the honest consequence that deleted
+          history returns space to the heap for reuse, not to the operating
+          system.</li>
+    </ol>
+    <p>
+      <code>lz4</code> TOAST compression is requested for the ten large text
+      columns inside a <code>DO</code> block that catches
+      <code>feature_not_supported</code> and warns. On a server without lz4 you
+      get <code>WARNING: pgmind: lz4 toast compression unavailable on this
+      server</code> at <code>CREATE EXTENSION</code>. It is a warning, not an
+      error, and everything works without it.
+    </p>
+
+    <h2 id="write-path">The write path, step by step</h2>
+    <p>
+      <code>knowledge.write()</code> is <code>write_note()</code> in
+      <code>extension/src/write.rs:899</code>. It is one function, no triggers,
+      no rules, and the order of its steps is normative — several of them are in
+      that position because putting them anywhere else produced a bug that was
+      found the hard way. Each step below says why it sits where it sits.
+    </p>
+
+    <ol>
+      <li>
+        <p><strong>Normalise and validate the path.</strong> NFC-normalise, trim,
+        then check the grammar; PM001 on failure. Normalisation comes first
+        because macOS hands out NFD and a reader that skipped this could not find
+        a note it had just written (<code>store.rs:134</code>).</p>
+      </li>
+      <li>
+        <p><strong>Take the advisory lock on <code>(vault, path)</code></strong>
+        (<code>store.rs:665</code>). This is the <em>name</em> lock, and it is a
+        different domain from the row lock in step 4. Without it, two sessions
+        racing to create the same path get a bare <code>23505</code> out of
+        <code>note_live_path</code> — an error the caller cannot act on and which
+        RFC-005 D5.8 promises never to raise.</p>
+      </li>
+      <li>
+        <p><strong>Look up the live note by path.</strong> Tombstones are filtered
+        out, so a path whose only note is deleted looks like a path with no
+        note.</p>
+      </li>
+      <li>
+        <p><strong>Take <code>FOR NO KEY UPDATE</code> on the note row</strong>
+        (<code>store.rs:581</code>). Not an advisory lock: this one blocks writers
+        without blocking readers, is released by the transaction, and shows up in
+        <code>pg_blocking_pids()</code> — which is what lets the concurrency gate
+        test interleavings without sleeping. It is taken with
+        <code>Spi::connect_mut</code> and <code>update</code>, because pgrx runs
+        SPI read-only while the transaction has no XID and
+        <code>FOR NO KEY UPDATE</code> in a read-only context is rejected outright
+        (<code>25006</code>) — which is exactly the first mutating operation in a
+        transaction.</p>
+      </li>
+      <li>
+        <p><strong>Re-read <code>path</code> and <code>head_revision</code> from
+        under the lock</strong>, and raise PM002 if the path changed. RFC-005
+        D5.2a is normative here and was <em>amended after acceptance</em>: the
+        note row lock protects the note row and nothing else. Holding it does not
+        stop another session inserting that note's tiles or updating its blocks.
+        So every value the operation depends on — both lanes' pre-image, the head,
+        the path, the floor — must be read after the lock, or the writer computes
+        a pre-image from a state its own lock never covered.</p>
+      </li>
+      <li>
+        <p><strong>Compare-and-swap</strong> (<code>store.rs:616</code>). If
+        <code>expected_head</code> is non-NULL and differs from what step 5 read,
+        raise PM009. If the path had <em>no</em> live note and
+        <code>expected_head</code> was given, raise PM009 too — a caller that
+        asserted a head is editing something, and answering with a silent create
+        makes its CAS unenforceable exactly when it matters, which is while racing
+        a concurrent delete (RFC-005 D5.6).</p>
+      </li>
+      <li>
+        <p><strong>Then</strong> the byte-identical short-circuit
+        (<code>write.rs:946</code>): if <code>preamble ‖ tiles</code> equals the
+        incoming source, return the current head and write no revision at all.
+        <strong>The order of 6 and 7 is the load-bearing part.</strong> The
+        short-circuit answers "did anything change"; CAS answers "did you see what
+        you were changing". Reordering them lets a stale writer's byte-identical
+        no-op succeed silently (RFC-005 D5.5).</p>
+      </li>
+      <li>
+        <p><strong>Parse</strong> — once, with the only parser
+        (<code>pgmind-core</code>), over the whole document. SQL never
+        re-implements it, and no read path ever re-parses.</p>
+      </li>
+      <li>
+        <p><strong>Run the identity carry</strong> (<a href="#carry">next
+        section</a>): each parsed block gets a carried or a freshly minted
+        UUID.</p>
+      </li>
+      <li>
+        <p><strong>Capture the pre-image</strong> (<code>history.rs:122</code>),
+        <em>before</em> anything is mutated. This is the whole reason the step
+        exists at this position: after reconcile runs, the bytes the pre-image
+        records are gone. RFC-005 D4 is one sentence — "before mutating a lane,
+        record its pre-image" — and it is the only ordering rule the history
+        engine has.</p>
+      </li>
+      <li>
+        <p><strong>Reconcile the lanes by set-diff</strong>
+        (<code>write.rs:506</code>), in this order:
+        <em>(a)</em> the note row's preamble and properties, guarded so an
+        unchanged note writes nothing; <em>(b)</em> tiles, by set-diff on
+        <code>(ord, raw)</code> — an unchanged tile emits no SQL at all, which is
+        the property Law 7 depends on; <em>(c)</em> <code>INSERT</code> minted
+        blocks and <code>UPDATE</code> carried ones whose stored columns actually
+        changed; <em>(d)</em> <code>DELETE</code> removed rows
+        <strong>last</strong> (<code>write.rs:699</code>).
+        The INSERT/UPDATE-before-DELETE order is normative: carried children are
+        re-parented before any parent row can disappear, and the
+        <code>NO ACTION</code> FK turns a violation into a loud error rather than
+        a silent cascade.</p>
+        <p>Each lane flushes in chunks of 2048 rows
+        (<code>write.rs:446</code>). That bound is not cosmetic:
+        <code>jsonb</code> caps a single string, and an array's element total, at
+        256&nbsp;MB−1, where a <code>text</code> datum caps at 1&nbsp;GB — so an
+        unbounded batch would have rejected documents the per-row implementation
+        stored. Unbounded columns therefore travel as <code>text[]</code>, joined
+        on ordinality, and never inside the <code>jsonb</code>. Chunking also
+        makes parse order load-bearing: a non-deferrable FK is checked at the end
+        of each <em>statement</em>, so a minted child must not land in an earlier
+        chunk than its minted parent. <code>doc.blocks</code> is pre-order, so
+        this holds by construction.</p>
+      </li>
+      <li>
+        <p><strong>Reconcile extraction</strong> — edges and tags — by set-diff on
+        natural keys, <strong>against the full new parse, never per changed
+        block</strong> (<code>write.rs:714</code>). CommonMark makes extraction
+        document-global: adding a <code>[foo]: url</code> reference definition in
+        one paragraph changes whether <code>[[foo]]</code> elsewhere is a
+        wiki-link at all. Set-diff gives Law 7's no-rebuild property without
+        pretending extraction is block-local. Every distinct new target is
+        resolved in one pass (<code>store.rs:348</code>), two queries total rather
+        than a round trip per link.</p>
+      </li>
+      <li>
+        <p><strong>Insert the revision row and swap the head</strong>
+        (<code>write.rs:396</code>), then write the H1/H2 history rows
+        (<code>history.rs:256</code>) and, when <code>seq</code> lands on the
+        cadence, an H3 frame (<code>history.rs:376</code>). H1 has a foreign key
+        to <code>revision</code>, so this has to follow the revision insert and
+        not precede it.</p>
+      </li>
+      <li>
+        <p><strong>Repair other notes' edges — last</strong>, and only on creation
+        (<code>store.rs:431</code>). A new path can promote a dangling edge to
+        resolved, or a basename match to exact, anywhere in the vault. It runs
+        last because it is the only step that touches rows belonging to
+        <em>other</em> notes, and it takes their row locks in ascending
+        <code>note.id</code> order before doing so
+        (<a href="#concurrency">see below</a>).</p>
+      </li>
+    </ol>
+
+    <p>Both halves of step 6/7 are observable. First the short-circuit:</p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/scratch', knowledge.read('notes/scratch'))
+       = (SELECT head_revision FROM pgmind.note WHERE path = 'notes/scratch')
+       AS head_unchanged,
+       (SELECT count(*) FROM pgmind.revision r JOIN pgmind.note n ON n.id = r.note_id
+         WHERE n.path = 'notes/scratch') AS revisions;</code></pre>
+<pre class="out"><code class="out"> head_unchanged | revisions
+----------------+-----------
+ t              |         1
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Same bytes in, same head out, still one revision. Now the same no-op with a
+      stale <code>expected_head</code> — CAS has already run, so it fails anyway:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('notes/scratch', knowledge.read('notes/scratch'),
+                       expected_head =&gt; '00000000-0000-0000-0000-000000000000');</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: expected_head is not the note's current head
+DETAIL:  pgmind_stale_head — note notes/scratch: expected
+         00000000-0000-0000-0000-000000000000, head is 019fd629-6785-…
+CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE</code></pre>
+    </div>
+
+    <p>
+      Every PM error arrives with that <code>CONTEXT</code> line, because pgrx's
+      error enum cannot emit custom SQLSTATEs and the extension routes them
+      through a plpgsql <code>RAISE … USING ERRCODE</code> trampoline
+      (<code>extension/src/errors.rs</code>). It is elided in the rest of this
+      page.
+    </p>
+
+    <h2 id="carry">The deterministic carry</h2>
+    <p>
+      Rewriting a whole note must not renumber it. RFC-004 A3 defines three
+      passes; <code>write.rs:164</code> is the single normative implementation,
+      shared by <code>knowledge.write()</code> and by the five block operations
+      (it used to exist twice, and the copies had already drifted on whether an
+      already-claimed holder stays claimable).
+    </p>
+    <ol>
+      <li>
+        <p><strong>Pass 1 — <code>^id</code> claims.</strong> Per marker value,
+        only the <em>lowest-ord unused</em> old holder is claimable, and only the
+        lowest-ord new claimant wins; duplicates on either side behave as
+        unmarked and fall through to pass 2. A marker is an explicit assertion by
+        the author, so it outranks content.</p>
+      </li>
+      <li>
+        <p><strong>Pass 2 — exact content match, in two tiers.</strong> Blocks are
+        paired k-th↔k-th in document order by content hash. Tier 0 requires the
+        same <code>heading_path</code>; tier 1 drops it.</p>
+        <p>The tiering is not an optimisation, it is a correctness fix. The
+        content hash covers <code>(kind, normalised content)</code> and
+        <strong>not</strong> <code>heading_path</code>. With a single untiered
+        pass, deleting a section handed its paragraph's id to an identical
+        paragraph in a surviving section while the survivor's own id was deleted
+        — an id silently changing what it points at, which RFC-004 A1 forbids.
+        Tier 1 still lets a renamed heading carry its whole section's blocks,
+        which is the case people actually hit.</p>
+      </li>
+      <li>
+        <p><strong>Pass 3 — mint and remove.</strong> Anything no pass claimed
+        mints a fresh UUIDv7; any old block nothing claimed is removed
+        (<code>write.rs:241</code>). <a href="#rebinding">Heuristic
+        rebinding</a> runs between passes 2 and 3, and only for
+        <code>knowledge.write()</code>.</p>
+      </li>
+    </ol>
+
+    <p>
+      A worked example. This rewrite of <code>projects/auth</code> does three
+      things at once: it reorders two bullets in <code>## Decisions</code>, it
+      renames <code>## Runbook</code> to <code>## Key rotation</code>, and it
+      leaves everything else alone.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', $md$---
+title: Auth
+tags: [architecture, active]
+owner: platform
+---
+
+# Auth
+
+The service that issues and rotates credentials. Owned by [[people/ada]].
+
+## Decisions
+
+- Refresh tokens rotate every 24h #decision ^rotation
+- [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
+- Access tokens live 15 minutes, no exceptions
+
+## Key rotation
+
+Key rotation is [[runbooks/rotate-keys|documented separately]].
+
+## Log
+
+Migrated the session store.
+$md$) IS NOT NULL AS wrote;</code></pre>
+<pre class="out"><code class="out"> wrote
+-------
+ t
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Now join the new blocks against their own past — <code>blocks_as_of</code>
+      at <code>seq&nbsp;0</code> is the note as the seed wrote it — on
+      <code>block_id</code>. Every row that appears is a block whose identity
+      survived:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT now.ord, now.kind, was.ord AS was_ord,
+       now.heading_path &lt;&gt; was.heading_path AS section_changed,
+       left(now.content, 26) AS content
+  FROM knowledge.blocks('projects/auth') now
+  JOIN knowledge.blocks_as_of('projects/auth', 0::bigint) was
+    ON was.block_id = now.block_id
+ ORDER BY now.ord;</code></pre>
+<pre class="out"><code class="out"> ord |   kind    | was_ord | section_changed |          content
+-----+-----------+---------+-----------------+----------------------------
+   0 | heading   |       0 | f               | # Auth
+   1 | paragraph |       1 | f               | The service that issues an
+   2 | heading   |       2 | f               | ## Decisions
+   3 | list_item |       5 | f               | Refresh tokens rotate ever
+   4 | paragraph |       6 | f               | Refresh tokens rotate ever
+   5 | list_item |       3 | f               | [[oauth2]] over server ses
+   6 | paragraph |       4 | f               | [[oauth2]] over server ses
+   7 | list_item |       7 | f               | Access tokens live 15 minu
+   8 | paragraph |       8 | f               | Access tokens live 15 minu
+  10 | paragraph |      10 | t               | Key rotation is [[runbooks
+  11 | heading   |      11 | f               | ## Log
+  12 | paragraph |      12 | f               | Migrated the session store
+(12 rows)</code></pre>
+    </div>
+
+    <p>Three things to read out of that table.</p>
+    <ul>
+      <li>Ords 3–6 moved (<code>was_ord</code> 5,6 ↔ 3,4) and kept their ids.
+          That is pass 2, tier 0: same hash, same <code>heading_path</code>,
+          paired in document order.</li>
+      <li>Ord 10 is the paragraph under the renamed heading. Its content did not
+          change but its <code>heading_path</code> did — <code>section_changed =
+          t</code>. Tier 0 could not match it; tier 1 did. Without tier 1 that
+          paragraph would have minted a new id for a heading rename it did not
+          participate in.</li>
+      <li>Ord 9 is missing from the join. That is the new
+          <code>## Key rotation</code> heading: its content changed, so its hash
+          changed, and no rule could claim it. It minted, and the old
+          <code>## Runbook</code> heading was removed.</li>
+    </ul>
+
+    <p>The revision's own bookkeeping says the same thing in three numbers:</p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT r.meta-&gt;'carried' AS carried,
+       (SELECT count(*) FROM pgmind.block_revision br
+         WHERE br.note_id = r.note_id AND br.seq = r.seq) AS effect_rows
+  FROM pgmind.revision r JOIN pgmind.note n ON n.id = r.note_id
+ WHERE n.path = 'projects/auth' AND r.seq = 1;</code></pre>
+<pre class="out"><code class="out">               carried               | effect_rows
+-------------------------------------+-------------
+ {"ref": 1, "hash": 11, "rebind": 0} |           2
+(1 row)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT br.bind, br.existed, coalesce(br.prev_content, '') AS prev_content
+  FROM pgmind.block_revision br JOIN pgmind.note n ON n.id = br.note_id
+ WHERE n.path = 'projects/auth' AND br.seq = 1 ORDER BY br.bind;</code></pre>
+<pre class="out"><code class="out">  bind  | existed | prev_content
+--------+---------+--------------
+ mint   | f       |
+ remove | t       | ## Runbook
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      One carry by marker, eleven by hash, none inferred; and the entire history
+      cost of a thirteen-block rewrite is two rows, because the eleven blocks
+      that moved did not change any content-visible column. That is
+      <a href="#history">the economics rule</a>, in the small.
+    </p>
+
+    <h2 id="rebinding">Heuristic rebinding</h2>
+    <p>
+      Deterministic carry stops where the bytes stop matching. An agent that
+      reads a note, paraphrases a sentence and writes the whole thing back has
+      changed the hash of every block it touched, and RFC-004 Part B is the layer
+      that tries to keep those blocks' identities anyway
+      (<code>extension/src/rebind.rs</code>).
+    </p>
+
+    <div class="note-box">
+      <span class="lbl">Where it runs, and where it does not</span>
+      <p>
+        Between passes 2 and 3, on the <code>knowledge.write()</code> path
+        <strong>only</strong> (<code>write.rs:296</code>). The five block
+        operations call <code>carry_scope</code> directly and never reach it: they
+        carry explicit intent, and guessing for a caller who said what it meant is
+        strictly worse than obeying it. Nothing it infers is stored as though it
+        were certain — every inferred binding writes
+        <code>block_revision.confidence</code>, and a deterministic one leaves it
+        NULL (Law 8, RFC-005 H2).
+      </p>
+    </div>
+
+    <h3 id="how-rebinding-works">The mechanism</h3>
+    <ul>
+      <li><strong>Features</strong> (<code>rebind.rs:57</code>): token unigrams
+          ∪ bigrams, lowercased, FNV-1a hashed, sorted. The draft said
+          "token-bigram Dice"; bigrams alone are unusable at the short end,
+          because a one-word fragment has none and therefore shares nothing with
+          anything. Unigrams put short and long content on one scale; bigrams keep
+          word order mattering. Sorted <code>u64</code> rather than a map of
+          strings, so multiset intersection is a linear merge with no allocation
+          per comparison — which is what makes an O(n·m) loop affordable at
+          all.</li>
+      <li><strong>Similarity</strong> (<code>rebind.rs:101</code>): Dice over the
+          feature multisets.</li>
+      <li><strong>Splits</strong> (<code>rebind.rs:148</code>): a split run is 2
+          to <code>MAX_RUN&nbsp;=&nbsp;4</code> consecutive <em>same-kind peers</em>
+          — consecutive among peers, not adjacent by <code>ord</code>, because a
+          list item is a <code>list_item</code> block <em>plus the paragraph
+          inside it</em>, so two sibling items' fragments are never adjacent on
+          either stricter reading. Both stricter readings silently never fire on
+          lists.</li>
+      <li><strong>Containment, in both directions</strong>
+          (<code>rebind.rs:111</code>). The run must cover the original, and every
+          fragment in it must itself be made of the original. One direction is not
+          enough: a moved-and-edited paragraph is "covered" by the run
+          {unrelated new paragraph, the moved one}, so a one-way rule calls that a
+          split and hands the id to a block the author had never written.</li>
+      <li><strong>Alignment</strong> (<code>rebind.rs:176</code>): maximum-weight
+          order-monotonic matching by dynamic programming. The RFC says no
+          crossing matches and does not say how ties resolve; maximising total
+          score is the reading that does not depend on iteration order.
+          Monotonicity is enforced <em>within the residual only</em> — extending
+          it to bindings the deterministic passes already made was measured and
+          refused (B5): it buys precision 0.969 → 0.989 and costs four inferred
+          bindings, every one of them a move. A rebinder that cannot follow a
+          block across a document is refusing the case it is most needed for.</li>
+    </ul>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Constant</th><th scope="col">Value</th><th scope="col">Why that value</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>TAU</code></td><td>0.5</td>
+            <td>Measured, not chosen: recall on the corpus's inferred class is flat
+                for every τ ≤ 0.5 and falls above it, so this is the highest
+                threshold that still reaches maximum recall.</td></tr>
+        <tr><td><code>TAU_SPLIT</code></td><td>0.6</td>
+            <td>Does <em>not</em> discriminate — every value from 0.3 to 0.9 gives
+                an identical corpus result, because what decides a split is the
+                two-way test, not where its threshold sits. Kept as a named
+                constant rather than advertised as a tunable nothing
+                constrains.</td></tr>
+        <tr><td><code>MAX_RUN</code></td><td>4</td>
+            <td>Beyond four consecutive fragments the scan cost grows without the
+                corpus showing anything to find.</td></tr>
+        <tr><td><code>CELL_BUDGET</code></td><td>40&nbsp;000</td>
+            <td>The O(n·m) alignment runs on the write path inside the
+                transaction, so it gets a ceiling. Over it, the whole heuristic is
+                skipped, every unmatched block mints, and the revision records
+                <code>meta.rebind = {"skipped":"budget", …}</code> — a skipped note
+                churned identity silently otherwise, and silently is the part
+                worth fixing. The residual is unmatched blocks only, so an ordinary
+                edit is orders of magnitude below it; what blows it is a large
+                document rewritten wholesale, where carrying nothing is the right
+                answer.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3 id="rebinding-in-action">In action</h3>
+    <p>
+      Splitting one bullet into two. The whole note is rewritten, so this is
+      <code>write()</code>, not <code>split_block()</code> — and RFC-004 A2 says
+      the first fragment keeps the id and the rest mint:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write('projects/auth', replace(
+         knowledge.read('projects/auth')::text,
+         '- Access tokens live 15 minutes, no exceptions',
+         E'- Access tokens live 15 minutes\n- No exceptions are granted')::markdown)
+       IS NOT NULL AS wrote;</code></pre>
+<pre class="out"><code class="out"> wrote
+-------
+ t
+(1 row)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT now.ord, now.kind, left(now.content, 30) AS content,
+       CASE WHEN was.block_id IS NULL THEN 'minted' ELSE 'kept' END AS identity
+  FROM knowledge.blocks('projects/auth') now
+  LEFT JOIN knowledge.blocks_as_of('projects/auth', 1::bigint) was
+    ON was.block_id = now.block_id
+ WHERE now.ord BETWEEN 7 AND 10 ORDER BY now.ord;</code></pre>
+<pre class="out"><code class="out"> ord |   kind    |            content            | identity
+-----+-----------+-------------------------------+----------
+   7 | list_item | Access tokens live 15 minutes | kept
+   8 | paragraph | Access tokens live 15 minutes | kept
+   9 | list_item | No exceptions are granted     | minted
+  10 | paragraph | No exceptions are granted     | minted
+(4 rows)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT br.bind, br.confidence FROM pgmind.block_revision br
+  JOIN pgmind.note n ON n.id = br.note_id
+ WHERE n.path = 'projects/auth' AND br.seq = 2 ORDER BY br.bind;</code></pre>
+<pre class="out"><code class="out">  bind  | confidence
+--------+------------
+ mint   |
+ mint   |
+ rebind |  0.8181818
+ rebind |  0.8181818
+(4 rows)</code></pre>
+    </div>
+
+    <p>
+      The first fragment scores as the <em>run's</em> coverage (0.818), not as its
+      own similarity to the original — on its own it is a small piece of a longer
+      sentence and would fall under τ. And the row that records it says
+      <code>bind = 'rebind'</code> with a number, so a reviewer can find every
+      identity the machine guessed at. A plain paraphrase behaves the same way
+      with a lower score; rewording that same bullet to "Access tokens live for 15
+      minutes and no exceptions are granted" binds at 0.647.
+    </p>
+
+    <h3 id="rebinding-measured">What it is measured at</h3>
+    <p>
+      From <a href="https://github.com/MarosiLabs/pgmind/blob/main/eval/published/rebinding-v2.json"><code>eval/published/rebinding-v2.json</code></a>,
+      an adversarial corpus of <strong>42 cases</strong> in eight categories with
+      <strong>101 expected bindings</strong>:
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Measure</th><th scope="col">Value</th><th scope="col">Denominator</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Recall, all classes</td><td>0.9505</td><td>96 of 101 expected bindings</td></tr>
+        <tr><td>Precision</td><td>0.9796</td><td>96 true positives, 2 false</td></tr>
+        <tr><td>Recall on the <em>inferred</em> class</td><td>0.8261</td><td>19 of 23 — this is the number that matters, the rest are deterministic</td></tr>
+        <tr><td>Perfect cases</td><td>38 of 42</td><td>every expected binding, no extras</td></tr>
+        <tr><td>Precision before Part B</td><td>0.9872</td><td>the deterministic passes alone</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      Part B trades precision for inferred recall, deliberately: 0.9872 → 0.9796.
+      RFC-004 B5 accepts that trade and puts the gate somewhere else — on
+      mis-bindings <em>outside</em> the corpus's declared-ambiguous cases, of
+      which there are zero. The two false positives are both in the
+      <code>near-duplicate</code> category, which scores 0.857 recall and 0.857
+      precision and is the worst of the eight; <code>split</code>,
+      <code>merge</code>, <code>rewrite</code> and <code>structural</code> are all
+      at 1.0.
+    </p>
+
+    <div class="note-box warn">
+      <span class="lbl">The cases it will not solve</span>
+      <p>
+        Five of the 101 expected bindings are missed, four of them in the
+        <em>inferred</em> class, which carries 19 of its 23 — that four is the
+        figure RFC-004 B5 quotes, not the total. Lowering τ does not recover them.
+        Two are <code>edit-in-place</code>: a heading that gains two words, and a
+        two-word block with one word changed. At that length token bigrams carry
+        almost no signal, and a τ loose enough to catch them starts accepting
+        noise. One is a <code>move-edit</code> where two blocks swap <em>and</em>
+        both are edited — any binding there is a crossing match, and an
+        order-monotonic aligner has to drop one of the two. The last two are a
+        single <code>near-duplicate</code> case: two byte-identical paragraphs,
+        the first of them edited, so the survivor's hash matches both originals
+        and k-th ↔ k-th pairs it with the wrong one. That one case also produces
+        both false positives.
+        If identity across an edit like that matters to you, put a
+        <code>^id</code> marker on the block: pass 1 is deterministic and no
+        heuristic ever overrides it.
+      </p>
+    </div>
+
+    <h2 id="block-ops">Block-operation mechanics</h2>
+    <p>
+      The five block operations — <code>insert_blocks</code>,
+      <code>update_block</code>, <code>move_block</code>,
+      <code>split_block</code>, <code>merge_blocks</code>, plus
+      <code>append_to_section</code> which delegates to the first — edit bytes
+      surgically instead of rewriting the note. They all share
+      <code>commit_op()</code> (<code>extension/src/ops.rs:369</code>), and they
+      all end at the same reconcile and the same history recorder as
+      <code>write()</code>, so history cannot drift between the two write paths.
+    </p>
+
+    <h3 id="arity">Fragment arity</h3>
+    <p>
+      A fragment's arity is its count of <em>parentless</em> addressable blocks
+      (<code>ops.rs:196</code>), which is why a fragment of two bullets is arity 2
+      and not 4 — the inner paragraphs have parents.
+    </p>
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Operation</th><th scope="col">Arity</th><th scope="col">Identity outcome (RFC-004 A2)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>insert_blocks</code></td><td>≥ 1</td><td>every parsed block mints</td></tr>
+        <tr><td><code>update_block</code></td><td>exactly 1</td><td>the id is kept by caller assertion; the subtree is carried</td></tr>
+        <tr><td><code>move_block</code></td><td>—</td><td>id, content and hash unchanged; position recomputed</td></tr>
+        <tr><td><code>split_block</code></td><td>≥ 2</td><td>the first keeps the id, the rest mint</td></tr>
+        <tr><td><code>merge_blocks</code></td><td>exactly 1</td><td><code>keep</code> (default: the first) survives, the rest retire with their descendants</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.split_block(
+  (SELECT block_id FROM knowledge.blocks('projects/auth') WHERE content LIKE 'Migrated%'),
+  $md$Migrated the session store.$md$);</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: split_block fragment must contain at least two blocks
+DETAIL:  pgmind_fragment_arity — found 1</code></pre>
+    </div>
+
+    <h3 id="splice">Splice, separator synthesis, and the PM008 assertion</h3>
+    <p>
+      An operation locates its target's byte range, splices the replacement in,
+      and then <strong>re-parses the whole reassembled note</strong>. Tile-local
+      re-parsing is unsound and was verified to be: an unclosed fence or a type-1
+      HTML block in a fragment swallows every following tile, and a spliced
+      paragraph can be absorbed backward by a preceding construct.
+    </p>
+    <p>
+      Newly written interior lines take canonical decoration — quote prefix
+      <code>"&gt; "</code>, item continuation as marker-width spaces, fragment
+      list markers restyled to the destination list's marker and numbering. Bytes
+      outside the spliced span are never reformatted, and the replacement carries
+      exactly the terminator the replaced region carried, which everywhere but the
+      end of a note is a newline.
+    </p>
+    <p>
+      <strong>Separator synthesis is scoped to the seam</strong>
+      (<code>ops.rs:1417</code>) — the inserted or relocated tile run plus the
+      tile immediately before it. Applying it to every tile rewrote bytes far
+      outside the splice: <code>para\n# Heading\n</code> is legitimately two tiles
+      with no blank line between them, and any later insert silently rewrote them
+      to <code>para\n\n# Heading\n\n</code>. PM008 cannot catch that, because
+      RFC-002 D7 strips trailing newline runs before hashing, so every outside
+      block's kind and hash are unchanged. Scoping to the seam is what the
+      no-reformat rule always required.
+    </p>
+    <p>
+      Then the assertion. After the re-parse, the block multiset
+      <em>outside</em> the spliced region must be unchanged — same count, same
+      kinds, same hashes, in order. Anything else is <strong>PM008</strong> and
+      the operation aborts rather than silently retiring a neighbour's identity:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">-- replacing a paragraph with an unclosed fence would swallow the rest of the note
+SELECT knowledge.update_block(
+  (SELECT block_id FROM knowledge.blocks('projects/auth') WHERE content LIKE 'The service%'),
+  $md$```$md$);</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: splice restructures adjacent content
+DETAIL:  pgmind_splice_restructures — 14 blocks outside the edit before, 1 after</code></pre>
+    </div>
+
+    <p>
+      <code>move_block</code> is the case that makes this rule subtle: it rewrites
+      the whole note and pins every block by permutation, so its outside set is
+      empty and the comparison would be 0-against-0 — asserting nothing, and
+      letting a re-parse that produced <em>extra</em> blocks mint fresh ids in
+      silence. When there is no outside set the assertion is made directly
+      instead: the block count must be unchanged and every new block must be
+      covered by a pin (<code>ops.rs:423</code> and <code>ops.rs:434</code>). The
+      RFC states the general form of the lesson — implementations must not encode
+      "this check does not apply here" as a sentinel whose emptiness depends on
+      downstream arithmetic.
+    </p>
+
+    <h3 id="anchors-and-containers">Anchors, containers, markers</h3>
+    <ul>
+      <li><strong>Anchor legality.</strong> <code>insert_blocks</code> anchors on
+          a top-level block or a list item, and nothing else. "Top level" is a
+          property of the parse, not of the stored row
+          (<code>ops.rs:1319</code>): a paragraph inside a top-level blockquote
+          has <code>parent = NULL</code> and starts at the tile boundary, and
+          matching on either alone accepted it — which let an insert splice a new
+          tile <em>outside</em> the quote without the PM005 the guard exists to
+          raise. The block must span the whole tile.</li>
+      <li><strong>Container constraints (v1).</strong> A target whose own content
+          is non-contiguous — content after a container child — is PM006. A
+          replacement fragment must not itself contain nested containers, and a
+          target that has container children must be replaced by something that
+          stays a list item. <code>move_block</code> reorders siblings within one
+          container or at top level; cross-container moves are PM006.</li>
+      <li><strong>Item re-marking.</strong> Fragment list items are re-marked to
+          the destination list's style — marker character for unordered lists,
+          delimiter for ordered ones, with the numbers kept.</li>
+      <li><strong><code>^id</code> markers survive splits and merges.</strong>
+          <code>marker_holder</code> (<code>ops.rs:645</code>) scans each
+          candidate's <em>whole subtree</em>, because on a list item the marker
+          rides on the item's inner paragraph; scanning only the roots reported
+          "no holder" for markers that plainly survived. The surviving block is
+          named by uuid in <code>revision.meta</code>, resolved after the carry
+          because identities do not exist before it.</li>
+      <li><strong>Only <code>update_block</code> takes
+          <code>expected_hash</code>.</strong> Split, merge, move and insert
+          address blocks too and could take the same guard; nothing has asked for
+          it, and widening later is additive where narrowing is not.</li>
+    </ul>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT r.block_ids = ARRAY[(SELECT block_id FROM knowledge.blocks('projects/auth')
+                             WHERE content LIKE 'Migrated%')] AS same_id
+  FROM knowledge.update_block(
+         (SELECT block_id FROM knowledge.blocks('projects/auth')
+           WHERE content LIKE 'Migrated%'),
+         $md$Migrated the session store to Redis.$md$,
+         expected_hash =&gt; (SELECT content_hash FROM knowledge.blocks('projects/auth')
+                            WHERE content LIKE 'Migrated%')) AS r;</code></pre>
+<pre class="out"><code class="out"> same_id
+---------
+ t
+(1 row)</code></pre>
+    </div>
+
+    <h2 id="history">The history engine</h2>
+    <p>
+      Versioning is where a design usually starts taxing the present to pay for
+      the past. pgmind's does not, because it stores the past as
+      <strong>pre-images</strong>.
+    </p>
+
+    <h3 id="pre-images">Pre-images, not post-images</h3>
+    <p>
+      A post-image ledger records what each revision <em>produced</em>: current
+      state is then the sum of the chain, and reading a note at head means
+      replaying it or maintaining a separate materialised copy. A pre-image ledger
+      records what each revision <em>replaced</em>. Current state stays plain
+      current state — the same <code>note</code>, <code>tile</code> and
+      <code>block</code> rows a version-less design would have — and
+      reconstruction runs <em>backwards</em> from an anchor at or above the target
+      (<code>extension/src/history.rs</code>, <code>timetravel.rs:305</code>).
+    </p>
+    <p>
+      The consequence is the one that matters in production: <strong>a read at
+      head pays nothing for history at all</strong>, and history's cost is
+      proportional to what changed rather than to what exists.
+    </p>
+
+    <h3 id="x1-x2">X1 and X2, and what each buys</h3>
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Invariant</th><th scope="col">Statement</th><th scope="col">What it buys</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><b>X1</b></td>
+          <td>No history row defines its bytes by reference to another history
+              row's bytes. Every payload is literal.</td>
+          <td><strong>Erasure is a bounded local rewrite.</strong> With delta
+              chains, erasing one revision's content re-bases every successor;
+              with literal payloads,
+              <a href="#erasure">excision</a> is an <code>UPDATE</code> of the
+              rows that hold the text and nothing else. This costs storage —
+              deliberately, and the <a href="#capacity">measured price</a> is
+              0.207× current state.</td>
+        </tr>
+        <tr>
+          <td><b>X2</b></td>
+          <td>Reconstruction never invokes the parser. Structure at a past
+              revision comes from stored vectors.</td>
+          <td><strong>History survives a parser change.</strong> An amendment to
+              the markdown dialect cannot silently re-interpret what an agent read
+              last month, and a revision cannot depend on the block taxonomy of
+              the <em>current</em> build. It also means a frame has to snapshot
+              both lanes, since recovering the semantic lane by re-parsing the
+              frame's bytes is exactly what X2 forbids.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3 id="keep-ins">The KEEP/INS script</h3>
+    <p>
+      Two vectors — the tile array and the block-id array — are diffed against
+      their newer selves and stored as a script that rebuilds the older from the
+      newer (<code>history.rs:45</code>). <code>KEEP start len</code> copies a run
+      from the newer vector; <code>INS count</code> takes the next
+      <em>count</em> elements from a literal payload (that is X1). The diff is
+      common prefix + common suffix, deliberately not an LCS: a minimal edit
+      script costs O(n·m) on a lane that a whole-document rewrite touches
+      entirely, and the payoff is only in the multi-site-edit case. Prefix/suffix
+      is O(n), exact for the single-region edits that dominate, and degrades to
+      "store the changed middle literally" otherwise — correct, only larger.
+    </p>
+
+    <h3 id="positional-vs-content">Positional facts vs content-visible ones</h3>
+    <p>
+      This is the single most consequential rule in the design's economics
+      (RFC-005 D4). A <code>block_revision</code> row is written
+      <strong>only</strong> when a content-visible column changed:
+      <code>kind</code>, <code>content</code>, <code>content_hash</code>,
+      <code>block_ref_id</code>, <code>attrs</code>, <code>parent_block</code>.
+      Five columns never produce one — <code>ord</code>, <code>tile_ord</code>,
+      <code>start_in_tile</code>, <code>end_in_tile</code> and
+      <code>heading_path</code>. They ride the per-revision vectors in
+      <code>note_revision</code> instead, as changed slots only.
+    </p>
+    <p>
+      Without that rule, inserting a block at the top of a 100-block note writes
+      100 full history rows for an edit whose semantic content is one block. And
+      structural churn is exactly the workload an importer produces, so a design
+      that is O(note) per structural edit fails on the traffic it was built for.
+    </p>
+    <p>
+      <code>heading_path</code> is the interesting member of that list, and it was
+      <em>moved</em> there after RFC-005 was accepted. It had been classified as
+      content-visible — and the same paragraph offered "renaming a heading" as the
+      case the rule saved, which it did not: a rename changes no <code>ord</code>
+      at all, but rewrites <code>heading_path</code> for every block in the
+      section. Renaming a <code>##</code> heading above 60 blocks wrote 60 full
+      effect rows. <code>heading_path</code> is derived from the preceding headings
+      (RFC-002 D6), which makes it a positional fact, so it belongs with the
+      others; <code>head_idx</code>/<code>head_prev</code> carry the changed slots.
+      The <a href="#carry">carry example</a> above is that exact case, costing two
+      rows instead of two plus one per block in the renamed section.
+    </p>
+
+    <p>
+      Here is a whole <code>note_revision</code> row — the pre-image of the
+      reorder-and-rename write:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT nr.seq, nr.tile_ops, cardinality(nr.tile_payload) AS tiles_stored,
+       nr.id_ops, cardinality(nr.id_payload) AS ids_stored,
+       nr.place_idx, nr.head_idx, nr.head_prev
+  FROM pgmind.note_revision nr JOIN pgmind.note n ON n.id = nr.note_id
+ WHERE n.path = 'projects/auth' AND nr.seq = 1 \gx</code></pre>
+<pre class="out"><code class="out">-[ RECORD 1 ]+--------------------------------
+seq          | 1
+tile_ops     | {0,0,3,1,2,0,5,3}
+tiles_stored | 2
+id_ops       | {0,0,3,1,7,0,10,3}
+ids_stored   | 7
+place_idx    | {3,4,5,6,9}
+head_idx     | {9,10}
+head_prev    | [["Auth"], ["Auth", "Runbook"]]</code></pre>
+    </div>
+
+    <p>
+      Read <code>tile_ops</code> as <code>KEEP(0,3) · INS(2) · KEEP(5,3)</code>:
+      of the eight tiles, the first three and the last three are copied from the
+      newer state and only two are stored literally. <code>id_ops</code> is
+      <code>KEEP(0,3) · INS(7) · KEEP(10,3)</code> over thirteen ids.
+      <code>place_idx</code> names the five blocks whose tile-relative span moved,
+      and <code>head_idx</code> the two whose <code>heading_path</code> changed,
+      with their previous values alongside. Everything else in the note is
+      recorded by not being mentioned.
+    </p>
+
+    <p>The structural case, measured on a live note. Insert one block at ord 0:</p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT r.block_ids IS NOT NULL AS inserted
+  FROM knowledge.insert_blocks(
+         'projects/auth',
+         $md$&gt; Superseded by the 2026 rotation policy.$md$,
+         before =&gt; (SELECT block_id FROM knowledge.blocks('projects/auth') WHERE ord = 0)
+       ) AS r;</code></pre>
+<pre class="out"><code class="out"> inserted
+----------
+ t
+(1 row)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT nr.seq, nr.tile_ops, cardinality(nr.place_idx) AS blocks_moved,
+       (SELECT count(*) FROM pgmind.block_revision br
+         WHERE br.note_id = nr.note_id AND br.seq = nr.seq) AS effect_rows,
+       (SELECT count(*) FROM pgmind.block b WHERE b.note_id = nr.note_id) AS blocks_now
+  FROM pgmind.note_revision nr JOIN pgmind.note n ON n.id = nr.note_id
+ WHERE n.path = 'projects/auth' ORDER BY nr.seq DESC LIMIT 1;</code></pre>
+<pre class="out"><code class="out"> seq | tile_ops | blocks_moved | effect_rows | blocks_now
+-----+----------+--------------+-------------+------------
+   4 | {0,1,8}  |           15 |           1 |         16
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Fifteen blocks changed position; one history row was written, for the mint.
+      The tile script is a single <code>KEEP(1,8)</code> with an empty payload —
+      the older tile vector is the newer one minus its first element, so not one
+      byte of tile text was copied.
+    </p>
+
+    <h3 id="frames">Frames and <code>pgmind.frame_every</code></h3>
+    <p>
+      Reconstruction walks backwards from an anchor, so without periodic anchors
+      a deep <code>as_of</code> is O(depth). <code>history.rs:376</code> writes a
+      <code>note_frame</code> whenever <code>seq mod pgmind.frame_every = 0</code>
+      (default 50, USERSET, range 1–1&nbsp;000&nbsp;000). A frame is a full copy of
+      <em>both</em> lanes, so the knob trades storage against deep-read latency
+      and the storage-growth gate measures both ends of it.
+    </p>
+    <p>
+      That cadence writer is an amendment. As accepted, the only frame-writing
+      rule was compaction's, which places a frame <em>at the floor</em> — usable
+      as an anchor for reads at the floor alone, since reconstruction consumes
+      anchors at or <strong>above</strong> its target. Without a cadence writer
+      the bound degrades to O(depth) and the RFC's headline read cost is
+      unearned.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT seq, verb, blocks_changed, reconstructable
+  FROM knowledge.history('projects/auth') ORDER BY seq;</code></pre>
+<pre class="out"><code class="out"> seq |     verb      | blocks_changed | reconstructable
+-----+---------------+----------------+-----------------
+   0 | write         |             13 | t
+   1 | write         |              2 | t
+   2 | write         |              4 | t
+   3 | update_block  |              1 | t
+   4 | insert_blocks |              1 | t
+(5 rows)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT nf.seq, cardinality(nf.tiles) AS tiles, cardinality(nf.block_ids) AS blocks
+  FROM pgmind.note_frame nf JOIN pgmind.note n ON n.id = nf.note_id
+ WHERE n.path = 'projects/auth' ORDER BY nf.seq;</code></pre>
+<pre class="out"><code class="out"> seq | tiles | blocks
+-----+-------+--------
+   0 |     8 |     13
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      One frame, at <code>seq 0</code>, because <code>0 mod 50 = 0</code> and this
+      note has five revisions. <code>blocks_changed</code> is literally the count
+      of effect rows at that <code>seq</code>, which is why the whole-note rewrite
+      at <code>seq 2</code> shows 4 (two mints, two rebinds) and the structural
+      insert at <code>seq 4</code> shows 1.
+    </p>
+
+    <h3 id="reconstruction">The reconstruction algorithm</h3>
+    <ol>
+      <li>Resolve the target to a <code>(note, seq)</code>
+          (<code>timetravel.rs:113</code>). A revision id that is not this note's
+          is <strong>PM010</strong>; a <code>seq</code> below
+          <code>note.history_floor</code> is <strong>PM011</strong>. Those two
+          mean opposite things to whoever is debugging — "your client is wrong"
+          versus "your operator retained it away" — so they are never
+          interchanged.</li>
+      <li>Find the nearest anchor <strong>at or above</strong> the target
+          (<code>timetravel.rs:231</code>): the nearest frame with
+          <code>seq ≥ target</code>, or current state. A frame is only used if it
+          is closer than head.</li>
+      <li>Read the pre-images of every revision above the target,
+          <strong>newest first, in one statement</strong>. One statement is not a
+          performance choice. pgrx runs SPI read-only only while the transaction
+          has no XID, so any prior write in the caller's transaction puts each
+          subsequent statement on a fresh snapshot — and a concurrent commit
+          between two of them yields a document one revision off, silently. This
+          was reproduced on PG 18.4; the fix is a single query.</li>
+      <li>Apply each revision backwards: rebuild the tile and id vectors with the
+          KEEP/INS scripts, restore the note-lane columns that changed, override
+          the named positional slots (everything else <em>inherits by block
+          id</em> from the newer state), then apply the effect rows —
+          <code>existed = false</code> means the block did not exist yet and is
+          dropped; a pre-image means restore it.</li>
+      <li>Never return a partially reconstructed document. The failure this most
+          wants to prevent is an agent citing a revision and receiving a
+          plausible, wrong one.</li>
+    </ol>
+
+    <p>
+      X2 is visible from SQL. At <code>seq 0</code> the note still had a heading
+      called <code>## Runbook</code>, and the paragraph under it still had that
+      heading in its <code>heading_path</code> — reconstructed from the stored
+      vectors, with no parser involved:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT ord, kind, left(content, 28) AS content, heading_path
+  FROM knowledge.blocks_as_of('projects/auth', 0::bigint) WHERE ord BETWEEN 9 AND 10;</code></pre>
+<pre class="out"><code class="out"> ord |   kind    |           content            |  heading_path
+-----+-----------+------------------------------+----------------
+   9 | heading   | ## Runbook                   | {Auth}
+  10 | paragraph | Key rotation is [[runbooks/r | {Auth,Runbook}
+(2 rows)</code></pre>
+    </div>
+
+    <h3 id="redacted-pre-images">Redacted pre-images</h3>
+    <p>
+      A <code>NULL</code> in a <code>prev_*</code> column normally means "this
+      column did not change". Erasure would be indistinguishable from that, which
+      would make redacted history reconstruct as though the erased text had never
+      been edited — so <a href="#erasure">excision</a> sets
+      <code>block_revision.redacted = true</code>, and the reconstructor reports
+      such a block as erased (<code>attrs = {"redacted": true}</code>, empty
+      content) rather than inheriting the newer value. Unknown is reported as
+      unknown, never as a plausible wrong answer.
+    </p>
+
+    <h2 id="concurrency">Concurrency</h2>
+    <p>
+      Everything here is one PostgreSQL transaction. pgmind adds no locks of its
+      own beyond the two below, runs no background worker, and never retries
+      anything for you.
+    </p>
+
+    <h3 id="lock-domains">Two lock domains</h3>
+    <p>
+      They protect different things and confusing them produced two separate
+      bugs.
+    </p>
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Lock</th><th scope="col">Protects</th><th scope="col">Taken by</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pg_advisory_xact_lock</code> on
+              <code>hashtextextended(vault ‖ '/' ‖ path)</code>
+              (<code>store.rs:665</code>)</td>
+          <td>The <strong>name</strong>. Path occupancy is not a row.</td>
+          <td>Every operation that changes which note occupies a path: create,
+              <code>move_note</code> (both paths, in lexicographic order, so two
+              renames cannot deadlock), <code>delete_note</code>,
+              <code>undelete_note</code>.</td>
+        </tr>
+        <tr>
+          <td><code>SELECT … FOR NO KEY UPDATE</code> on the note row
+              (<code>store.rs:581</code>)</td>
+          <td>The <strong>row</strong>, and only the row.</td>
+          <td>Every mutating operation, including all five block ops.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <p>
+      Without the name lock, a <code>move_note</code> onto a path another session
+      is creating gets a bare <code>23505</code> from <code>note_live_path</code>
+      — reproduced on PG 18.4, and an error the caller cannot act on. It is a
+      genuinely separate domain, which is why <code>append_to_section</code> and
+      the other block ops take only the row lock: they never change which note
+      answers to a name.
+    </p>
+    <p>
+      <code>FOR NO KEY UPDATE</code> rather than <code>FOR UPDATE</code> because
+      it blocks writers and leaves plain readers alone; rather than an advisory
+      lock because it is released by the transaction and shows in
+      <code>pg_blocking_pids()</code>, which is what lets the concurrency gate
+      test interleavings without sleeping.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">BEGIN;
+SELECT knowledge.write('projects/auth',
+         (knowledge.read('projects/auth')::text || E'\nOne more line.\n')::markdown)
+       IS NOT NULL AS wrote;
+
+SELECT l.locktype, l.mode, l.granted,
+       ((l.classid::bigint &lt;&lt; 32) | l.objid::bigint)
+         = hashtextextended(current_setting('pgmind.vault_id') || '/' || 'projects/auth', 0)
+         AS key_is_vault_and_path
+  FROM pg_locks l WHERE l.pid = pg_backend_pid() AND l.locktype = 'advisory';
+ROLLBACK;</code></pre>
+<pre class="out"><code class="out"> locktype |     mode      | granted | key_is_vault_and_path
+----------+---------------+---------+-----------------------
+ advisory | ExclusiveLock | t       | t
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      The row lock does not appear there because PostgreSQL keeps row locks in the
+      tuple header, not in <code>pg_locks</code>. That is also the reason for
+      RFC-005 D5.2's amendment: <strong>holding the note row lock does not stop
+      another session inserting that note's tiles, updating its blocks, or writing
+      its history rows.</strong> It protects a row. So every read whose value an
+      operation depends on is taken from under it — otherwise two sessions both
+      read the pre-image, and the second reconciles against a stale <code>old</code>
+      in which rows the first already deleted compare equal on every stored column,
+      emit no SQL, and stay deleted: the byte lane advancing while the semantic
+      lane silently loses rows, with no error raised.
+    </p>
+
+    <h3 id="cas">Compare-and-swap, at two granularities</h3>
+    <p>
+      <code>expected_head</code> (all seven write operations) asserts the note has
+      not moved; mismatch is <strong>PM009</strong>.
+      <code>expected_hash</code> (<code>update_block</code> only) asserts
+      <em>this block's</em> content hash; mismatch is <strong>PM016</strong>. Both
+      may be given, and both are checked, with <code>expected_head</code> first —
+      "someone changed the note" is the more informative failure when the caller
+      asked for both (<code>ops.rs:845</code>).
+    </p>
+    <p>
+      Two error codes rather than one, on purpose: PM009 means <em>someone</em>
+      changed the note and PM016 means someone changed <em>this block</em>, and
+      only the second obliges the caller to re-read its own edit.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.update_block(
+  (SELECT block_id FROM knowledge.blocks('projects/auth') WHERE content LIKE 'Migrated%'),
+  $md$Migrated the session store to Valkey.$md$,
+  expected_hash =&gt; '\x0000000000000000000000000000000000000000000000000000000000000000');</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: expected_hash is not the block's current content hash
+DETAIL:  pgmind_stale_block — block 019fd629-6768-…: expected 000000000000…0000,
+         current is e674b15db05dfa5afd8b05698e7bcabccef8f248cf474cd47f4b18039e5b5519</code></pre>
+    </div>
+
+    <div class="note-box">
+      <span class="lbl">Block CAS removes the failure, not the serialization</span>
+      <p>
+        Two agents patching different paragraphs of one note still take the note
+        row lock one after the other — <code>expected_hash</code> changes nothing
+        about that. What it changes is that neither is <em>rejected</em>. With
+        only <code>expected_head</code>, the second writer is told its head moved
+        even though nothing it touched changed, and its only escape is asserting
+        nothing at all: a choice between false conflicts and no safety
+        (<code>store.rs:636</code>, RFC-005 D5.11).
+      </p>
+    </div>
+
+    <h3 id="append-both-survive">Append: the operation where a conflict is not one</h3>
+    <p>
+      <code>append_to_section</code> resolves its anchor <em>after</em> taking the
+      row lock (<code>ops.rs:757</code>), so a concurrent append that already
+      extended the section is visible and this one lands after it. Two concurrent
+      appends therefore both survive, in lock-acquisition order. That is the whole
+      reason it exists as an operation rather than as a client-side
+      read-modify-write, which would make one of the two disappear with no error.
+    </p>
+
+    <div class="code">
+      <div class="cap">session A</div>
+<pre><code class="sql">BEGIN;
+SELECT revision IS NOT NULL AS ok FROM knowledge.append_to_section(
+  'projects/auth', ARRAY['Auth','Log'], $md$Agent A rotated the staging key.$md$);
+SELECT pg_sleep(2);
+COMMIT;</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">session B — started while A still holds the lock</div>
+<pre><code class="sql">SELECT revision IS NOT NULL AS ok FROM knowledge.append_to_section(
+  'projects/auth', ARRAY['Auth','Log'], $md$Agent B rotated the production key.$md$);</code></pre>
+<pre class="out"><code class="out"> ok
+----
+ t
+(1 row)
+
+-- B blocked for the remainder of A's transaction, then committed: 1.457 s total</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_section('projects/auth', ARRAY['Auth','Log']);</code></pre>
+<pre class="out"><code class="out">             read_section
+--------------------------------------
+ ## Log                              +
+                                     +
+ Migrated the session store to Redis.+
+                                     +
+ Agent A rotated the staging key.    +
+                                     +
+ Agent B rotated the production key. +
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      Both writes are in the note and both have their own revision. In
+      <code>knowledge.history()</code> they appear with
+      <code>verb = 'insert_blocks'</code>, because <code>append_to_section</code>
+      resolves the anchor and then delegates.
+    </p>
+
+    <h3 id="multi-note">Multi-note operations, and what pgmind never raises</h3>
+    <ul>
+      <li>Any operation touching more than one note locks in ascending
+          <code>note.id</code> order, so two writers touching the same pair cannot
+          deadlock. <strong>This includes edge repair</strong>
+          (<code>store.rs:431</code>), which was not treated as a multi-note
+          operation until RFC-005 D5.9: it rewrites <em>other</em> notes' edge
+          rows, and did so while holding only its own note's lock.</li>
+      <li><code>pgmind.enable_vault_rls()</code> enumerates its tables in
+          <code>pg_class.oid</code> order for the same reason. Each
+          <code>ALTER TABLE</code> takes <code>ACCESS EXCLUSIVE</code> and holds it
+          to commit, so the loop order is a lock order — and creation order is the
+          order every writer touches these tables in. Alphabetical takes
+          <code>block</code> before <code>note</code> and deadlocks against any
+          concurrent write (observed, <code>schema.rs:329</code>).</li>
+      <li><strong>pgmind never raises <code>40001</code> or <code>40P01</code>
+          itself, and never retries internally.</strong> Conflicts it detects are
+          <code>PM0xx</code> with the observed value in the DETAIL, so a client can
+          re-read and retry deterministically. Serialization failures PostgreSQL
+          raises under REPEATABLE READ or SERIALIZABLE pass through untouched — an
+          extension that swallowed them would break your own retry loop.</li>
+      <li><code>expected_head =&gt; NULL</code> is last-writer-wins, explicitly and
+          by the caller's choice.</li>
+    </ul>
+
+    <h2 id="erasure">Erasure and retention</h2>
+    <p>
+      Erasure is the half of Law 8 that a version engine fakes most readily. Four
+      obligations: erase from <em>every</em> surface including derived ones,
+      refuse rather than half-erase, log the erasure, and prove it
+      (<code>extension/src/excision.rs</code>).
+    </p>
+
+    <h3 id="refuse">Refuse, do not half-erase</h3>
+    <p>
+      If the target is still live at head, <code>pgmind.excise</code> raises
+      <strong>PM012</strong>. An erasure that quietly left the current copy in
+      place would be the worst possible outcome of a right-to-erasure request. The
+      refusal is evaluated <em>before</em> the dry-run short-circuit
+      (<code>excision.rs:119</code>), so even a dry run against live content raises
+      rather than reporting:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT pgmind.excise('{"literal":"ada@example.com"}'::jsonb, 'erasure request 4471');</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: target is still live at head
+DETAIL:  pgmind_excision_refused — 1 live row(s); pass and_head =&gt; true to remove it first</code></pre>
+    </div>
+
+    <p>
+      <code>dry_run</code> defaults to <strong>true</strong> — erasure is never
+      the accidental outcome of a typo — and a dry run reports its scope through a
+      <code>WARNING</code> and returns the nil UUID:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT pgmind.excise('{"literal":"ada@example.com"}'::jsonb, 'erasure request 4471',
+                     and_head =&gt; true) AS excision;</code></pre>
+<pre class="out"><code class="out">WARNING:  pgmind: dry run — would erase 1 live and touch 4 history surface(s)
+          for literal target
+               excision
+--------------------------------------
+ 00000000-0000-0000-0000-000000000000
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      The shipped target forms are <code>{"literal": …}</code>,
+      <code>{"path": …}</code> and <code>{"block_id": …}</code>, matched in that
+      precedence order (<code>excision.rs:104</code>). <code>and_head =&gt;
+      true</code> first removes the live content through an ordinary audited write
+      — a real revision through the normal write path — and only then erases
+      history.
+    </p>
+
+    <h3 id="sweep">The sweep, and why <code>pg_catalog</code></h3>
+    <p>
+      Every text-bearing column in schema <code>pgmind</code> is enumerated at call
+      time from <code>pg_class</code>/<code>pg_attribute</code>
+      (<code>excision.rs:23</code>), so a table added by a later RFC is inside the
+      sweep by construction rather than by someone remembering.
+    </p>
+    <p>
+      It is emphatically <strong>not</strong> <code>information_schema</code>,
+      whose views are privilege-filtered by the current user. That difference was
+      measured: the same sweep saw 46 columns as the extension owner and 24 as a
+      Law-11 erasure admin granted rights on exactly the history and audit tables
+      — so the live <code>pgmind.block</code> lane was never opened, a canary
+      still sitting in it went unseen, and <code>verify_excision</code> returned a
+      <em>positive attestation of erasure</em>. The anti-vacuity clause, computed
+      from the same filtered view, passed too.
+    </p>
+
+    <h3 id="splice-not-null">Redaction is a splice, not a NULL</h3>
+    <p>
+      A tile pre-image holds a whole top-level child — an entire list, table or
+      code fence. Nulling it would erase every <em>other</em> block that shared the
+      tile and leave <code>read_as_of</code> reassembling a document with a hole.
+      So the erased span is replaced in place with a marker,
+      <code>⟨redacted pgmind:‹excision-id›⟩</code>, and redacted history still
+      reconstructs to byte-defined, parseable markdown
+      (<code>excision.rs:415</code>). In the semantic lane the effect row keeps its
+      skeleton — history still knows <em>that</em> a block existed and when — while
+      <code>prev_content</code>, <code>prev_content_hash</code>,
+      <code>prev_attrs</code> and <code>prev_block_ref_id</code> go NULL and
+      <code>redacted</code> goes true. The hash goes too: BLAKE3 of a short block
+      is a confirm-a-guess oracle.
+    </p>
+
+    <h3 id="verify-in-transaction">Verification runs inside the transaction</h3>
+    <p>
+      After redaction, the sweep runs again. Survivors raise <strong>PM013</strong>
+      and abort — so an incomplete excision is never committed, and no
+      <code>excision_log</code> row survives one (<code>excision.rs:162</code>).
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT pgmind.excise('{"literal":"ada@example.com"}'::jsonb, 'erasure request 4471',
+                     and_head =&gt; true, dry_run =&gt; false) AS excision;
+
+SELECT count(*) AS survivors FROM pgmind.verify_excision(
+  (SELECT id FROM pgmind.excision_log ORDER BY requested_at DESC LIMIT 1));
+
+SELECT target_kind, reason, scope, survivors, verified_at IS NOT NULL AS verified
+  FROM pgmind.excision_log;</code></pre>
+<pre class="out"><code class="out">               excision
+--------------------------------------
+ 019fd629-e770-75a1-87ee-1a9db51aeabe
+(1 row)
+
+ survivors
+-----------
+         0
+(1 row)
+
+ target_kind |        reason        |                  scope                  | survivors | verified
+-------------+----------------------+-----------------------------------------+-----------+----------
+ literal     | erasure request 4471 | {"live_rows": 1, "history_surfaces": 4} |         0 | t
+(1 row)</code></pre>
+    </div>
+
+    <p>What that left behind, on both lanes:</p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT seq, verb, blocks_changed FROM knowledge.history('people/ada') ORDER BY seq;
+
+SELECT br.seq, br.bind, br.redacted, br.prev_content IS NULL AS content_gone
+  FROM pgmind.block_revision br JOIN pgmind.note n ON n.id = br.note_id
+ WHERE n.path = 'people/ada' AND br.seq = 1;
+
+SELECT left(nr.tile_payload[1], 58) AS tile_pre_image
+  FROM pgmind.note_revision nr JOIN pgmind.note n ON n.id = nr.note_id
+ WHERE n.path = 'people/ada' AND cardinality(nr.tile_payload) &gt; 0;</code></pre>
+<pre class="out"><code class="out"> seq | verb  | blocks_changed
+-----+-------+----------------
+   0 | write |              3
+   1 | write |              1
+(2 rows)
+
+ seq |  bind  | redacted | content_gone
+-----+--------+----------+--------------
+   1 | rebind | t        | t
+(1 row)
+
+                       tile_pre_image
+------------------------------------------------------------
+ Platform lead, reachable at ⟨redacted pgmind:019fd629-e770
+(1 row)</code></pre>
+    </div>
+
+    <div class="note-box warn">
+      <span class="lbl">The code disagrees with the RFC here — believe the code</span>
+      <p>
+        RFC-005 D7.1 says the live-removal step records
+        <code>verb = 'excise'</code>. It does not: the removal is an ordinary
+        audited write through the normal path, so it records
+        <code>verb = 'write'</code> (visible above at <code>seq 1</code>). Two
+        further gaps, stated rather than buried: <code>pgmind.excise</code> and
+        <code>pgmind.verify_excision</code> are specified as
+        <code>SECURITY DEFINER</code> and are <strong>not</strong>, so today they
+        require a role that can already write the tables; and the shipped
+        <code>verify_excision</code> implements clause (a) of D7.6 — the
+        exhaustive canary sweep — but not the whole-note re-reconstruction of
+        clauses (b)–(d). Escalation to whole-tile redaction and the span-shifting
+        rule are likewise specified and not yet built.
+      </p>
+    </div>
+
+    <h3 id="audit-replay">The audit/replay split, and what a restored dump does</h3>
+    <p>
+      Where the target is stored is itself an erasure decision. As RFC-005 was
+      accepted, <code>excision_log.target</code> held the caller's target "as
+      given" and was annotated as carrying no erased content — false for two of the
+      forms, since <code>{"literal":"Jane Doe, 1978-04-02"}</code> <em>is</em> the
+      content and a path like <code>people/jane-doe</code> is identifying data.
+      That table is dump-registered, so it would have become the one copy of the
+      erased string guaranteed to be reproduced in every future backup. Reproduced
+      on PG 18.4: after a maximally thorough excision, the gate's own zero-hit
+      sweep found the canary in <code>excision_log.target</code> and in the raw
+      <code>pg_dump</code> output.
+    </p>
+    <p>
+      So the log now records only <code>target_kind</code> and counts, and the
+      executable target lives in <code>pgmind.excision_replay</code>, which is
+      <strong>not</strong> registered for dump and is the sweep's one named
+      exception (named, never silently skipped — a silent exemption is how this
+      check reports green on a broken system).
+    </p>
+    <p>
+      The honest consequence: <strong>restoring a backup taken before an excision
+      resurrects the erased content</strong>, and the replay driver that would
+      re-apply it — <code>enforce_excisions()</code> in RFC-005 D7 — is
+      <span class="badge next">not shipped</span>. Until it is, an operator
+      restoring an old dump has to re-run <code>pgmind.excise</code> by hand.
+      pgmind cannot reach backups it does not know about, and no in-database
+      mechanism can.
+    </p>
+
+    <h3 id="retention">Retention</h3>
+    <p>
+      <code>pgmind.retain(keep_revisions, dry_run)</code> raises each note's
+      <code>history_floor</code> to <code>head_seq − keep + 1</code>. It is a
+      function with parameters, not a stored policy catalog: there is no persisted
+      mode that can be toggled into deleting more than the caller asked for, and no
+      background job that runs when nobody is watching. <code>dry_run</code>
+      defaults to true and returns the row count it would remove.
+    </p>
+    <p>Order inside <code>excision.rs:216</code> is deliberate:</p>
+    <ol>
+      <li>Write a <code>note_frame</code> <em>at</em> the new floor first — it is
+          the anchor every read at or above the floor depends on, and writing it
+          after the delete would leave a window with no anchor at all.</li>
+      <li>Delete <code>block_revision</code>, <code>note_revision</code>
+          <strong>and every <code>note_frame</code></strong> below the floor.
+          Frames below the floor were not in the deletion set as accepted, so a
+          compacted vault kept full snapshots of exactly the content PM011 claims
+          is no longer reconstructable.</li>
+      <li>Advance <code>note.history_floor</code>.</li>
+      <li><strong><code>pgmind.revision</code> rows are never deleted.</strong> A
+          vault that forgot must remember that it forgot:
+          <code>knowledge.history()</code> keeps listing every revision — id,
+          author, source, verb, timestamp — long after its content is gone, with
+          <code>reconstructable = false</code>.</li>
+    </ol>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT pgmind.retain(keep_revisions =&gt; 2) AS rows_that_would_go;
+SELECT pgmind.retain(keep_revisions =&gt; 2, dry_run =&gt; false) AS rows_removed;
+
+SELECT n.path, n.history_floor,
+       (SELECT count(*) FROM pgmind.note_frame f
+         WHERE f.note_id = n.id AND f.seq = n.history_floor) AS floor_frame
+  FROM pgmind.note n WHERE n.path IN ('projects/auth','people/ada') ORDER BY n.path;</code></pre>
+<pre class="out"><code class="out"> rows_that_would_go
+--------------------
+                 26
+(1 row)
+
+ rows_removed
+--------------
+           26
+(1 row)
+
+     path      | history_floor | floor_frame
+---------------+---------------+-------------
+ people/ada    |             0 |           1
+ projects/auth |             5 |           1
+(2 rows)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT seq, verb, reconstructable FROM knowledge.history('projects/auth') ORDER BY seq;</code></pre>
+<pre class="out"><code class="out"> seq |     verb      | reconstructable
+-----+---------------+-----------------
+   0 | write         | f
+   1 | write         | f
+   2 | write         | f
+   3 | update_block  | f
+   4 | insert_blocks | f
+   5 | insert_blocks | t
+   6 | insert_blocks | t
+(7 rows)</code></pre>
+    </div>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.read_as_of('projects/auth', 0::bigint);</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: history below the retention floor was compacted or excised
+DETAIL:  pgmind_history_unavailable — seq 0 &lt; floor 5 on projects/auth</code></pre>
+    </div>
+
+    <p>
+      PM011, not PM010. The revision still exists and <code>history()</code> still
+      lists it; what is gone is the ability to reconstruct it.
+      <code>knowledge.blame()</code> behaves the same way: once retention has taken
+      a block's <code>existed = false</code> row, <code>first_revision</code> goes
+      NULL and the <code>history_floor</code> is reported alongside it, rather than
+      returning the floor as though it were an origin
+      (<code>timetravel.rs:734</code>). The oldest and most-cited blocks are
+      exactly the ones compaction blinds, so the API says so.
+    </p>
+    <p>
+      One more honest consequence of the no-partitioning decision: retention is
+      <code>DELETE</code>-based, so deleted history returns space to the heap for
+      reuse, not to the operating system.
+    </p>
+
+    <h2 id="verification">Verification</h2>
+    <p>
+      Three checkers, all admin surface, all returning <code>SETOF text</code>
+      where <strong>an empty result means healthy</strong> and every row is a
+      specific disagreement.
+    </p>
+
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Function</th><th scope="col">What it checks</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pgmind.verify_note(note_id)</code><br><span class="badge admin">Admin</span></td>
+          <td>Re-parses the note from its own stored bytes and compares everything
+              against the parse (<code>verify.rs:29</code>):
+              <code>head_revision</code> exists and belongs to this note (the FK
+              the schema deliberately omits); preamble length; tile count and
+              bytes; block count, <code>ord</code> density, kind, content, hash,
+              <code>heading_path</code>, <code>block_ref_id</code>,
+              <code>attrs</code>, placement and <code>parent_block</code>; and
+              edges and tags against a <em>fresh recomputation including
+              resolution</em> — RFC-003 D5 says incremental maintenance must be
+              definitionally equal to full recomputation, and this is where that is
+              enforced. It is also the tool that detects direct DML into
+              <code>pgmind.*</code>.</td>
+        </tr>
+        <tr>
+          <td><code>pgmind.verify_history(note_id)</code><br><span class="badge admin">Admin</span></td>
+          <td>Three post-conditions (<code>verify.rs:245</code>). <em>(1)</em> A
+              frame exists at the history floor. <em>(2)</em> <code>seq</code> is
+              dense and gapless above the floor <em>and</em> every revision above
+              it has exactly one <code>note_revision</code> row — the half that
+              catches a history lane which silently stopped being written,
+              including a dump that restored the revisions and lost their
+              pre-images. <em>(3)</em> Reconstruction, checked at the floor, at the
+              newest frame, and at up to 20 deterministically sampled revisions
+              between them; each must yield parseable bytes with an id vector
+              matching the parsed block count and every span inside its tile.
+              <br>The accepted RFC's post-conditions were all three unsatisfiable,
+              vacuous, or both. The vacuous one is worth naming:
+              <code>read_as_of(head) = read()</code> proves nothing, because
+              reconstruction at head applies no scripts and reads current state by
+              definition.</td>
+        </tr>
+        <tr>
+          <td><code>pgmind.verify_excision(excision)</code><br><span class="badge admin">Admin</span></td>
+          <td>Re-runs the <code>pg_catalog</code> sweep for that excision's target
+              and returns the surviving hits. It also asserts that it
+              <em>looked at something</em> — a sweep that enumerated zero columns
+              would otherwise report success on a broken system. If the replay row
+              is absent (an excision from a restored dump), it says so rather than
+              attesting.</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      A whole-vault health sweep, run here after the excision and the compaction
+      above:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT n.path,
+       (SELECT count(*) FROM pgmind.verify_note(n.id))    AS note_findings,
+       (SELECT count(*) FROM pgmind.verify_history(n.id)) AS history_findings
+  FROM pgmind.note n WHERE n.tombstoned_at IS NULL ORDER BY n.path;</code></pre>
+<pre class="out"><code class="out">         path         | note_findings | history_findings
+----------------------+---------------+------------------
+ daily/2026-08-06     |             0 |                0
+ index                |             0 |                0
+ notes/scratch        |             0 |                0
+ people/ada           |             0 |                0
+ projects/auth        |             0 |                0
+ rfc/auth-01          |             0 |                0
+ runbooks/rotate-keys |             0 |                0
+(7 rows)</code></pre>
+    </div>
+
+    <p>
+      One class of defect <code>verify_note</code> structurally cannot see:
+      operations that append a byte the note never contained. It compares the
+      stored lanes against a fresh parse of the <em>stored bytes</em>, and both
+      agree after the extra byte is written — only the caller's original bytes
+      disagree. That case is pinned by a test in the identity-semantics gate
+      instead, which is the honest place for it.
+    </p>
+
+    <h2 id="capacity">Capacity and performance</h2>
+    <p>
+      Two published runs, both regenerable from
+      <a href="https://github.com/MarosiLabs/pgmind/tree/main/eval/published"><code>eval/published/</code></a>.
+      Every number below is quoted with its denominator, because a single
+      flattering ratio quoted alone is how this section would mislead.
+    </p>
+
+    <h3 id="capacity-v1">Storage and read latency at 10k notes</h3>
+    <p>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/eval/published/capacity-model-v1.json"><code>capacity-model-v1.json</code></a>
+      — 10&nbsp;000 notes, 230&nbsp;000 blocks, 40&nbsp;000 edges, 40&nbsp;000 tags,
+      on a pgrx-built PostgreSQL 18.4, single connection, release build.
+    </p>
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Measure</th><th scope="col">Value</th><th scope="col">Denominator</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>pgmind.block</code>, heap + indexes</td><td><b>429.9 B</b> per block</td><td>98.9 MB / 230 000 blocks</td></tr>
+        <tr><td>All eleven tables, heap + indexes</td><td><b>975.7 B</b> per block</td><td>224.4 MB / 230 000 blocks, <em>including</em> the Phase-3 history lanes</td></tr>
+        <tr><td><code>knowledge.read()</code> p95</td><td>0.318 ms</td><td>whole-note read at head</td></tr>
+        <tr><td><code>knowledge.backlinks()</code> p95</td><td>1.21 ms</td><td>&nbsp;</td></tr>
+        <tr><td><code>knowledge.tagged()</code> p95</td><td>4.16 ms</td><td>the slowest read surface measured</td></tr>
+        <tr><td>Write throughput</td><td>170 notes/s (5.87 ms/note median)</td><td>500-note passes into an empty vault; range 5.77–6.32 ms</td></tr>
+        <tr><td><code>verify_note</code> violations</td><td>0</td><td>across all 10 000 notes</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>
+      Two caveats the run states about itself. The write figure is
+      <strong>create-shaped</strong> — every one of those writes was a creation, so
+      every block minted; a steady-state edit is a different shape. And it is
+      measured against a design target of 2000 notes/s, which it does not meet:
+      170 notes/s is what the current write path does. Write cost attributes as
+      1.85 ms fixed per note, 2.64 ms for blocks and tiles beyond the first, and
+      1.39 ms for extraction, and it stays flat as the vault grows (5.73 ms/note
+      into an empty vault, 5.99 ms with 3500 notes already in it).
+    </p>
+
+    <h3 id="capacity-v2">What history costs</h3>
+    <p>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/eval/published/capacity-model-v2.json"><code>capacity-model-v2.json</code></a>
+      — 120 notes of 23 blocks at 25 revisions each, three traffic shapes,
+      <code>frame_every = 50</code>.
+    </p>
+    <div class="table-scroll">
+    <table>
+      <thead>
+        <tr><th scope="col">Verb</th><th scope="col">Effect rows per revision</th><th scope="col">Over</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>insert_blocks</code> (structural insert at ord 0)</td><td><b>1.00</b></td><td>1000 revisions</td></tr>
+        <tr><td><code>update_block</code> (one block edited)</td><td><b>1.00</b></td><td>1000 revisions</td></tr>
+        <tr><td><code>write</code> (whole-document rewrite)</td><td><b>3.36</b></td><td>1120 revisions, 3760 rows</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <ul>
+      <li>History came to <strong>0.207×</strong> current-state bytes, and
+          <strong>0.008×</strong> what storing every revision in full would cost.
+          Both denominators named.</li>
+      <li>Deep <code>as_of</code> p95 was <strong>0.56 ms</strong> against
+          <strong>0.33 ms</strong> for a head read — 1.7×, against the gate's 25×
+          ceiling.</li>
+      <li>Per-revision write cost by shape: 2.01 ms for a patch, 2.59 ms for a
+          document rewrite, 5.67 ms for a structural edit.</li>
+      <li><code>verify_history</code> violations: 0.</li>
+    </ul>
+
+    <div class="note-box warn">
+      <span class="lbl">Caveats the run states, not only the flattering ratios</span>
+      <p>
+        The corpus mixes the three traffic shapes <strong>evenly</strong>, which
+        real traffic will not — a vault driven by naive read-edit-write agents is
+        all <code>write</code>, at 3.36 effect rows per revision, and degenerates
+        toward full copies as documents get rewritten wholesale.
+        <code>pgmind.revision</code> is counted as current state rather than as
+        history; it is metadata either way, but the key names decide which side of
+        the ratio it lands on. And the frame cadence adds storage the ratio does
+        not include: history is roughly (effect rows) + (current-state size ÷
+        <code>frame_every</code>) per note. The ~1.9× figure RFC-005 D9 carried
+        before this run was a model, and the model was pessimistic.
+      </p>
+    </div>
+
+    <h2 id="backup">Backup and restore</h2>
+    <p>
+      Tables created by an extension script are skipped by <code>pg_dump</code>
+      unless they are registered with <code>pg_extension_config_dump()</code>
+      (<code>schema.rs:354</code>). Missing <em>one</em> registration loses 100% of
+      that lane from every backup while the rest of a dump-restore test stays
+      green — with <code>block_revision</code> alone unregistered, equal counts
+      across six hardcoded tables, a clean <code>verify_note</code>, and a working
+      post-restore write all pass, and all per-block history is gone. So the check
+      is a run-time enumeration, not a list someone has to remember to update:
+    </p>
+
+    <div class="code">
+      <div class="cap">psql — admin reach (Law 11)</div>
+<pre><code class="sql">SELECT c.relname AS "object", c.relkind,
+       c.oid IN (SELECT unnest(extconfig) FROM pg_extension WHERE extname = 'pgmind')
+         AS registered_for_dump
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'pgmind' AND c.relkind IN ('r','S')
+ ORDER BY registered_for_dump, c.relname;</code></pre>
+<pre class="out"><code class="out">     object      | relkind | registered_for_dump
+-----------------+---------+---------------------
+ excision_replay | r       | f
+ block           | r       | t
+ block_revision  | r       | t
+ edge            | r       | t
+ edge_id_seq     | S       | t
+ excision_log    | r       | t
+ note            | r       | t
+ note_frame      | r       | t
+ note_revision   | r       | t
+ revision        | r       | t
+ tag             | r       | t
+ tag_id_seq      | S       | t
+ tile            | r       | t
+(13 rows)</code></pre>
+    </div>
+
+    <p>
+      Twelve of thirteen registered, including both identity sequences.
+      <code>excision_replay</code> is the one deliberate absence, for the reason in
+      <a href="#audit-replay">the audit/replay split</a>.
+    </p>
+
+    <h3 id="restore-hazards">Two hazards worth knowing before you need them</h3>
+    <ul>
+      <li>
+        <p><strong>A newer dump does not restore onto an older build, and it fails
+        partway.</strong> <code>pg_dump</code> emits <code>CREATE EXTENSION</code>
+        with <strong>no version</strong>, so restoring a Phase-3 dump onto a host
+        still packaging Phase 2 installs the old schema and then fails on the first
+        <code>COPY</code> that names a column the old schema lacks
+        (<code>column "history_floor" … does not exist</code>) — after some tables
+        have already loaded. Verified on PG 18.4. Restore onto the same extension
+        build, or newer with a working upgrade script.</p>
+      </li>
+      <li>
+        <p><strong>Restoring an old backup resurrects excised content</strong>, and
+        the replay driver that would re-erase it is
+        <span class="badge next">not shipped</span>. See
+        <a href="#audit-replay">above</a>.</p>
+      </li>
+    </ul>
+    <p>
+      One feared hazard was tested and refuted: <code>pg_dump</code> orders its
+      <code>COPY</code> statements FK-topologically regardless of registration
+      order, and plain <code>psql -v ON_ERROR_STOP=1</code> restored all twelve
+      tables cleanly. The comment in <code>schema.rs</code> claiming dump order
+      follows registration order is wrong, and harmless.
+    </p>
+    <p>
+      The extension is <code>superuser = true</code>, <code>trusted = false</code>,
+      <code>relocatable = false</code>. There is no upgrade path between builds
+      yet; this is research pre-alpha and a schema change today means a rebuild
+      from source.
+    </p>
+
+    <h2 id="boundary">The AI-free boundary</h2>
+    <p>
+      Law 1 and Law 2 are not aspirations about the roadmap, they are properties of
+      the shipped artifact, and they are checkable from SQL. pgmind invokes no
+      model, opens no socket, registers no background worker, installs no trigger
+      and no event trigger, and needs no entry in
+      <code>shared_preload_libraries</code>.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT count(*) FILTER (WHERE NOT t.tgisinternal) AS user_triggers,
+       count(*) FILTER (WHERE t.tgisinternal)     AS fk_triggers
+  FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'pgmind';
+
+SELECT (SELECT count(*) FROM pg_event_trigger) AS event_triggers,
+       (SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname IN ('knowledge','pgmind') AND p.prosecdef) AS security_definer,
+       current_setting('shared_preload_libraries') = '' AS not_preloaded;</code></pre>
+<pre class="out"><code class="out"> user_triggers | fk_triggers
+---------------+-------------
+             0 |          62
+(1 row)
+
+ event_triggers | security_definer | not_preloaded
+----------------+------------------+---------------
+              0 |                0 | t
+(1 row)</code></pre>
+    </div>
+
+    <p>
+      The 62 are PostgreSQL's own foreign-key enforcement triggers, which every
+      <code>REFERENCES</code> clause creates. Zero are pgmind's. Everything that
+      maintains the link graph, the tag index and the history lanes is an explicit
+      statement on the write path you can read in
+      <code>write.rs</code>, which is what Law 9's "no hidden behavior" means in
+      practice — and what makes <code>pgmind.verify_note()</code> able to say
+      whether the invariants hold, since there is nothing running behind it.
+    </p>
+
+    <p>What that buys you, concretely:</p>
+    <ul>
+      <li><strong>Allowlisting.</strong> The extension is PostgreSQL-licensed, has
+          no runtime dependency beyond PostgreSQL itself, and makes no outbound
+          connection. A security review has a short list to check.</li>
+      <li><strong>Determinism.</strong> The same bytes written to the same vault
+          produce the same rows, the same hashes and the same identity decisions,
+          every time. The one heuristic in the system — <a href="#rebinding">Part
+          B rebinding</a> — is pure computation over already-loaded rows with a
+          fixed feature function, a fixed threshold and a deterministic tie-break,
+          and it records a confidence for everything it infers. There is no
+          sampling and no clock in it.</li>
+      <li><strong>No hidden cost.</strong> Nothing happens between your
+          transactions. There is no autovacuum-adjacent maintenance job, no
+          re-indexing worker, and no retention timer — <code>pgmind.retain</code>
+          only ever runs because you called it.</li>
+      <li><strong>You keep the vector lane.</strong> If you want embeddings, you
+          populate your own table keyed by <code>(block_id, content_hash)</code>
+          and pgmind reads it like any other table. The content hash is what lets
+          you skip re-embedding an unchanged block — see the
+          <a href="cookbook.html#retrieval">cookbook</a>.</li>
+    </ul>
+
+    <p>
+      The one place a claim about the writer is <em>not</em> verified is
+      <code>revision.author</code>. It defaults to <code>current_user</code> and
+      can be overridden by the connected role; the value is never validated beyond
+      its length and never namespaced. Any session that can write can claim any
+      author. Dressing that up — a registry, a required prefix, a foreign key to a
+      principals table — would make a claim look verified without verifying it,
+      which is worse than a plain string (<code>write.rs:374</code>). Treat
+      <code>author</code> as an assertion, and put the boundary in grants and
+      <code>pgmind.enable_vault_rls()</code>.
+    </p>
+
+    <nav class="page-nav" aria-label="Page">
+      <a href="concepts.html">
+        <span>Previous</span>
+        Concepts
+      </a>
+      <a class="next" href="sql.html">
+        <span>Next</span>
+        SQL reference
+      </a>
+    </nav>
+  </main>
+
+  <aside class="docs-toc" aria-label="On this page"><nav id="toc"></nav></aside>
+</div>
+
+<footer class="site-foot">
+  <div class="foot-inner">
+    <p><b>pgmind</b>: files hold notes, PostgreSQL holds the brain.</p>
+    <p class="foot-links">
+      <a href="../">Overview</a>
+      <a href="https://github.com/MarosiLabs/pgmind">Repository</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a>
+      <a href="https://github.com/MarosiLabs/pgmind/blob/main/LICENSE">PostgreSQL License</a>
+    </p>
+  </div>
+</footer>
+
+<script src="docs.js" defer></script>
+</body>
+</html>

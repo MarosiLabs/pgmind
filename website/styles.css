@@ -108,6 +108,12 @@ code {
 
 .head-nav { display: flex; align-items: center; gap: 18px; }
 
+/* Plain text links in the header sit between the wordmark and the CTA, so they
+   read as navigation rather than as body links — the accent is reserved for
+   the button. */
+.head-nav > a:not(.btn):not(.icon-link) { color: var(--ink-dim); font-size: 15px; }
+.head-nav > a:not(.btn):not(.icon-link):hover { color: var(--ink); text-decoration: none; }
+
 .icon-link {
   display: inline-flex; align-items: center; justify-content: center;
   width: 32px; height: 32px; border-radius: 7px;

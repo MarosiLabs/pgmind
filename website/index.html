@@ -3,17 +3,104 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+
 <title>pgmind: an Obsidian-shaped vault, stored as PostgreSQL rows</title>
-<meta name="description" content="A PostgreSQL extension that stores a markdown knowledge vault as relational rows: notes, sections, blocks, wiki-links and tags, with append-only revisions, compare-and-swap writes and block-level history. No model is invoked anywhere inside it.">
+<meta name="description" content="A PostgreSQL extension that stores a markdown knowledge vault as rows: notes, sections, blocks, wiki-links and tags, versioned and queryable in SQL.">
+<link rel="canonical" href="https://marosilabs.github.io/pgmind/">
+<meta name="author" content="Marosi Labs">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
 <meta name="theme-color" content="#0a0c10">
-<link rel="icon" href="assets/favicon.png" type="image/png">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="assets/favicon.png" type="image/png" sizes="180x180">
 <link rel="apple-touch-icon" href="assets/favicon.png">
+
+<!-- The hero logo is the LCP element and sits behind a render-blocking
+     stylesheet, so the preload is what actually starts its download early. -->
+<link rel="preload" as="image" href="assets/logo.png" fetchpriority="high">
+<link rel="stylesheet" href="styles.css">
+
+<!-- Absolute URLs: og:image is fetched by crawlers that do not resolve
+     relative paths against the page. -->
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="pgmind">
+<meta property="og:locale" content="en_US">
+<meta property="og:url" content="https://marosilabs.github.io/pgmind/">
 <meta property="og:title" content="pgmind: an Obsidian-shaped vault, stored as PostgreSQL rows">
 <meta property="og:description" content="Notes, sections, blocks, wiki-links and tags as relational rows with append-only revisions. Compare-and-swap writes, block-level history, and a query surface a folder cannot offer.">
-<meta property="og:image" content="assets/logo.png">
+<meta property="og:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The pgmind wordmark: an elephant in glasses reading a book.">
+
 <meta name="twitter:card" content="summary_large_image">
-<link rel="stylesheet" href="styles.css">
+<meta name="twitter:title" content="pgmind: an Obsidian-shaped vault, stored as PostgreSQL rows">
+<meta name="twitter:description" content="Notes, sections, blocks, wiki-links and tags as relational rows with append-only revisions. Compare-and-swap writes, block-level history, and a query surface a folder cannot offer.">
+<meta name="twitter:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
+<meta name="twitter:image:alt" content="The pgmind wordmark: an elephant in glasses reading a book.">
+
+<!-- robots.txt is only honoured at a host root, and this is a project page
+     under /pgmind/. The sitemap link is therefore the discovery path that
+     works without owning marosilabs.github.io/robots.txt. -->
+<link rel="sitemap" type="application/xml" href="sitemap.xml">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://github.com/MarosiLabs#organization",
+      "name": "Marosi Labs",
+      "url": "https://github.com/MarosiLabs",
+      "logo": "https://marosilabs.github.io/pgmind/assets/logo.png"
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://marosilabs.github.io/pgmind/#website",
+      "url": "https://marosilabs.github.io/pgmind/",
+      "name": "pgmind",
+      "inLanguage": "en",
+      "publisher": { "@id": "https://github.com/MarosiLabs#organization" }
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://marosilabs.github.io/pgmind/#webpage",
+      "url": "https://marosilabs.github.io/pgmind/",
+      "name": "pgmind: an Obsidian-shaped vault, stored as PostgreSQL rows",
+      "description": "A PostgreSQL extension that stores a markdown knowledge vault as rows: notes, sections, blocks, wiki-links and tags, versioned and queryable in SQL.",
+      "inLanguage": "en",
+      "isPartOf": { "@id": "https://marosilabs.github.io/pgmind/#website" },
+      "primaryImageOfPage": "https://marosilabs.github.io/pgmind/assets/og.png",
+      "mainEntity": { "@id": "https://marosilabs.github.io/pgmind/#software" }
+    },
+    {
+      "@type": ["SoftwareApplication", "SoftwareSourceCode"],
+      "@id": "https://marosilabs.github.io/pgmind/#software",
+      "name": "pgmind",
+      "description": "A PostgreSQL extension that stores a markdown knowledge vault as relational rows: notes, sections, blocks, wiki-links and tags, with append-only revisions, compare-and-swap writes and block-level history. No model is invoked anywhere inside it.",
+      "url": "https://marosilabs.github.io/pgmind/",
+      "applicationCategory": "DeveloperApplication",
+      "applicationSubCategory": "PostgreSQL extension",
+      "operatingSystem": "Linux, macOS",
+      "runtimePlatform": "PostgreSQL 16, PostgreSQL 17, PostgreSQL 18",
+      "programmingLanguage": "Rust",
+      "codeRepository": "https://github.com/MarosiLabs/pgmind",
+      "license": "https://github.com/MarosiLabs/pgmind/blob/main/LICENSE",
+      "isAccessibleForFree": true,
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "author": { "@id": "https://github.com/MarosiLabs#organization" },
+      "image": "https://marosilabs.github.io/pgmind/assets/og.png",
+      "keywords": "PostgreSQL, PostgreSQL extension, markdown, knowledge base, Obsidian, wiki-links, agent memory, retrieval, MCP, pgrx, Rust"
+    }
+  ]
+}
+</script>
 </head>
 <body>
 
@@ -36,11 +123,11 @@
       <span><b>pg</b>mind</span>
     </a>
     <nav class="head-nav">
+      <a href="docs/">Manual</a>
       <a class="icon-link" href="https://github.com/MarosiLabs/pgmind" aria-label="Repository on GitHub">
         <svg width="18" height="18" aria-hidden="true"><use href="#gh"/></svg>
       </a>
-      <!-- TODO: repoint to the standalone getting-started page once it exists -->
-      <a class="btn btn-primary btn-sm" href="#get-started">Get started</a>
+      <a class="btn btn-primary btn-sm" href="docs/quickstart.html">Get started</a>
     </nav>
   </div>
 </header>
@@ -49,7 +136,7 @@
 
   <section class="hero" id="top">
     <div class="wrap">
-      <img class="hero-logo" src="assets/logo.png" alt="pgmind" width="1000" height="1109" fetchpriority="high">
+      <img class="hero-logo" src="assets/logo.png" alt="pgmind" width="600" height="665" fetchpriority="high" decoding="async">
 
       <p class="eyebrow">PostgreSQL extension · Rust / pgrx · pre&#8209;alpha</p>
 
@@ -61,8 +148,7 @@
       </p>
 
       <div class="cta">
-        <!-- TODO: repoint to the standalone getting-started page once it exists -->
-        <a class="btn btn-primary" href="#get-started">Get started</a>
+        <a class="btn btn-primary" href="docs/quickstart.html">Get started</a>
         <a class="btn btn-ghost" href="https://github.com/MarosiLabs/pgmind">
           <svg width="16" height="16" aria-hidden="true"><use href="#gh"/></svg>
           Repository
@@ -350,7 +436,15 @@ make setup   # cargo-pgrx + a pgrx-managed Postgres
 make build   # PG=18 by default; make build PG=16
 make test    # runs inside a real Postgres</code></pre>
         <p class="start-more">
-          If you would rather read first, the documents have a precedence order:
+          Then the <a href="docs/">manual</a> takes it from there: a
+          <a href="docs/quickstart.html">quick start</a>, the
+          <a href="docs/concepts.html">vault model</a>, how the storage and version
+          engine <a href="docs/internals.html">actually work</a>, a complete
+          <a href="docs/sql.html">SQL reference</a>, and a
+          <a href="docs/cookbook.html">cookbook</a>.
+        </p>
+        <p class="start-more">
+          Behind it, the design documents have a precedence order:
           the <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">handbook</a>
           holds the architecture laws, the
           <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PRODUCT-PLAN.md">product plan</a>
@@ -389,6 +483,7 @@ make test    # runs inside a real Postgres</code></pre>
   <div class="wrap foot-inner">
     <p><b>pgmind</b>: files hold notes, PostgreSQL holds the brain.</p>
     <p class="foot-links">
+      <a href="docs/">Manual</a>
       <a href="https://github.com/MarosiLabs/pgmind">Repository</a>
       <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/PGMIND.md">Handbook</a>
       <a href="https://github.com/MarosiLabs/pgmind/blob/main/LICENSE">PostgreSQL License</a>
