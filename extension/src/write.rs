@@ -518,13 +518,16 @@ pub fn reconcile(
     // stale makes knowledge.read() return preamble ‖ tiles bytes that were
     // never written (RFC-003 D2). Guarded so an unchanged note writes nothing.
     let preamble = &parsed.source[parsed.doc.preamble.start..parsed.doc.preamble.end];
+    let title = derive_title(parsed);
     Spi::run_with_args(
-        "UPDATE pgmind.note SET properties = $2, preamble = $3
-         WHERE id = $1 AND (properties IS DISTINCT FROM $2 OR preamble IS DISTINCT FROM $3)",
+        "UPDATE pgmind.note SET properties = $2, preamble = $3, title = $4
+         WHERE id = $1 AND (properties IS DISTINCT FROM $2 OR preamble IS DISTINCT FROM $3
+                            OR title IS DISTINCT FROM $4)",
         &[
             arg(note_id),
             JsonB(parsed.doc.properties.clone()).into(),
             preamble.into(),
+            title.as_deref().into(),
         ],
     )
     .unwrap_or_else(|e| pgrx::error!("pgmind: SPI note lane update: {e}"));
@@ -896,8 +899,59 @@ fn reconcile_extraction(vault: Uuid, note_id: Uuid, parsed: &ParsedNote, c: &Car
 /// first session already deleted compare equal on every stored column, emit no
 /// SQL, and stay deleted — the byte lane advancing while the semantic lane
 /// silently loses rows, with no error raised.
-pub fn write_note(path_raw: &str, source: &str, expected_head: Option<Uuid>) -> Uuid {
-    let vault = store::current_vault();
+/// What the note calls itself: frontmatter `title`, else its first level-1
+/// heading's own text. `None` when it declares neither — `notes()` falls back
+/// to the basename, which lives on the same row and survives a rename.
+///
+/// Resolved here rather than in `notes()` because both terms need the parse.
+/// Computing the heading term at read time would cost an index probe per row,
+/// turning the cheapest and most-called query in the product — "what is in
+/// this vault?" — into an N+1 over the block lane.
+fn derive_title(parsed: &ParsedNote) -> Option<String> {
+    if let Some(t) = parsed
+        .doc
+        .properties
+        .get("title")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+    {
+        return Some(t.to_string());
+    }
+    parsed
+        .doc
+        .blocks
+        .iter()
+        .find(|b| {
+            b.kind == pgmind_core::BlockKind::Heading
+                && b.attrs.get("level").and_then(|v| v.as_i64()) == Some(1)
+        })
+        .and_then(|b| b.attrs.get("text").and_then(|v| v.as_str()))
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+}
+
+pub fn write_note(
+    path_raw: &str,
+    source: &str,
+    expected_head: Option<Uuid>,
+    vault: Option<&str>,
+) -> Uuid {
+    write_note_in(store::resolve_vault(vault), path_raw, source, expected_head)
+}
+
+/// `write_note` with the vault already resolved, for internal callers that
+/// hold one — excision rewriting a note it is erasing from, `undelete_note`
+/// restoring into the vault it read the history out of. They must not
+/// re-resolve: the vault is a fact of the operation in progress, not of the
+/// session it happens to be running in.
+pub fn write_note_in(
+    vault: Uuid,
+    path_raw: &str,
+    source: &str,
+    expected_head: Option<Uuid>,
+) -> Uuid {
     let path = pgmind_core::path::path_normalize(path_raw);
     if !pgmind_core::path::path_is_valid(&path) {
         pm_error(
@@ -999,8 +1053,9 @@ pub fn write_note(path_raw: &str, source: &str, expected_head: Option<Uuid>) -> 
             let note_id = ids::mint();
             let rev_id = ids::mint();
             Spi::run_with_args(
-                "INSERT INTO pgmind.note (id, vault_id, path, properties, preamble, head_revision)
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                "INSERT INTO pgmind.note
+                   (id, vault_id, path, properties, preamble, head_revision, title)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 &[
                     arg(note_id),
                     arg(vault),
@@ -1008,6 +1063,7 @@ pub fn write_note(path_raw: &str, source: &str, expected_head: Option<Uuid>) -> 
                     properties.into(),
                     preamble.into(),
                     arg(rev_id),
+                    derive_title(&parsed).as_deref().into(),
                 ],
             )
             .unwrap_or_else(|e| pgrx::error!("pgmind: SPI note insert: {e}"));

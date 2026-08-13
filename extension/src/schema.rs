@@ -48,12 +48,51 @@ CREATE TYPE pgmind.block_kind AS ENUM
 CREATE TYPE pgmind.edge_kind AS ENUM ('wikilink','transclusion','blockref','mdlink');
 CREATE TYPE pgmind.op_result AS (revision uuid, block_ids uuid[]);
 
+-- The container. Until now a vault was a bare uuid that sprang into existence
+-- the first time somebody wrote a row stamped with it, so it had no name, no
+-- description, no existence test, and a typo produced a new empty vault
+-- indistinguishable from an empty one.
+--
+-- Four columns, deliberately. There is no `tenant`: applications own tenancy,
+-- and they carry their own hierarchy in the NAME, which reuses the RFC-002 D8
+-- path grammar so `acme/alice/agents/billing` is legal and
+-- `knowledge.vaults('acme/**')` works with the glob matcher the vault already
+-- has. One grammar in the product, not two.
+CREATE TABLE pgmind.vault (
+  id          uuid PRIMARY KEY,
+  name        text NOT NULL UNIQUE CHECK (pgmind.path_is_valid(name)),
+  description text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+-- The vault every session starts in, so that `CREATE EXTENSION; knowledge.write(…)`
+-- still works without ceremony.
+INSERT INTO pgmind.vault (id, name, description)
+VALUES ('00000000-0000-0000-0000-000000000000', 'default',
+        'The vault a session uses when pgmind.vault_id is unset.');
+
 CREATE TABLE pgmind.note (
   id            uuid PRIMARY KEY,
-  vault_id      uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000',
+  vault_id      uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'
+                  REFERENCES pgmind.vault(id),
   path          text NOT NULL CHECK (pgmind.path_is_valid(path)),
   basename      text GENERATED ALWAYS AS (regexp_replace(path, '^.*/', '')) STORED,
   properties    jsonb NOT NULL DEFAULT '{}'::jsonb,
+  -- What the note calls ITSELF: frontmatter `title`, else its first level-1
+  -- heading. Resolved by the write path because both terms need the parse, and
+  -- an agent listing 100k notes must not pay an index probe per row to learn a
+  -- document's name.
+  --
+  -- NULL when the note declares neither, and `notes()` falls back to
+  -- `basename` on the same row. Storing the fallback instead would go stale on
+  -- `move_note`, which changes the basename and knows nothing about titles.
+  title         text,
+  -- Generated, not stored by the write path: it is a pure function of
+  -- frontmatter, so Postgres can maintain it and there is one fewer thing an
+  -- op can forget. NULL when the note declares none — pgmind does not invent a
+  -- summary from the lead paragraph, because a guessed description that an
+  -- agent then trusts is worse than an absent one.
+  description   text GENERATED ALWAYS AS (properties->>'description') STORED,
   preamble      text NOT NULL DEFAULT '',
   head_revision uuid NOT NULL,
   -- deliberately no FK on head_revision: a note<->revision circular FK makes pg_dump
@@ -307,7 +346,7 @@ $lz4$;
 -- change the behaviour of existing single-vault deployments. Call this once
 -- per database to adopt the boundary. Idempotent.
 CREATE FUNCTION pgmind.enable_vault_rls(force boolean DEFAULT false)
-RETURNS void LANGUAGE plpgsql
+RETURNS TABLE (table_name text, covered boolean, detail text) LANGUAGE plpgsql
 SET search_path = pg_catalog, pg_temp
 AS $fn$
 -- The table list is ENUMERATED FROM pg_catalog, never written out. RFC-005's
@@ -340,9 +379,40 @@ BEGIN
       EXECUTE format('ALTER TABLE pgmind.%I FORCE ROW LEVEL SECURITY', t);
     END IF;
     EXECUTE format('DROP POLICY IF EXISTS vault_isolation ON pgmind.%I', t);
+    -- NULLIF, because a custom GUC does not come back as NULL.
+    --
+    -- After `SET LOCAL pgmind.vault_id = …; COMMIT` the setting holds the
+    -- EMPTY STRING, not NULL, and never returns to NULL for the life of the
+    -- backend (measured). Without NULLIF the predicate casts '' to uuid and
+    -- every later statement on that connection fails with 22P02 — so the
+    -- pooled-connection pattern, which is the shipped way to scope a request,
+    -- poisoned the connection it was meant to protect on its second
+    -- transaction. NULL makes the predicate NULL, which denies rather than
+    -- errors: an unset vault sees nothing instead of breaking the session.
     EXECUTE format(
       'CREATE POLICY vault_isolation ON pgmind.%I USING '
-      '(vault_id = current_setting(''pgmind.vault_id'', true)::uuid)', t);
+      '(vault_id = NULLIF(current_setting(''pgmind.vault_id'', true), '''')::uuid)', t);
+    table_name := t; covered := true; detail := NULL; RETURN NEXT;
+  END LOOP;
+
+  -- Report what the enumeration could NOT cover, rather than skipping it in
+  -- silence. A pgmind table without vault_id is outside the boundary by
+  -- construction -- pgmind.excision_replay is one today, and it holds the
+  -- erased identifying data -- and a deployer who reads only the success of
+  -- this call would never learn that.
+  FOR t IN
+    SELECT c.relname
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = 'pgmind' AND c.relkind = 'r'
+       AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute a
+                        WHERE a.attrelid = c.oid AND a.attname = 'vault_id'
+                          AND a.attnum > 0 AND NOT a.attisdropped)
+     ORDER BY c.oid
+  LOOP
+    table_name := t; covered := false;
+    detail := 'no vault_id column: this table is outside the vault boundary';
+    RETURN NEXT;
   END LOOP;
 END
 $fn$;
@@ -351,6 +421,12 @@ REVOKE ALL ON FUNCTION pgmind.enable_vault_rls(boolean) FROM PUBLIC;
 -- Backups (RFC-003 D3): extension-script tables are skipped by pg_dump unless
 -- registered. Registration order is normative (FK-topological; pg_dump emits
 -- COPY in this order, which restores under plain autocommit psql).
+-- The registry first: FK-topological, and `note.vault_id` references it.
+-- The WHERE clause excludes the seeded default vault, which CREATE EXTENSION
+-- inserts on the restore side before this table's data is replayed — dumping
+-- it would restore into a duplicate key.
+SELECT pg_catalog.pg_extension_config_dump('pgmind.vault',
+       'WHERE id <> ''00000000-0000-0000-0000-000000000000''');
 SELECT pg_catalog.pg_extension_config_dump('pgmind.note',     '');
 SELECT pg_catalog.pg_extension_config_dump('pgmind.revision', '');
 SELECT pg_catalog.pg_extension_config_dump('pgmind.tile',     '');
@@ -373,4 +449,31 @@ SELECT pg_catalog.pg_extension_config_dump('pgmind.excision_log',   '');
 "#,
     name = "pgmind_storage",
     requires = [pgmind::path_is_valid, pgmind::path_normalize]
+);
+
+// Law 11 / RFC-005 D7: the admin surface is not `PUBLIC`.
+//
+// This was decided, written into RFC-005 D7 and restated in PRODUCT-PLAN §7.1
+// ("revoked from PUBLIC") — and never implemented. Until now the only two
+// REVOKEs in the extension were `raise_error` and `enable_vault_rls`, so any
+// role that could reach the database could erase content, bound history, and
+// probe for the existence of a string across the vault. `excise` in
+// particular defaults `dry_run => true` and reports its hit count in a
+// WARNING, which made it a free existence oracle.
+//
+// Grant these deliberately, to the role that owns erasure requests.
+extension_sql!(
+    r#"
+REVOKE ALL ON FUNCTION pgmind.excise(jsonb, text, boolean, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgmind.verify_excision(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgmind.retain(bigint, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgmind.verify_note(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION pgmind.verify_history(uuid) FROM PUBLIC;
+"#,
+    name = "pgmind_admin_grants",
+    // `finalize` rather than `requires`: these functions are private items
+    // inside `#[pg_schema] mod pgmind` in excision.rs and verify.rs, so there
+    // is no path from here to name them as dependencies. Emitting last is
+    // exactly the ordering a REVOKE needs anyway.
+    finalize
 );

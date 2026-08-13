@@ -110,8 +110,8 @@ fn apply<T: Clone>(newer: &[T], ops: &[i32], payload: &[T]) -> Vec<T> {
 /// Resolve a target to `(note, seq)`, raising the errors D3 and D10 require.
 /// PM010 ("no such revision") and PM011 ("no longer reconstructable") mean
 /// opposite things to whoever debugs them, so they are never interchanged.
-pub fn resolve_at(path: &str, at: At) -> (store::NoteRow, i64) {
-    let note = store::note_by_path_or_err(store::current_vault(), path);
+pub fn resolve_at(path: &str, at: At, vault: Option<&str>) -> (store::NoteRow, i64) {
+    let note = store::note_by_path_or_err(store::resolve_vault(vault), path);
     let (head_seq, floor) = head_and_floor(note.id);
     let seq = match at {
         At::Revision(rev) => {
@@ -525,6 +525,7 @@ pub mod knowledge {
     fn history(
         path: &str,
         limit_n: default!(i64, 50),
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -539,7 +540,7 @@ pub mod knowledge {
             name!(reconstructable, bool),
         ),
     > {
-        let note = store::note_by_path_or_err(store::current_vault(), path);
+        let note = store::note_by_path_or_err(store::resolve_vault(vault.as_deref()), path);
         let rows = Spi::connect(|client| {
             client
                 .select(
@@ -574,20 +575,32 @@ pub mod knowledge {
     }
 
     #[pg_extern(name = "read_as_of")]
-    fn read_as_of_rev(path: &str, at: Uuid) -> crate::Markdown {
-        let (note, seq) = resolve_at(path, At::Revision(at));
+    fn read_as_of_rev(
+        path: &str,
+        at: Uuid,
+        vault: default!(Option<String>, "NULL"),
+    ) -> crate::Markdown {
+        let (note, seq) = resolve_at(path, At::Revision(at), vault.as_deref());
         crate::Markdown(state_at(&note, seq).source())
     }
 
     #[pg_extern(name = "read_as_of")]
-    fn read_as_of_seq(path: &str, at: i64) -> crate::Markdown {
-        let (note, seq) = resolve_at(path, At::Seq(at));
+    fn read_as_of_seq(
+        path: &str,
+        at: i64,
+        vault: default!(Option<String>, "NULL"),
+    ) -> crate::Markdown {
+        let (note, seq) = resolve_at(path, At::Seq(at), vault.as_deref());
         crate::Markdown(state_at(&note, seq).source())
     }
 
     #[pg_extern(name = "read_as_of")]
-    fn read_as_of_time(path: &str, at: pgrx::datum::TimestampWithTimeZone) -> crate::Markdown {
-        let (note, seq) = resolve_at(path, At::Time(at));
+    fn read_as_of_time(
+        path: &str,
+        at: pgrx::datum::TimestampWithTimeZone,
+        vault: default!(Option<String>, "NULL"),
+    ) -> crate::Markdown {
+        let (note, seq) = resolve_at(path, At::Time(at), vault.as_deref());
         crate::Markdown(state_at(&note, seq).source())
     }
 
@@ -617,6 +630,7 @@ pub mod knowledge {
     fn blocks_as_of_rev(
         path: &str,
         at: Uuid,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -627,7 +641,7 @@ pub mod knowledge {
             name!(heading_path, Vec<String>),
         ),
     > {
-        let (note, seq) = resolve_at(path, At::Revision(at));
+        let (note, seq) = resolve_at(path, At::Revision(at), vault.as_deref());
         TableIterator::new(blocks_rows(&note, seq))
     }
 
@@ -636,6 +650,7 @@ pub mod knowledge {
     fn blocks_as_of_seq(
         path: &str,
         at: i64,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -646,7 +661,7 @@ pub mod knowledge {
             name!(heading_path, Vec<String>),
         ),
     > {
-        let (note, seq) = resolve_at(path, At::Seq(at));
+        let (note, seq) = resolve_at(path, At::Seq(at), vault.as_deref());
         TableIterator::new(blocks_rows(&note, seq))
     }
 
@@ -658,6 +673,7 @@ pub mod knowledge {
         path: &str,
         from_at: Uuid,
         to_at: Uuid,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -667,8 +683,8 @@ pub mod knowledge {
             name!(after, Option<String>),
         ),
     > {
-        let (note, from_seq) = resolve_at(path, At::Revision(from_at));
-        let (_, to_seq) = resolve_at(path, At::Revision(to_at));
+        let (note, from_seq) = resolve_at(path, At::Revision(from_at), vault.as_deref());
+        let (_, to_seq) = resolve_at(path, At::Revision(to_at), vault.as_deref());
         let a = state_at(&note, from_seq);
         let b = state_at(&note, to_seq);
         let pos = |s: &StateAt| -> HashMap<[u8; 16], usize> {
@@ -733,6 +749,7 @@ pub mod knowledge {
     #[pg_extern]
     fn blame(
         path: &str,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -747,7 +764,7 @@ pub mod knowledge {
             name!(history_floor, i64),
         ),
     > {
-        let note = store::note_by_path_or_err(store::current_vault(), path);
+        let note = store::note_by_path_or_err(store::resolve_vault(vault.as_deref()), path);
         let (_, floor) = head_and_floor(note.id);
         let rows = Spi::connect(|client| {
             client
@@ -793,8 +810,12 @@ pub mod knowledge {
     /// `undelete_note` is a reconstruction rather than a resurrection of rows
     /// that were never really gone.
     #[pg_extern(name = "delete_note", requires = ["pgmind_storage"])]
-    fn delete_note(path: &str, expected_head: default!(Option<Uuid>, "NULL")) -> Uuid {
-        let vault = store::current_vault();
+    fn delete_note(
+        path: &str,
+        expected_head: default!(Option<Uuid>, "NULL"),
+        vault: default!(Option<String>, "NULL"),
+    ) -> Uuid {
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         store::lock_path_name(vault, path);
         let (locked_path, head) = store::lock_note_row(note.id);
@@ -854,8 +875,8 @@ pub mod knowledge {
 
     /// Reconstruct the note as of the revision before its deletion.
     #[pg_extern(name = "undelete_note", requires = ["pgmind_storage"])]
-    fn undelete_note(path: &str) -> Uuid {
-        let vault = store::current_vault();
+    fn undelete_note(path: &str, vault: default!(Option<String>, "NULL")) -> Uuid {
+        let vault = store::resolve_vault(vault.as_deref());
         store::lock_path_name(vault, path);
         store::assert_path_free(vault, path);
         let found: Option<(Uuid, i64)> = Spi::connect(|client| {
@@ -902,7 +923,7 @@ pub mod knowledge {
         // Re-writing the reconstructed source restores both lanes through the
         // ordinary write path, so identity carries by the ordinary A3 rules
         // rather than by a second, private restore path that could drift.
-        crate::write::write_note(path, &before.source(), None)
+        crate::write::write_note_in(vault, path, &before.source(), None)
     }
 
     /// Rename a note. Both paths are locked (lexicographic order, so two
@@ -915,8 +936,9 @@ pub mod knowledge {
         path: &str,
         new_path: &str,
         expected_head: default!(Option<Uuid>, "NULL"),
+        vault: default!(Option<String>, "NULL"),
     ) -> Uuid {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         let target = pgmind_core::path::path_normalize(new_path);
         if !pgmind_core::path::path_is_valid(&target) {
             pm_error(

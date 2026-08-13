@@ -1510,6 +1510,8 @@ SELECT change, before, after
       <div class="cap">psql</div>
 <pre><code class="sql">SHOW pgmind.vault_id;
 
+SELECT * FROM knowledge.create_vault('tenant-b',
+    vault_id =&gt; '3f2a0000-0000-0000-0000-000000000001');
 SET pgmind.vault_id = '3f2a0000-0000-0000-0000-000000000001';
 SELECT count(*) AS notes_visible FROM knowledge.notes();
 
@@ -1521,6 +1523,11 @@ SELECT count(*) AS notes_visible FROM knowledge.notes();</code></pre>
 <pre class="out"><code class="out">           pgmind.vault_id
 --------------------------------------
  00000000-0000-0000-0000-000000000000
+(1 row)
+
+               vault_id               |   name   
+--------------------------------------+----------
+ 3f2a0000-0000-0000-0000-000000000001 | tenant-b
 (1 row)
 
  notes_visible
@@ -1660,6 +1667,14 @@ SELECT count(*) AS notes_visible FROM knowledge.notes();</code></pre>
         <tr><td><code>PM017</code></td><td><code>pgmind_invalid_author</code></td>
             <td><code>pgmind.author</code> is longer than 200 characters</td>
             <td>shorten it</td></tr>
+        <tr><td><code>PM018</code></td><td><code>pgmind_vault_not_found</code></td>
+            <td>no vault has that name or id</td>
+            <td>check <code>knowledge.vaults()</code>, or create it. An
+                unregistered id is an error, not a new empty vault</td></tr>
+        <tr><td><code>PM019</code></td><td><code>pgmind_batch_arity</code></td>
+            <td>a <code>write_many</code> batch has mismatched arrays, a NULL
+                element, or more than 1000 notes</td>
+            <td>fix the arrays — the DETAIL names the element index</td></tr>
       </tbody>
     </table>
     </div>

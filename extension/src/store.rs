@@ -17,17 +17,75 @@ pub fn default_vault() -> Uuid {
 
 /// The current vault from GUC `pgmind.vault_id` (RFC-003 D1).
 pub fn current_vault() -> Uuid {
-    let Some(setting) = VAULT_ID_GUC.get() else {
-        return default_vault();
+    let id = match VAULT_ID_GUC.get() {
+        None => default_vault(),
+        Some(setting) => {
+            let s = setting.to_str().unwrap_or("");
+            // An empty GUC is what a pooled connection holds after
+            // `SET LOCAL …; COMMIT` — it never returns to NULL. Treat it as
+            // unset rather than as a malformed uuid.
+            if s.is_empty() {
+                default_vault()
+            } else {
+                parse_uuid(s).unwrap_or_else(|| {
+                    pm_error(
+                        Pm::InvalidPath,
+                        "malformed pgmind.vault_id GUC",
+                        &format!("value {s:?} is not a UUID"),
+                    )
+                })
+            }
+        }
     };
-    let s = setting.to_str().unwrap_or("");
-    parse_uuid(s).unwrap_or_else(|| {
-        pm_error(
-            Pm::InvalidPath,
-            "malformed pgmind.vault_id GUC",
-            &format!("value {s:?} is not a UUID"),
-        )
-    })
+    require_vault(id)
+}
+
+/// Resolve an explicit `vault` argument: a **name** or a uuid in its text
+/// spelling. `None` falls back to the `pgmind.vault_id` GUC.
+///
+/// A value that parses as a uuid is looked up by id, otherwise by name. Vault
+/// names are RFC-002 D8 paths, so a uuid-shaped string is a legal name in
+/// principle; id wins, and that is the documented rule rather than a guess.
+///
+/// Either way the vault must exist. A typo and an id belonging to somebody
+/// else produce the same PM018, worded identically — there is nothing here to
+/// tell them apart with.
+pub fn resolve_vault(vault: Option<&str>) -> Uuid {
+    let Some(v) = vault else {
+        return current_vault();
+    };
+    let v = v.trim();
+    if v.is_empty() {
+        return current_vault();
+    }
+    let found: Option<Uuid> = match parse_uuid(v) {
+        Some(id) => Spi::get_one_with_args("SELECT id FROM pgmind.vault WHERE id = $1", &[arg(id)])
+            .unwrap_or(None),
+        None => Spi::get_one_with_args("SELECT id FROM pgmind.vault WHERE name = $1", &[v.into()])
+            .unwrap_or(None),
+    };
+    found.unwrap_or_else(|| vault_not_found(v))
+}
+
+/// The vault must be registered. Before there was a registry, a uuid nobody
+/// created was not an error but a brand-new empty vault, so a typo read as an
+/// empty vault and wrote into one nobody could find again.
+fn require_vault(id: Uuid) -> Uuid {
+    let known: Option<Uuid> =
+        Spi::get_one_with_args("SELECT id FROM pgmind.vault WHERE id = $1", &[arg(id)])
+            .unwrap_or(None);
+    known.unwrap_or_else(|| vault_not_found(&id.to_string()))
+}
+
+fn vault_not_found(what: &str) -> ! {
+    pm_error(
+        Pm::VaultNotFound,
+        "no such vault",
+        &format!(
+            "vault {what:?} is not registered; create it with \
+             knowledge.create_vault(), or list what exists with knowledge.vaults()"
+        ),
+    )
 }
 
 /// Parse the `pgmind.vault_id` GUC the way PostgreSQL's own `uuid` input does,

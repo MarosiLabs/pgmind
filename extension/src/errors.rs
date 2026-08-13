@@ -50,6 +50,14 @@ pub enum Pm {
     StaleBlock,
     /// PM017 pgmind_invalid_author
     InvalidAuthor,
+    /// PM018 pgmind_vault_not_found
+    VaultNotFound,
+    // Deliberately not PM004. That code is frozen to "fragment parses to the
+    // wrong number of addressable blocks" (RFC-004 §A6); a batch whose parallel
+    // arrays disagree in length has nothing to do with block counts, and an
+    // agent matching on `pgmind_fragment_arity` would repair the wrong thing.
+    /// PM019 pgmind_batch_arity
+    BatchArity,
 }
 
 impl Pm {
@@ -72,6 +80,8 @@ impl Pm {
             Pm::PathTaken => "PM015",
             Pm::StaleBlock => "PM016",
             Pm::InvalidAuthor => "PM017",
+            Pm::VaultNotFound => "PM018",
+            Pm::BatchArity => "PM019",
         }
     }
 
@@ -94,6 +104,8 @@ impl Pm {
             Pm::PathTaken => "pgmind_path_taken",
             Pm::StaleBlock => "pgmind_stale_block",
             Pm::InvalidAuthor => "pgmind_invalid_author",
+            Pm::VaultNotFound => "pgmind_vault_not_found",
+            Pm::BatchArity => "pgmind_batch_arity",
         }
     }
 }

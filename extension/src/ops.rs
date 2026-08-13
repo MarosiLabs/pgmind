@@ -3,7 +3,7 @@
 //! invariance (PM008), pins + scoped subtree carry, one revision per op.
 
 use pgrx::prelude::*;
-use pgrx::{heap_tuple::PgHeapTuple, Uuid};
+use pgrx::{heap_tuple::PgHeapTuple, iter::SetOfIterator, Uuid};
 use serde_json::json;
 
 use crate::errors::{pm_error, Pm};
@@ -49,8 +49,8 @@ impl NoteCtx {
     }
 }
 
-fn load_ctx_by_block(block_id: Uuid) -> (NoteCtx, usize) {
-    let vault = store::current_vault();
+fn load_ctx_by_block(block_id: Uuid, vault: Option<&str>) -> (NoteCtx, usize) {
+    let vault = store::resolve_vault(vault);
     let found: Option<(Uuid, Uuid)> = Spi::connect(|client| {
         let rows = client
             .select(
@@ -320,8 +320,26 @@ fn trailing_newlines(s: &str) -> String {
     s[s.trim_end_matches('\n').len()..].to_string()
 }
 
-/// The op result composite (RFC-003 D6).
-fn op_result(revision: Uuid, block_ids: Vec<Uuid>) -> PgHeapTuple<'static, pgrx::AllocatedByRust> {
+/// The op result (RFC-003 D6): still the named composite `pgmind.op_result`,
+/// now returned as a one-row SET.
+///
+/// The composite is normative in three frozen RFCs (RFC-003 D6, RFC-004,
+/// RFC-005 D5.11) and keeps its name and its columns. What changes is arity,
+/// and the reason is correctness rather than taste: a VOLATILE function
+/// returning a *scalar* composite is evaluated once per output column when it
+/// is called as `SELECT (knowledge.update_block(…)).*` — the idiom every SQL
+/// example in the world teaches — so a two-column result applied every edit
+/// TWICE, committing two revisions and printing one row of correct-looking
+/// output. Postgres evaluates a set-returning expression once, in a ProjectSet
+/// node, so that call site is now safe by construction instead of by a warning
+/// on six documentation pages.
+///
+/// Measured on PG 18.4: scalar composite `(f()).*` = 2 invocations;
+/// `SETOF` composite `(f()).*` = 1. `SELECT * FROM knowledge.op(…)` is
+/// unchanged in both shape and column names.
+type OpRows = pgrx::iter::SetOfIterator<'static, PgHeapTuple<'static, pgrx::AllocatedByRust>>;
+
+fn op_result(revision: Uuid, block_ids: Vec<Uuid>) -> OpRows {
     let mut tuple = PgHeapTuple::new_composite_type("pgmind.op_result")
         .unwrap_or_else(|e| pgrx::error!("pgmind: op_result composite missing: {e}"));
     tuple
@@ -330,7 +348,7 @@ fn op_result(revision: Uuid, block_ids: Vec<Uuid>) -> PgHeapTuple<'static, pgrx:
     tuple
         .set_by_name("block_ids", block_ids)
         .unwrap_or_else(|e| pgrx::error!("pgmind: op_result.block_ids: {e}"));
-    tuple
+    pgrx::iter::SetOfIterator::new(vec![tuple])
 }
 
 /// What an op tells [`commit_op`] about the splice it just performed. Named
@@ -366,12 +384,7 @@ struct OpCommit {
 /// itself: every op already parsed it to locate its pins, and re-parsing here
 /// meant a third full comrak pass and another whole-document copy per
 /// operation (`ctx.parsed`, the probe, and this one) for an identical result.
-fn commit_op(
-    ctx: &NoteCtx,
-    op: &str,
-    new_parsed: ParsedNote,
-    spec: OpCommit,
-) -> PgHeapTuple<'static, pgrx::AllocatedByRust> {
+fn commit_op(ctx: &NoteCtx, op: &str, new_parsed: ParsedNote, spec: OpCommit) -> OpRows {
     let OpCommit {
         old_region,
         edit_range,
@@ -671,7 +684,8 @@ mod knowledge {
         before: default!(Option<Uuid>, "NULL"),
         after: default!(Option<Uuid>, "NULL"),
         expected_head: default!(Option<Uuid>, "NULL"),
-    ) -> pgrx::composite_type!('static, "pgmind.op_result") {
+        vault: default!(Option<String>, "NULL"),
+    ) -> SetOfIterator<'static, pgrx::composite_type!('static, "pgmind.op_result")> {
         if before.is_some() && after.is_some() {
             pm_error(
                 Pm::InvalidAnchor,
@@ -679,7 +693,7 @@ mod knowledge {
                 "insert_blocks",
             );
         }
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         let tiles = store::tiles_of(note.id);
         let source = store::source_of(&note, &tiles);
@@ -759,8 +773,9 @@ mod knowledge {
         heading_path: Vec<String>,
         fragment: Markdown,
         expected_head: default!(Option<Uuid>, "NULL"),
-    ) -> pgrx::composite_type!('static, "pgmind.op_result") {
-        let vault = store::current_vault();
+        vault: default!(Option<String>, "NULL"),
+    ) -> SetOfIterator<'static, pgrx::composite_type!('static, "pgmind.op_result")> {
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         let (locked_path, locked_head) = store::lock_note_row(note.id);
         if locked_path != path {
@@ -807,7 +822,14 @@ mod knowledge {
             })
             .map(|(_, r)| r.id);
         match anchor {
-            Some(anchor) => insert_blocks(path, fragment, None, Some(anchor), Some(locked_head)),
+            Some(anchor) => insert_blocks(
+                path,
+                fragment,
+                None,
+                Some(anchor),
+                Some(locked_head),
+                Some(vault.to_string()),
+            ),
             // The section exists but ends in something nothing can anchor to
             // (a bare blockquote, say). Saying "no such section" here would
             // send the caller looking for a heading that is right there.
@@ -816,11 +838,34 @@ mod knowledge {
                 "section has no block an append can anchor to",
                 &format!("{heading_path:?} in {path:?}"),
             ),
-            None => pm_error(
-                Pm::SectionNotFound,
-                "no section with that heading path",
-                &format!("{heading_path:?} in {path:?}"),
-            ),
+            // No CONTENT block carries this heading_path — but the section may
+            // exist and simply be empty. A block's `heading_path` is its
+            // ANCESTOR chain, and a heading's own text is not in its own
+            // chain, so a section holding nothing but its heading matches zero
+            // rows here while `read_section` resolves it and `blocks()` shows
+            // it plainly. That is the first append into every freshly created
+            // memory document, so it anchors on the heading itself rather than
+            // reporting a section the caller can see is right there.
+            //
+            // Deliberately only on this arm: the InvalidAnchor arm above means
+            // the section HAS content that cannot take an append, and falling
+            // back to the heading there would silently land the append at the
+            // TOP of the section instead of the bottom.
+            None => match section_heading_block(&rows, &parsed, &heading_path) {
+                Some(heading_id) => insert_blocks(
+                    path,
+                    fragment,
+                    None,
+                    Some(heading_id),
+                    Some(locked_head),
+                    Some(vault.to_string()),
+                ),
+                None => pm_error(
+                    Pm::SectionNotFound,
+                    "no section with that heading path",
+                    &format!("{heading_path:?} in {path:?}"),
+                ),
+            },
         }
     }
 
@@ -838,8 +883,9 @@ mod knowledge {
         fragment: Markdown,
         expected_head: default!(Option<Uuid>, "NULL"),
         expected_hash: default!(Option<Vec<u8>>, "NULL"),
-    ) -> pgrx::composite_type!('static, "pgmind.op_result") {
-        let (ctx, idx) = load_ctx_by_block(block_id);
+        vault: default!(Option<String>, "NULL"),
+    ) -> SetOfIterator<'static, pgrx::composite_type!('static, "pgmind.op_result")> {
+        let (ctx, idx) = load_ctx_by_block(block_id, vault.as_deref());
         // Coarser guard first: "someone changed the note" is the more
         // informative failure when the caller asked for both.
         store::cas_check(expected_head, ctx.head, &ctx.path);
@@ -930,7 +976,8 @@ mod knowledge {
         before: default!(Option<Uuid>, "NULL"),
         after: default!(Option<Uuid>, "NULL"),
         expected_head: default!(Option<Uuid>, "NULL"),
-    ) -> pgrx::composite_type!('static, "pgmind.op_result") {
+        vault: default!(Option<String>, "NULL"),
+    ) -> SetOfIterator<'static, pgrx::composite_type!('static, "pgmind.op_result")> {
         if before.is_some() == after.is_some() {
             pm_error(
                 Pm::InvalidAnchor,
@@ -938,7 +985,7 @@ mod knowledge {
                 "move_block",
             );
         }
-        let (ctx, idx) = load_ctx_by_block(block_id);
+        let (ctx, idx) = load_ctx_by_block(block_id, vault.as_deref());
         store::cas_check(expected_head, ctx.head, &ctx.path);
         let anchor_id = before.or(after).unwrap();
         let ai = ctx
@@ -1038,8 +1085,9 @@ mod knowledge {
         block_id: Uuid,
         fragment: Markdown,
         expected_head: default!(Option<Uuid>, "NULL"),
-    ) -> pgrx::composite_type!('static, "pgmind.op_result") {
-        let (ctx, idx) = load_ctx_by_block(block_id);
+        vault: default!(Option<String>, "NULL"),
+    ) -> SetOfIterator<'static, pgrx::composite_type!('static, "pgmind.op_result")> {
+        let (ctx, idx) = load_ctx_by_block(block_id, vault.as_deref());
         store::cas_check(expected_head, ctx.head, &ctx.path);
         let (frag, roots) = parse_fragment(&fragment.0);
         if roots.len() < 2 {
@@ -1159,7 +1207,8 @@ mod knowledge {
         fragment: Markdown,
         keep: default!(Option<Uuid>, "NULL"),
         expected_head: default!(Option<Uuid>, "NULL"),
-    ) -> pgrx::composite_type!('static, "pgmind.op_result") {
+        vault: default!(Option<String>, "NULL"),
+    ) -> SetOfIterator<'static, pgrx::composite_type!('static, "pgmind.op_result")> {
         if block_ids.len() < 2 {
             pm_error(
                 Pm::ContainerConstraint,
@@ -1167,7 +1216,7 @@ mod knowledge {
                 "merge_blocks",
             );
         }
-        let (ctx, _) = load_ctx_by_block(block_ids[0]);
+        let (ctx, _) = load_ctx_by_block(block_ids[0], vault.as_deref());
         store::cas_check(expected_head, ctx.head, &ctx.path);
         let mut idxs: Vec<usize> = block_ids
             .iter()
@@ -1316,6 +1365,34 @@ mod knowledge {
 /// accepted it as top level, which let `insert_blocks` splice a new tile
 /// outside the quote and `move_block` relocate the entire quote, both without
 /// the PM005 the anchor guard is there to raise.
+/// The heading block that OPENS the section named by `heading_path`, if the
+/// note has one.
+///
+/// A heading's stored `heading_path` is its ANCESTOR chain and excludes its
+/// own text, so a section's full name is that chain plus the heading's own
+/// text — the same comparison `read_section` makes (read.rs). First match
+/// wins, matching `read_section`; the two functions disagreeing about which
+/// duplicate heading they mean is a separate defect, and this fix does not
+/// widen it.
+fn section_heading_block(
+    rows: &[BlockRow],
+    parsed: &ParsedNote,
+    heading_path: &[String],
+) -> Option<Uuid> {
+    rows.iter().enumerate().find_map(|(i, r)| {
+        if r.kind != "heading" {
+            return None;
+        }
+        let own = r.attrs.get("text").and_then(|v| v.as_str()).unwrap_or("");
+        let mut full = r.heading_path.clone();
+        full.push(own.to_string());
+        if full.as_slice() != heading_path {
+            return None;
+        }
+        is_top_level_child(parsed, i).then_some(r.id)
+    })
+}
+
 fn is_top_level_child(parsed: &ParsedNote, idx: usize) -> bool {
     let b = &parsed.doc.blocks[idx];
     b.parent.is_none()
@@ -1341,7 +1418,7 @@ fn insert_top_level(
     anchor: Option<usize>,
     frag: &ParsedNote,
     before: bool,
-) -> PgHeapTuple<'static, pgrx::AllocatedByRust> {
+) -> OpRows {
     let preamble_end = ctx.parsed.doc.preamble.end;
     let old_trailing = trailing_newlines(ctx.src());
     let mut tiles: Vec<String> = ctx.parsed.tiles.clone();
@@ -1441,7 +1518,7 @@ fn insert_item_level(
     frag: &ParsedNote,
     roots: &[usize],
     before: bool,
-) -> PgHeapTuple<'static, pgrx::AllocatedByRust> {
+) -> OpRows {
     let all_items = roots
         .iter()
         .all(|&r| frag.doc.blocks[r].kind == pgmind_core::BlockKind::ListItem);

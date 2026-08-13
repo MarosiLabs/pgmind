@@ -125,16 +125,18 @@
       </p>
     </div>
 
-    <div class="note-box trap">
-      <span class="lbl">Read this before your first write</span>
+    <div class="note-box">
+      <span class="lbl">Return shape</span>
       <p>
         Six of the seven writing functions return
-        <code>pgmind.op_result</code>, a composite — every one except
-        <code>knowledge.write</code>, which returns a bare <code>uuid</code>.
-        Call the six from <code>FROM</code>. <code>SELECT
-        (knowledge.update_block(…)).*</code> makes PostgreSQL evaluate the
-        function once per output column and applies your edit <em>twice</em> —
-        measured, not theoretical.
+        <code>SETOF pgmind.op_result</code> — one row, <code>(revision,
+        block_ids)</code> — every one except <code>knowledge.write</code>,
+        which returns a bare <code>uuid</code>. <code>SELECT * FROM
+        knowledge.update_block(…)</code> is the clearest form, but
+        <code>SELECT (knowledge.update_block(…)).*</code> is now safe too:
+        a set-returning expression is evaluated once. It was not always —
+        while these returned a scalar composite, that idiom applied the edit
+        <em>twice</em>.
       </p>
     </div>
 
@@ -388,13 +390,25 @@
       <a href="#fn-knowledge-blocks"><code>blocks</code></a>,
       <a href="#fn-knowledge-links"><code>links</code></a> and
       <a href="#fn-knowledge-tags"><code>tags</code></a> — are overloads of
-      reading functions and are documented with them below. For
-      <code>blocks</code> and <code>links</code>, remember the cast: they also
-      have a <code>(text)</code> overload, and a bare string literal picks that
-      stored-note one. <code>tags</code> is overloaded on arity —
-      <code>tags()</code> against <code>tags(markdown)</code> — so a bare
-      literal reaches the parser without a cast.
+      reading functions and are documented with them below.
+      <strong>All three need the cast.</strong> Each also has a
+      <code>text</code>-taking overload, and an uncast literal — quoted or
+      dollar-quoted — resolves to <code>text</code>, so pgmind reads your
+      document as a path or a vault name instead of parsing it. Write
+      <code>$md$…$md$::markdown</code>.
     </p>
+    <div class="note-box trap">
+      <span class="lbl">Changed</span>
+      <p>
+        <code>tags</code> used to be the exception: it was overloaded on arity
+        alone, so <code>tags($md$…$md$)</code> reached the parser. Now that
+        <code>tags(vault text DEFAULT NULL)</code> exists, that same call
+        resolves to the vault overload and raises
+        <span class="badge err">PM018</span> — or, if the text happens to name a
+        real vault, quietly answers a different question. Every example on this
+        site carries the cast; check your own.
+      </p>
+    </div>
 
     <div class="fn">
       <h3 id="fn-knowledge-preamble">knowledge.preamble <span class="badge ok">In main</span></h3>
@@ -557,7 +571,7 @@ $md$) AS invalid_yaml;</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-read">knowledge.read <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>read(path text) → markdown</code></div>
+      <div class="sig"><code>read(path text, vault text DEFAULT NULL) → markdown</code></div>
       <p class="purpose">
         Return the note's current source, byte for byte as it was written.
       </p>
@@ -570,7 +584,10 @@ $md$) AS invalid_yaml;</code></pre>
           <tr><td><code>path</code></td><td><code>text</code></td><td>—</td>
               <td>Note path. NFC-normalised and trimmed before lookup;
                   case-sensitive.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -616,7 +633,7 @@ $md$) AS invalid_yaml;</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-read-section">knowledge.read_section <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>read_section(path text, heading_path text[]) → markdown</code></div>
+      <div class="sig"><code>read_section(path text, heading_path text[], vault text DEFAULT NULL) → markdown</code></div>
       <p class="purpose">
         Return one section — its heading and everything under it, down to the
         next heading of the same or a shallower level — as markdown.
@@ -634,7 +651,10 @@ $md$) AS invalid_yaml;</code></pre>
                   <code>ARRAY['Auth','Decisions']</code>. Compare against the
                   <code>heading_path</code> column of
                   <a href="#fn-knowledge-blocks"><code>blocks()</code></a>.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -686,9 +706,224 @@ $md$) AS invalid_yaml;</code></pre>
     </div>
 
     <div class="fn">
+      <h3 id="fn-knowledge-create-vault">knowledge.create_vault <span class="badge ok">In main</span></h3>
+      <div class="sig"><code>create_vault(name text, description text DEFAULT NULL,
+              vault_id uuid DEFAULT NULL, if_not_exists boolean DEFAULT false)
+  &rarr; TABLE(vault_id uuid, name text)</code></div>
+      <p class="purpose">
+        Create a vault. A vault is the container every note lives in; until it
+        is registered, its id is not usable.
+      </p>
+
+      <h4>Parameters</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>name</code></td><td><code>text</code></td><td>&mdash;</td>
+              <td>Unique. Uses the same grammar as a note path, so
+                  <code>acme/alice/agents/billing</code> is legal and
+                  <code>knowledge.vaults('acme/**')</code> matches it. pgmind has
+                  no tenant concept: <strong>this is where an application puts
+                  its hierarchy</strong>.</td></tr>
+          <tr><td><code>description</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Free text, returned by <code>vaults()</code>.</td></tr>
+          <tr><td><code>vault_id</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
+              <td>Caller-supplied id, else a minted UUIDv7. Supply it when your
+                  own table already keys this tenant, user or agent, so the two
+                  agree without a mapping table.</td></tr>
+          <tr><td><code>if_not_exists</code></td><td><code>boolean</code></td><td><code>false</code></td>
+              <td>Adopt an existing vault of the same name instead of raising.
+                  What makes provisioning idempotent.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Errors</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Code</th><th scope="col">When</th></tr></thead>
+        <tbody>
+          <tr><td><code>PM001</code></td><td>The name is not a valid path.</td></tr>
+          <tr><td><code>PM015</code></td><td>The name or the id is already taken, and
+              <code>if_not_exists</code> is false. It never silently hands back
+              somebody else's vault.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Example</h4>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.create_vault('acme/alice/instructions',
+    'Alice standing instructions');</code></pre>
+<pre class="out"><code class="out">               vault_id               |          name           
+--------------------------------------+-------------------------
+ 019feaf0-…                           | acme/alice/instructions
+(1 row)</code></pre>
+      </div>
+
+      <h4>See also</h4>
+      <p>
+        <a href="#fn-knowledge-vaults">knowledge.vaults</a>,
+        <a href="#fn-knowledge-vault-id">knowledge.vault_id</a>.
+      </p>
+    </div>
+
+    <div class="fn">
+      <h3 id="fn-knowledge-vaults">knowledge.vaults <span class="badge ok">In main</span></h3>
+      <div class="sig"><code>vaults(glob text DEFAULT '**'::text)
+  &rarr; TABLE(vault_id uuid, name text, description text, created_at timestamptz)</code></div>
+      <p class="purpose">
+        List vaults, filtered by a glob over the <em>name</em>.
+      </p>
+
+      <div class="note-box trap">
+        <span class="lbl">Scope</span>
+        <p>
+          This lists <strong>every</strong> vault in the database. pgmind has no
+          tenant concept, so narrowing a listing is
+          <code>knowledge.vaults('acme/**')</code> and <em>enforcing</em> that
+          narrowing is the application's job. See
+          <a href="cookbook.html#tenancy">Multi-tenancy and access</a>.
+        </p>
+      </div>
+
+      <h4>Parameters</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>glob</code></td><td><code>text</code></td><td><code>'**'</code></td>
+              <td>Matched against the vault name, with the same
+                  <code>*</code>/<code>**</code> rules as
+                  <a href="#fn-knowledge-notes"><code>notes()</code></a>.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Example</h4>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT vault_id, name, description FROM knowledge.vaults('acme/**');</code></pre>
+<pre class="out"><code class="out">               vault_id               |          name           |         description         
+--------------------------------------+-------------------------+-----------------------------
+ 019feaf0-…                           | acme/alice/instructions | Alice standing instructions
+(1 row)</code></pre>
+      </div>
+    </div>
+
+    <div class="fn">
+      <h3 id="fn-knowledge-vault-id">knowledge.vault_id <span class="badge ok">In main</span></h3>
+      <div class="sig"><code>vault_id(name text) &rarr; uuid</code></div>
+      <p class="purpose">
+        A vault's id, by name.
+      </p>
+
+      <h4>Errors</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Code</th><th scope="col">When</th></tr></thead>
+        <tbody>
+          <tr><td><code>PM018</code></td><td>No vault of that name. A typo and a name
+              belonging to somebody else fail identically — there is nothing in
+              the message to tell them apart with.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Example</h4>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.vault_id('acme/alice/instructions');</code></pre>
+<pre class="out"><code class="out">               vault_id               
+--------------------------------------
+ 019feaf0-…
+(1 row)</code></pre>
+      </div>
+    </div>
+
+    <div class="fn">
+      <h3 id="fn-knowledge-note-id">knowledge.note_id <span class="badge ok">In main</span></h3>
+      <div class="sig"><code>note_id(path text, vault text DEFAULT NULL) &rarr; uuid</code></div>
+      <p class="purpose">
+        A note's stable identity, by path.
+      </p>
+      <p>
+        Worth holding in preference to a path: it survives
+        <a href="#fn-knowledge-move-note"><code>move_note</code></a>, it is what
+        an application should foreign-key against, and it is the argument
+        <a href="#fn-pgmind-verify-note"><code>pgmind.verify_note</code></a>
+        takes — which the public API could not previously produce at all.
+      </p>
+
+      <h4>Parameters</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>path</code></td><td><code>text</code></td><td>—</td>
+              <td>The note to identify.</td></tr>
+          <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Errors</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Code</th><th scope="col">When</th></tr></thead>
+        <tbody>
+          <tr><td><code>PM002</code></td><td>No live note at that path in this vault.</td></tr>
+          <tr><td><code>PM018</code></td><td>The <code>vault</code> given is not registered.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Example</h4>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.note_id('projects/auth');</code></pre>
+<pre class="out"><code class="out">               note_id                
+--------------------------------------
+ 019feb61-…
+(1 row)</code></pre>
+      </div>
+
+      <h4>See also</h4>
+      <p><a href="#fn-knowledge-path-of">knowledge.path_of</a>.</p>
+    </div>
+
+    <div class="fn">
+      <h3 id="fn-knowledge-path-of">knowledge.path_of <span class="badge ok">In main</span></h3>
+      <div class="sig"><code>path_of(note_id uuid) &rarr; text</code></div>
+      <p class="purpose">
+        A note's current path, by id. The inverse of
+        <a href="#fn-knowledge-note-id"><code>note_id</code></a>.
+      </p>
+      <p>
+        Scoped to the current vault: an id belonging to another vault raises
+        <code>PM002</code>, exactly as an id belonging to nothing does.
+      </p>
+
+      <h4>Errors</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Code</th><th scope="col">When</th></tr></thead>
+        <tbody>
+          <tr><td><code>PM002</code></td><td>No live note with that id in this vault.</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+
+    <div class="fn">
       <h3 id="fn-knowledge-notes">knowledge.notes <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>notes(glob text DEFAULT '**'::text)
-  → TABLE(path text, title text, properties jsonb, head_revision uuid,
+      <div class="sig"><code>notes(glob text DEFAULT '**'::text, vault text DEFAULT NULL)
+  → TABLE(note_id uuid, path text, title text, description text,
+          properties jsonb, head_revision uuid,
           created_at timestamptz, updated_at timestamptz)</code></div>
       <p class="purpose">
         List the live notes in the current vault, optionally filtered by a
@@ -705,7 +940,10 @@ $md$) AS invalid_yaml;</code></pre>
                   <code>**</code> matches across segments. Nothing else is
                   special — no <code>?</code>, no character classes, no
                   braces. Maximum 4096 bytes.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -715,11 +953,21 @@ $md$) AS invalid_yaml;</code></pre>
         <thead><tr><th scope="col">Column</th><th scope="col">Type</th><th scope="col">Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>path</code></td><td><code>text</code></td><td>The note's path.</td></tr>
+          <tr><td><code>note_id</code></td><td><code>uuid</code></td>
+              <td>Stable identity. Survives <code>move_note</code>, where the
+                  path does not, and is what
+                  <a href="#fn-pgmind-verify-note"><code>pgmind.verify_note</code></a>
+                  takes.</td></tr>
           <tr><td><code>title</code></td><td><code>text</code></td>
-              <td><strong>The path's last segment</strong>, not the frontmatter
-                  <code>title</code>. For <code>projects/auth</code> this is
-                  <code>auth</code> even when the frontmatter says
-                  <code>title: Auth</code>.</td></tr>
+              <td>What the note calls itself: frontmatter <code>title</code>,
+                  else its first level-1 heading, else the path's last segment.
+                  Never NULL. (Before the registry work this column was
+                  <em>always</em> the last segment, whatever the frontmatter
+                  said.)</td></tr>
+          <tr><td><code>description</code></td><td><code>text</code></td>
+              <td>Frontmatter <code>description</code>, or NULL. pgmind does not
+                  invent one from the lead paragraph — a guessed summary an
+                  agent then trusts is worse than an absent one.</td></tr>
           <tr><td><code>properties</code></td><td><code>jsonb</code></td>
               <td>Parsed frontmatter; <code>{}</code> when there is none.</td></tr>
           <tr><td><code>head_revision</code></td><td><code>uuid</code></td>
@@ -799,7 +1047,7 @@ SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-blocks">knowledge.blocks <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>blocks(path text)
+      <div class="sig"><code>blocks(path text, vault text DEFAULT NULL)
   → TABLE(block_id uuid, ord integer, kind text, parent_block uuid,
           heading_path text[], content text, content_hash bytea,
           block_ref_id text, span_start bigint, span_end bigint, attrs jsonb)
@@ -825,7 +1073,10 @@ blocks(doc markdown)
                   <code>parent</code> is an <code>ord</code>, not a
                   <code>uuid</code>. Cast the literal:
                   <code>$md$…$md$::markdown</code>.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -931,7 +1182,7 @@ $md$::markdown);</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-links">knowledge.links <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>links(path text)
+      <div class="sig"><code>links(path text, vault text DEFAULT NULL)
   → TABLE(block_id uuid, kind text, target text, anchor text, alias text,
           resolved_path text, dangling_reason text)
 
@@ -954,7 +1205,10 @@ links(doc markdown)
               <td>A document to parse. Nothing is resolved — there is no vault
                   in the picture — so the row reports the block's
                   <code>ord</code> instead of an id.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -1047,7 +1301,7 @@ links(doc markdown)
 
     <div class="fn">
       <h3 id="fn-knowledge-backlinks">knowledge.backlinks <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>backlinks(path text)
+      <div class="sig"><code>backlinks(path text, vault text DEFAULT NULL)
   → TABLE(src_path text, block_id uuid, kind text, anchor text, excerpt text)</code></div>
       <p class="purpose">
         Every edge pointing <em>at</em> this note, with the source block's text
@@ -1061,7 +1315,10 @@ links(doc markdown)
         <tbody>
           <tr><td><code>path</code></td><td><code>text</code></td><td>—</td>
               <td>The note being pointed at. It must exist.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -1118,7 +1375,7 @@ links(doc markdown)
 
     <div class="fn">
       <h3 id="fn-knowledge-tags">knowledge.tags <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>tags() → TABLE(tag text, notes bigint, blocks bigint)
+      <div class="sig"><code>tags(vault text DEFAULT NULL) → TABLE(tag text, notes bigint, blocks bigint)
 
 tags(doc markdown) → TABLE(tag text, block integer)</code></div>
       <p class="purpose">
@@ -1136,7 +1393,10 @@ tags(doc markdown) → TABLE(tag text, block integer)</code></div>
           <tr><td><code>doc</code></td><td><code>markdown</code></td><td>—</td>
               <td>A document to scan. Returns one row per occurrence, with the
                   block's <code>ord</code>.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -1211,7 +1471,7 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
 
     <div class="fn">
       <h3 id="fn-knowledge-tagged">knowledge.tagged <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>tagged(tag text) → TABLE(path text, block_id uuid, tag text)</code></div>
+      <div class="sig"><code>tagged(tag text, vault text DEFAULT NULL) → TABLE(path text, block_id uuid, tag text)</code></div>
       <p class="purpose">
         Find everything carrying a tag, note-level and block-level in one
         result.
@@ -1225,7 +1485,10 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
           <tr><td><code>tag</code></td><td><code>text</code></td><td>—</td>
               <td>Tag name, with or without a leading <code>#</code>. Matched
                   case-insensitively.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -1268,11 +1531,23 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
 
     <div class="fn">
       <h3 id="fn-knowledge-orphans">knowledge.orphans <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>orphans() → TABLE(path text)</code></div>
+      <div class="sig"><code>orphans(vault text DEFAULT NULL) → TABLE(path text)</code></div>
       <p class="purpose">
         Notes nothing links to — the ones an agent will never reach by walking
         the graph.
       </p>
+
+      <h4>Parameters</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+        </tbody>
+      </table>
+      </div>
 
       <h4>Returns</h4>
       <div class="table-scroll">
@@ -1315,7 +1590,7 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
 
     <div class="fn">
       <h3 id="fn-knowledge-stats">knowledge.stats <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>stats()
+      <div class="sig"><code>stats(vault text DEFAULT NULL)
   → TABLE(vault_id uuid, notes bigint, blocks bigint, edges_resolved bigint,
           edges_dangling bigint, tags bigint, revisions bigint, bytes bigint)</code></div>
       <p class="purpose">
@@ -1324,6 +1599,18 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
         <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a> is doing
         what you think.
       </p>
+
+      <h4>Parameters</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+        </tbody>
+      </table>
+      </div>
 
       <h4>Returns</h4>
       <div class="table-scroll">
@@ -1397,7 +1684,7 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
 
     <div class="fn">
       <h3 id="fn-knowledge-write">knowledge.write <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>write(path text, doc markdown, expected_head uuid DEFAULT NULL::uuid) → uuid</code></div>
+      <div class="sig"><code>write(path text, doc markdown, expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → uuid</code></div>
       <p class="purpose">
         Create a note or replace its entire contents, keeping as many block
         identities as it can prove.
@@ -1414,7 +1701,10 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
               <td>The complete new source, frontmatter included.</td></tr>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set. <code>NULL</code> means "do not check".</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -1518,10 +1808,132 @@ DETAIL:  pgmind_stale_head — path "notes/does-not-exist"</code></pre>
     </div>
 
     <div class="fn">
+      <h3 id="fn-knowledge-write-many">knowledge.write_many <span class="badge ok">In main</span></h3>
+      <div class="sig"><code>write_many(paths text[], docs markdown[], vault text DEFAULT NULL)
+  &rarr; TABLE(path text, revision uuid)</code></div>
+      <p class="purpose">
+        Write many notes in one call. This is how a vault is migrated in.
+      </p>
+
+      <h4>Parameters</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>paths</code></td><td><code>text[]</code></td><td>—</td>
+              <td>Where each note goes. Normalised, then validated.</td></tr>
+          <tr><td><code>docs</code></td><td><code>markdown[]</code></td><td>—</td>
+              <td>The complete source of each note, positionally matched to
+                  <code>paths</code>.</td></tr>
+          <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. Resolved once — a batch goes to
+                  exactly one vault.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Returns</h4>
+      <p>
+        One row per input, <strong>in input order</strong>, carrying the
+        <em>stored</em> path — normalised, so it is the value you read back
+        with. Each <code>revision</code> is what
+        <a href="#fn-knowledge-write"><code>write()</code></a> would have
+        returned for that note on its own.
+      </p>
+
+      <h4>Raises</h4>
+      <ul>
+        <li><span class="badge err">PM019</span> the two arrays are different
+            lengths, an element is <code>NULL</code>, or the batch is longer
+            than 1000. The DETAIL names the element index.</li>
+        <li>Anything <a href="#fn-knowledge-write"><code>write()</code></a>
+            raises, from any element — and it takes the whole batch with it.</li>
+      </ul>
+
+      <h4>Notes</h4>
+      <ul>
+        <li><strong>All-or-nothing.</strong> One statement, one transaction: if
+            element 400 has a bad path, elements 1–399 are rolled back too. That
+            is the reason for the 1000 cap — not memory, but keeping the unit of
+            retry something you can re-send.</li>
+        <li><strong>No <code>expected_head</code>, deliberately.</strong> A
+            batch is for ingestion, where you hold no prior head. Per element
+            the semantics are ordinary <code>write()</code>: upsert,
+            last-writer-wins, and byte-identical input mints no revision. Use
+            <a href="#fn-knowledge-write"><code>write()</code></a> when you need
+            compare-and-swap.</li>
+        <li><strong>It is not faster per note.</strong> Measured over a local
+            socket, 500 notes cost the same 8.4 ms each whether sent as 500
+            statements, as one <code>SELECT count(write(…)) FROM staging</code>,
+            or as one <code>write_many</code> — per-note parsing, hashing and
+            extraction dominate that completely. What it removes is
+            <em>N</em> round trips and <em>N</em> commits, which is worth real
+            time against a remote database and nothing against a socket. Reach
+            for it because a migration is one call, not because it is quick.</li>
+        <li>Duplicate paths within one batch are legal and applied in order —
+            the second write of the same bytes is the usual no-op.</li>
+      </ul>
+
+      <h4>Example</h4>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT * FROM knowledge.write_many(
+         ARRAY['imported/refunds', 'imported/escalation'],
+         ARRAY[$md$# Refunds
+
+Within 30 days, no questions asked. #policy
+$md$, $md$# Escalation
+
+Ask a human. See [[imported/refunds]].
+$md$]::markdown[]);</code></pre>
+<pre class="out"><code class="out">        path         |               revision
+---------------------+--------------------------------------
+ imported/refunds    | 019fef52-ce24-7dec-b543-6948ded7ed95
+ imported/escalation | 019fef52-ce46-7a69-ae34-d40464f4d56e
+(2 rows)</code></pre>
+      </div>
+      <p>
+        In practice the arrays come from wherever your files landed. Aggregate
+        with a matching <code>ORDER BY</code> on both sides so the pairs stay
+        together:
+      </p>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">CREATE TEMP TABLE incoming (path text PRIMARY KEY, body text);
+INSERT INTO incoming VALUES
+  ('vault/guides/tone',  '# Tone' || chr(10) || chr(10) || 'Plain words. #style' || chr(10)),
+  ('vault/guides/scope', '# Scope' || chr(10) || chr(10) || 'Say what you did. #style' || chr(10));
+
+SELECT count(*) AS imported
+  FROM knowledge.write_many(
+         (SELECT array_agg(path ORDER BY path) FROM incoming),
+         (SELECT array_agg(body::markdown ORDER BY path) FROM incoming));</code></pre>
+<pre class="out"><code class="out"> imported
+----------
+        2
+(1 row)</code></pre>
+      </div>
+      <p>Mismatched arrays are refused before anything is written:</p>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT knowledge.write_many(ARRAY['a', 'b'], ARRAY['x'::markdown]);</code></pre>
+<pre class="out"><code class="out">ERROR:  pgmind: paths and docs must have the same length
+DETAIL:  pgmind_batch_arity — 2 path(s), 1 doc(s)</code></pre>
+      </div>
+
+      <h4>See also</h4>
+      <p>
+        <a href="#fn-knowledge-write">knowledge.write</a>,
+        <a href="#fn-knowledge-create-vault">knowledge.create_vault</a>,
+        <a href="cookbook.html#migration">Cookbook: migrating a folder of markdown</a>.
+      </p>
+    </div>
+
+    <div class="fn">
       <h3 id="fn-knowledge-insert-blocks">knowledge.insert_blocks <span class="badge ok">In main</span></h3>
       <div class="sig"><code>insert_blocks(path text, fragment markdown, before uuid DEFAULT NULL::uuid,
               after uuid DEFAULT NULL::uuid,
-              expected_head uuid DEFAULT NULL::uuid) → pgmind.op_result</code></div>
+              expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → SETOF pgmind.op_result</code></div>
       <p class="purpose">
         Splice new blocks into a note at a position you name, without sending
         the rest of the note.
@@ -1541,13 +1953,16 @@ DETAIL:  pgmind_stale_head — path "notes/does-not-exist"</code></pre>
               <td>Insert immediately after this block.</td></tr>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set on the note.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
       <h4>Returns</h4>
       <p>
-        <code>pgmind.op_result</code> — the new revision, and
+        <code>SETOF pgmind.op_result</code> (one row) — the new revision, and
         <code>block_ids</code> holding every block the fragment produced, in
         document order.
       </p>
@@ -1636,7 +2051,7 @@ DETAIL:  pgmind_invalid_anchor — insert_blocks</code></pre>
     <div class="fn">
       <h3 id="fn-knowledge-append-to-section">knowledge.append_to_section <span class="badge ok">In main</span></h3>
       <div class="sig"><code>append_to_section(path text, heading_path text[], fragment markdown,
-                  expected_head uuid DEFAULT NULL::uuid) → pgmind.op_result</code></div>
+                  expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → SETOF pgmind.op_result</code></div>
       <p class="purpose">
         Add content at the end of a named section. The one operation where two
         concurrent callers both succeed.
@@ -1656,13 +2071,16 @@ DETAIL:  pgmind_invalid_anchor — insert_blocks</code></pre>
               <td>One or more blocks. No frontmatter.</td></tr>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set. Usually leave it NULL — see Notes.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
       <h4>Returns</h4>
       <p>
-        <code>pgmind.op_result</code> — the new revision and every block the
+        <code>SETOF pgmind.op_result</code> (one row) — the new revision and every block the
         fragment produced.
       </p>
 
@@ -1744,7 +2162,7 @@ DETAIL:  pgmind_section_not_found — ["Nope"] in "projects/auth"</code></pre>
       <h3 id="fn-knowledge-update-block">knowledge.update_block <span class="badge ok">In main</span></h3>
       <div class="sig"><code>update_block(block_id uuid, fragment markdown,
              expected_head uuid DEFAULT NULL::uuid,
-             expected_hash bytea DEFAULT NULL::bytea) → pgmind.op_result</code></div>
+             expected_hash bytea DEFAULT NULL::bytea, vault text DEFAULT NULL) → SETOF pgmind.op_result</code></div>
       <p class="purpose">
         Replace one block's content in place, keeping its identity. The only
         operation with a block-granular compare-and-set.
@@ -1764,13 +2182,16 @@ DETAIL:  pgmind_section_not_found — ["Nope"] in "projects/auth"</code></pre>
           <tr><td><code>expected_hash</code></td><td><code>bytea</code></td><td><code>NULL</code></td>
               <td>Compare-and-set on <em>this block's</em>
                   <code>content_hash</code>.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
       <h4>Returns</h4>
       <p>
-        <code>pgmind.op_result</code> — the new revision, and
+        <code>SETOF pgmind.op_result</code> (one row) — the new revision, and
         <code>block_ids</code> containing the one block, with the id it had
         before.
       </p>
@@ -1858,7 +2279,7 @@ DETAIL:  pgmind_stale_block — block 019fd627-…: expected 00, current is 69b4
       <h3 id="fn-knowledge-move-block">knowledge.move_block <span class="badge ok">In main</span></h3>
       <div class="sig"><code>move_block(block_id uuid, before uuid DEFAULT NULL::uuid,
            after uuid DEFAULT NULL::uuid,
-           expected_head uuid DEFAULT NULL::uuid) → pgmind.op_result</code></div>
+           expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → SETOF pgmind.op_result</code></div>
       <p class="purpose">
         Reorder a block among its siblings. Nothing about the block changes
         except where it sits.
@@ -1877,13 +2298,16 @@ DETAIL:  pgmind_stale_block — block 019fd627-…: expected 00, current is 69b4
               <td>Land immediately after this sibling.</td></tr>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set on the note.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
       <h4>Returns</h4>
       <p>
-        <code>pgmind.op_result</code> — the new revision, and
+        <code>SETOF pgmind.op_result</code> (one row) — the new revision, and
         <code>block_ids</code> containing the moved block's unchanged id.
       </p>
 
@@ -1955,7 +2379,7 @@ DETAIL:  pgmind_container_constraint — target and anchor live in different con
     <div class="fn">
       <h3 id="fn-knowledge-split-block">knowledge.split_block <span class="badge ok">In main</span></h3>
       <div class="sig"><code>split_block(block_id uuid, fragment markdown,
-            expected_head uuid DEFAULT NULL::uuid) → pgmind.op_result</code></div>
+            expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → SETOF pgmind.op_result</code></div>
       <p class="purpose">
         Replace one block with two or more, keeping the original's identity on
         the first of them.
@@ -1972,13 +2396,16 @@ DETAIL:  pgmind_container_constraint — target and anchor live in different con
               <td>Two or more blocks — the replacement, in full.</td></tr>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set on the note.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
       <h4>Returns</h4>
       <p>
-        <code>pgmind.op_result</code> — the new revision, and
+        <code>SETOF pgmind.op_result</code> (one row) — the new revision, and
         <code>block_ids</code> listing the resulting blocks in document order.
         The first entry is the original id.
       </p>
@@ -2054,7 +2481,7 @@ DETAIL:  pgmind_fragment_arity — split_block</code></pre>
     <div class="fn">
       <h3 id="fn-knowledge-merge-blocks">knowledge.merge_blocks <span class="badge ok">In main</span></h3>
       <div class="sig"><code>merge_blocks(block_ids uuid[], fragment markdown, keep uuid DEFAULT NULL::uuid,
-             expected_head uuid DEFAULT NULL::uuid) → pgmind.op_result</code></div>
+             expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → SETOF pgmind.op_result</code></div>
       <p class="purpose">
         Collapse two or more adjacent sibling blocks into one, choosing which
         identity survives.
@@ -2076,13 +2503,16 @@ DETAIL:  pgmind_fragment_arity — split_block</code></pre>
                   first in document order. Must be a member of the set.</td></tr>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set on the note.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
       <h4>Returns</h4>
       <p>
-        <code>pgmind.op_result</code> — the new revision, and
+        <code>SETOF pgmind.op_result</code> (one row) — the new revision, and
         <code>block_ids</code> containing the single survivor.
       </p>
 
@@ -2158,7 +2588,7 @@ DETAIL:  pgmind_fragment_arity — split_block</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-delete-note">knowledge.delete_note <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>delete_note(path text, expected_head uuid DEFAULT NULL::uuid) → uuid</code></div>
+      <div class="sig"><code>delete_note(path text, expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → uuid</code></div>
       <p class="purpose">
         Tombstone a note. The rows stay, the history stays, and the path stops
         resolving.
@@ -2173,7 +2603,10 @@ DETAIL:  pgmind_fragment_arity — split_block</code></pre>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set, so you do not delete a version you have not
                   seen.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -2225,7 +2658,7 @@ DETAIL:  pgmind_note_not_found — path "notes/manual-demo"</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-undelete-note">knowledge.undelete_note <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>undelete_note(path text) → uuid</code></div>
+      <div class="sig"><code>undelete_note(path text, vault text DEFAULT NULL) → uuid</code></div>
       <p class="purpose">
         Bring a tombstoned note back, reconstructed from the revision before its
         deletion.
@@ -2239,7 +2672,10 @@ DETAIL:  pgmind_note_not_found — path "notes/manual-demo"</code></pre>
           <tr><td><code>path</code></td><td><code>text</code></td><td>—</td>
               <td>The path the note had when it was deleted. Nothing in the
                   public API lists tombstones, so you need to know it.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -2304,7 +2740,7 @@ DETAIL:  pgmind_note_not_found — path "notes/manual-demo"</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-move-note">knowledge.move_note <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>move_note(path text, new_path text, expected_head uuid DEFAULT NULL::uuid) → uuid</code></div>
+      <div class="sig"><code>move_note(path text, new_path text, expected_head uuid DEFAULT NULL::uuid, vault text DEFAULT NULL) → uuid</code></div>
       <p class="purpose">
         Rename a note and repair the edges that pointed at it, in one
         transaction.
@@ -2320,7 +2756,10 @@ DETAIL:  pgmind_note_not_found — path "notes/manual-demo"</code></pre>
               <td>Where it should be. Normalised, then validated.</td></tr>
           <tr><td><code>expected_head</code></td><td><code>uuid</code></td><td><code>NULL</code></td>
               <td>Compare-and-set on the source note.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -2417,7 +2856,7 @@ DETAIL:  pgmind_path_taken — path "projects/auth"</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-history">knowledge.history <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>history(path text, limit_n bigint DEFAULT 50)
+      <div class="sig"><code>history(path text, limit_n bigint DEFAULT 50, vault text DEFAULT NULL)
   → TABLE(revision uuid, seq bigint, verb text, author text, source text,
           message text, created_at timestamptz, blocks_changed bigint,
           reconstructable boolean)</code></div>
@@ -2434,7 +2873,10 @@ DETAIL:  pgmind_path_taken — path "projects/auth"</code></pre>
           <tr><td><code>path</code></td><td><code>text</code></td><td>—</td><td>The note.</td></tr>
           <tr><td><code>limit_n</code></td><td><code>bigint</code></td><td><code>50</code></td>
               <td>How many revisions to return, counting back from the head.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -2535,9 +2977,9 @@ DETAIL:  pgmind_path_taken — path "projects/auth"</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-read-as-of">knowledge.read_as_of <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>read_as_of(path text, at uuid)        → markdown
-read_as_of(path text, at bigint)      → markdown
-read_as_of(path text, at timestamptz) → markdown</code></div>
+      <div class="sig"><code>read_as_of(path text, at uuid, vault text DEFAULT NULL)        → markdown
+read_as_of(path text, at bigint, vault text DEFAULT NULL)      → markdown
+read_as_of(path text, at timestamptz, vault text DEFAULT NULL) → markdown</code></div>
       <p class="purpose">
         Reconstruct the note's complete source as it stood at a revision, a
         sequence number, or a moment.
@@ -2556,7 +2998,10 @@ read_as_of(path text, at timestamptz) → markdown</code></div>
                   revision.</td></tr>
           <tr><td><code>at</code></td><td><code>timestamptz</code></td><td>—</td>
               <td>The latest revision at or before this instant.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -2670,10 +3115,10 @@ DETAIL:  pgmind_unknown_revision — seq 99 > head 2</code></pre>
 
     <div class="fn">
       <h3 id="fn-knowledge-blocks-as-of">knowledge.blocks_as_of <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>blocks_as_of(path text, at bigint)
+      <div class="sig"><code>blocks_as_of(path text, at bigint, vault text DEFAULT NULL)
   → TABLE(ord integer, block_id uuid, kind text, content text, heading_path text[])
 
-blocks_as_of(path text, at uuid) → (same columns)</code></div>
+blocks_as_of(path text, at uuid, vault text DEFAULT NULL) → (same columns)</code></div>
       <p class="purpose">
         The note's blocks as they stood at a past revision, with the ids they
         had then.
@@ -2691,7 +3136,10 @@ blocks_as_of(path text, at uuid) → (same columns)</code></div>
                   — resolve the time through
                   <a href="#fn-knowledge-history"><code>history()</code></a>
                   first.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -2760,7 +3208,7 @@ blocks_as_of(path text, at uuid) → (same columns)</code></div>
 
     <div class="fn">
       <h3 id="fn-knowledge-diff">knowledge.diff <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>diff(path text, from_at uuid, to_at uuid)
+      <div class="sig"><code>diff(path text, from_at uuid, to_at uuid, vault text DEFAULT NULL)
   → TABLE(block_id uuid, change text, before text, after text)</code></div>
       <p class="purpose">
         What changed between two revisions of a note, block by block.
@@ -2776,7 +3224,10 @@ blocks_as_of(path text, at uuid) → (same columns)</code></div>
               <td>The earlier revision. <strong>UUID only</strong> — there is no
                   seq or timestamp form.</td></tr>
           <tr><td><code>to_at</code></td><td><code>uuid</code></td><td>—</td><td>The later revision.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -2834,7 +3285,7 @@ blocks_as_of(path text, at uuid) → (same columns)</code></div>
 
     <div class="fn">
       <h3 id="fn-knowledge-blame">knowledge.blame <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>blame(path text)
+      <div class="sig"><code>blame(path text, vault text DEFAULT NULL)
   → TABLE(block_id uuid, ord integer, first_revision uuid,
           last_changed_revision uuid, author text, source text,
           confidence real, changed_at timestamptz, history_floor bigint)</code></div>
@@ -2849,7 +3300,10 @@ blocks_as_of(path text, at uuid) → (same columns)</code></div>
         <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
         <tbody>
           <tr><td><code>path</code></td><td><code>text</code></td><td>—</td><td>The note.</td></tr>
-        </tbody>
+                  <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+</tbody>
       </table>
       </div>
 
@@ -3250,8 +3704,11 @@ SELECT path FROM knowledge.notes('notes/**') ORDER BY path;</code></pre>
       <h3 id="fn-pgmind-verify-excision">pgmind.verify_excision <span class="badge admin">Admin</span></h3>
       <div class="sig"><code>verify_excision(excision uuid) → SETOF text</code></div>
       <p class="purpose">
-        Re-sweep every text-bearing column for the erased target. Empty result
-        means proven erased.
+        Re-sweep every text-bearing column of the current vault for the erased
+        target. Empty result means proven erased <em>from this vault</em> —
+        the sweep is scoped, so a copy of the same string living in another
+        vault is neither reported nor touched. An excision belonging to another
+        vault reads exactly like one that never existed.
       </p>
 
       <h4>Parameters</h4>
@@ -3410,7 +3867,7 @@ DETAIL:  pgmind_history_unavailable — seq 0 < floor 2 on projects/auth</code><
 
     <div class="fn">
       <h3 id="fn-pgmind-enable-vault-rls">pgmind.enable_vault_rls <span class="badge admin">Admin</span></h3>
-      <div class="sig"><code>enable_vault_rls(force boolean DEFAULT false) → void</code></div>
+      <div class="sig"><code>enable_vault_rls(force boolean DEFAULT false) → TABLE (table_name text, covered boolean, detail text)</code></div>
       <p class="purpose">
         Turn <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a> from
         a scoping convention into an enforced boundary, by putting a row-level
@@ -3460,7 +3917,7 @@ DETAIL:  pgmind_history_unavailable — seq 0 < floor 2 on projects/auth</code><
       <h4>Example</h4>
       <div class="code">
         <div class="cap">psql</div>
-<pre><code class="sql">SELECT pgmind.enable_vault_rls();</code></pre>
+<pre><code class="sql">SELECT * FROM pgmind.enable_vault_rls();</code></pre>
 <pre class="out"><code class="out">NOTICE:  policy "vault_isolation" for relation "pgmind.note" does not exist, skipping
 NOTICE:  policy "vault_isolation" for relation "pgmind.revision" does not exist, skipping
 NOTICE:  policy "vault_isolation" for relation "pgmind.tile" does not exist, skipping
@@ -3471,10 +3928,20 @@ NOTICE:  policy "vault_isolation" for relation "pgmind.note_revision" does not e
 NOTICE:  policy "vault_isolation" for relation "pgmind.block_revision" does not exist, skipping
 NOTICE:  policy "vault_isolation" for relation "pgmind.note_frame" does not exist, skipping
 NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not exist, skipping
- enable_vault_rls 
-------------------
- 
-(1 row)</code></pre>
+   table_name    | covered |                            detail                            
+-----------------+---------+--------------------------------------------------------------
+ note            | t       | 
+ revision        | t       | 
+ tile            | t       | 
+ block           | t       | 
+ edge            | t       | 
+ tag             | t       | 
+ note_revision   | t       | 
+ block_revision  | t       | 
+ note_frame      | t       | 
+ excision_log    | t       | 
+ excision_replay | f       | no vault_id column: this table is outside the vault boundary
+(11 rows)</code></pre>
       </div>
       <div class="code">
         <div class="cap">psql</div>
@@ -3912,7 +4379,9 @@ DETAIL:  pgmind_invalid_author — 201 characters, limit 200</code></pre>
       <h4>Example</h4>
       <div class="code">
         <div class="cap">psql</div>
-<pre><code class="sql">SET pgmind.vault_id = '11111111-1111-1111-1111-111111111111';
+<pre><code class="sql">SELECT * FROM knowledge.create_vault('tenant-b',
+    vault_id =&gt; '11111111-1111-1111-1111-111111111111');
+SET pgmind.vault_id = '11111111-1111-1111-1111-111111111111';
 SELECT vault_id, notes FROM knowledge.stats();
 RESET pgmind.vault_id;
 SELECT vault_id, notes FROM knowledge.stats();</code></pre>
@@ -4120,6 +4589,23 @@ RESET
           <td>Shorten it. The limit is characters, not bytes, so a limit never
               cuts a name in half.</td>
           <td>Every function that records a revision.</td>
+        </tr>
+        <tr>
+          <td><code>PM018</code></td><td><code>pgmind_vault_not_found</code></td>
+          <td>No vault has that name or id.</td>
+          <td>Check <code>knowledge.vaults()</code>, or create it. A vault id
+              nobody registered is an error, not a new empty vault — that is
+              what stops a typo becoming a vault you can never find again.</td>
+          <td>Every vault-scoped function, and <code>pgmind.vault_id</code>
+              itself.</td>
+        </tr>
+        <tr>
+          <td><code>PM019</code></td><td><code>pgmind_batch_arity</code></td>
+          <td>The batch arrays disagree in length, an element is
+              <code>NULL</code>, or the batch is over 1000 notes.</td>
+          <td>Fix the arrays. The DETAIL names the element index. Distinct from
+              PM004, which is about blocks inside one document.</td>
+          <td><code>write_many</code>.</td>
         </tr>
       </tbody>
     </table>

@@ -53,7 +53,8 @@ Keep the markdown. Replace the filesystem.
 - **Multi-tenant by column.** Every row carries a `vault_id`; one session GUC scopes the
   vault, and Postgres row security enforces it.
 - **Erasure is a real operation.** History is append-only *by default*, not forever.
-  Excision is explicit, audited, and verified inside the transaction that performs it.
+  Excision is explicit, audited, scoped to one vault, and verified inside the transaction
+  that performs it.
 - **It is just your database.** Notes, indexes and any embeddings you add live in
   Postgres, inside the backup you already take.
 
@@ -82,6 +83,11 @@ SELECT knowledge.write('projects/auth', $md$
 
 Migrated the session store.
 $md$);
+
+-- A whole folder in one call: two parallel arrays, one row back per note,
+-- in input order. All-or-nothing, capped at 1000.
+SELECT * FROM knowledge.write_many(ARRAY['guides/tone', 'guides/scope'],
+                                   ARRAY[$md$# Tone$md$, $md$# Scope$md$]::markdown[]);
 ```
 
 ### Concurrency: two agents, one note
@@ -113,9 +119,10 @@ SELECT * FROM knowledge.update_block($1, $md$- Refresh tokens rotate every 12h #
 `insert_blocks`, `move_block`, `split_block` and `merge_blocks` round out the set, each
 with defined identity semantics and each accepting `expected_head`.
 
-> **Call them from `FROM`, not from the select list.** These return a composite, and
-> `SELECT (knowledge.update_block(…)).*` makes PostgreSQL evaluate the function once per
-> output column — applying the edit twice.
+> **They return `SETOF pgmind.op_result`** — one row, `(revision, block_ids)`. `SELECT *
+> FROM knowledge.update_block(…)` reads best, and `SELECT (knowledge.update_block(…)).*`
+> is safe: a set-returning expression is evaluated once. While these returned a *scalar*
+> composite, that second form applied the edit twice.
 
 ### Navigate
 
@@ -192,7 +199,7 @@ The measured match rate on the adversarial edit corpus is published in
 SET pgmind.vault_id = '11111111-1111-1111-1111-111111111111';
 SELECT count(*) FROM knowledge.notes();   -- only this tenant's notes, ever
 
-SELECT pgmind.enable_vault_rls();         -- and enforce it with row security
+SELECT * FROM pgmind.enable_vault_rls();  -- and enforce it with row security
 ```
 
 ### Erasure
@@ -208,7 +215,7 @@ SELECT pgmind.excise('{"literal":"Refresh tokens rotate every 24h"}'::jsonb,
 -- WARNING: pgmind: dry run — would erase 0 live and touch 4 history surface(s)
 
 SELECT pgmind.excise('{"literal":"…"}'::jsonb, 'erasure request #42', dry_run => false);
-SELECT * FROM pgmind.verify_excision($1);   -- empty result ⇒ proven erased
+SELECT * FROM pgmind.verify_excision($1);   -- empty result ⇒ proven erased from this vault
 
 SELECT pgmind.retain(keep_revisions => 50, dry_run => false);   -- bound history
 

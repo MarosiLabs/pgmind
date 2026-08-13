@@ -139,6 +139,64 @@
     </div>
 
 
+    <h2 id="migration">Migrating a folder of markdown</h2>
+    <p>The first thing most people do. Your files are on a disk pgmind cannot reach — Law 2, no network or filesystem I/O from inside the extension — so getting them in is your client's job, and pgmind's job is to make the receiving end one call.</p>
+
+    <h3 id="r-import-batch">Import a directory in batches</h3>
+    <p><b>Problem.</b> Several hundred <code>.md</code> files, and one <code>knowledge.write()</code> per file means one round trip per file.</p>
+    <p>Send them as two parallel arrays. Positions pair up, so whatever produces them must order both sides the same way. Name the destination with <code>vault =&gt;</code> rather than switching <code>pgmind.vault_id</code> — an import should not change which vault the rest of your session is talking to.</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT name FROM knowledge.create_vault('imported/handbook', 'Migrated from ~/vault');
+
+SELECT * FROM knowledge.write_many(
+         ARRAY['onboarding/day-one', 'onboarding/tools'],
+         ARRAY[$md$# Day one
+
+Read the handbook. #onboarding
+$md$, $md$# Tools
+
+Ask in #ops for access. See [[onboarding/day-one]].
+$md$]::markdown[],
+         vault => 'imported/handbook');</code></pre>
+<pre class="out"><code class="out">       name        
+-------------------
+ imported/handbook
+(1 row)
+
+        path        |               revision               
+--------------------+--------------------------------------
+ onboarding/day-one | 019fef54-b414-70f3-955c-993a65548697
+ onboarding/tools   | 019fef54-b42d-7cc3-bdae-f926b01c3c9f
+(2 rows)</code></pre>
+</div>
+    <p><b>Chunk at 1000.</b> That is the cap, and it is about blast radius rather than memory: a batch is one statement in one transaction, so a bad path in the last file rolls back every file before it. Drive it from your client in slices, and a failure costs you one slice.</p>
+    <p><b>Do not expect it to be faster per note.</b> Measured over a local socket, 500 notes cost the same whether they arrive as 500 statements or one <code>write_many</code> — parsing, hashing and link extraction per note swamp everything batching removes. What you save is <em>N</em> round trips and <em>N</em> commits, which matters over a network and not at all over a socket.</p>
+
+    <h3 id="r-import-verify">Check what landed</h3>
+    <p><b>Problem.</b> The import returned without error. Did it import what you meant?</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">SELECT notes, blocks, edges_resolved, edges_dangling, tags
+  FROM knowledge.stats(vault => 'imported/handbook');
+
+-- Links that point at nothing: usually files you have not imported yet.
+SELECT n.path, l.target, l.dangling_reason
+  FROM knowledge.notes('**', vault => 'imported/handbook') n
+  CROSS JOIN LATERAL knowledge.links(n.path, vault => 'imported/handbook') l
+ WHERE l.dangling_reason IS NOT NULL
+ ORDER BY n.path, l.target;</code></pre>
+<pre class="out"><code class="out"> notes | blocks | edges_resolved | edges_dangling | tags 
+-------+--------+----------------+----------------+------
+     2 |      4 |              1 |              0 |    2
+(1 row)
+
+ path | target | dangling_reason 
+------+--------+-----------------
+(0 rows)</code></pre>
+</div>
+    <p>A dangling link is not an error and never blocks a write (RFC-002 D8). Import the rest of the folder and they resolve themselves — <code>write()</code> repairs every edge that pointed at a path as soon as a note takes it.</p>
+
     <h2 id="agent-memory">Agent memory</h2>
     <p>Several processes, one vault, no lost writes. Everything here is the public <code>knowledge</code> API; nothing needs a lock you take yourself.</p>
 
@@ -1544,7 +1602,11 @@ SELECT src_path FROM knowledge.backlinks('rfc/2026-auth-01') ORDER BY src_path;<
     <p><b>Problem.</b> Serve many tenants from one database and one connection pool without leaking the previous request's vault.</p>
 <div class="code">
   <div class="cap">psql</div>
-<pre><code class="sql">BEGIN;
+<pre><code class="sql">SELECT * FROM knowledge.create_vault('tenant-b',
+    vault_id =&gt; '3f2b9c14-0000-4000-8000-000000000001',
+    if_not_exists =&gt; true);
+
+BEGIN;
 SET LOCAL pgmind.vault_id = '3f2b9c14-0000-4000-8000-000000000001';
 
 SELECT knowledge.write('projects/auth', $md$# Auth (tenant B)
@@ -1557,7 +1619,12 @@ COMMIT;
 
 SELECT current_setting('pgmind.vault_id') AS vault_after_commit,
        (SELECT count(*) FROM knowledge.notes()) AS notes_in_default_vault;</code></pre>
-<pre class="out"><code class="out">BEGIN
+<pre class="out"><code class="out">               vault_id               |   name   
+--------------------------------------+----------
+ 3f2b9c14-0000-4000-8000-000000000001 | tenant-b
+(1 row)
+
+BEGIN
 SET
                written                
 --------------------------------------
@@ -1581,7 +1648,7 @@ COMMIT
     <p><b>Problem.</b> Make the database refuse cross-tenant reads instead of trusting your code to set the GUC.</p>
 <div class="code">
   <div class="cap">psql</div>
-<pre><code class="sql">SELECT pgmind.enable_vault_rls();
+<pre><code class="sql">SELECT * FROM pgmind.enable_vault_rls();
 SELECT count(*) AS policies FROM pg_policies WHERE schemaname = 'pgmind';</code></pre>
 <pre class="out"><code class="out">psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.note" does not exist, skipping
 psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.revision" does not exist, skipping
@@ -1593,10 +1660,20 @@ psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind
 psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.block_revision" does not exist, skipping
 psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.note_frame" does not exist, skipping
 psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not exist, skipping
- enable_vault_rls 
-------------------
- 
-(1 row)
+   table_name    | covered |                            detail                            
+-----------------+---------+--------------------------------------------------------------
+ note            | t       | 
+ revision        | t       | 
+ tile            | t       | 
+ block           | t       | 
+ edge            | t       | 
+ tag             | t       | 
+ note_revision   | t       | 
+ block_revision  | t       | 
+ note_frame      | t       | 
+ excision_log    | t       | 
+ excision_replay | f       | no vault_id column: this table is outside the vault boundary
+(11 rows)
 
  policies 
 ----------
@@ -1604,6 +1681,7 @@ psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind
 (1 row)</code></pre>
 </div>
     <p><span class="badge admin">Admin</span> <code>enable_vault_rls()</code> creates one policy per <code>vault_id</code>-carrying table — ten on this build — and is idempotent, which is why the first run narrates a <code>DROP POLICY IF EXISTS</code> per table. Table owners still bypass RLS unless you pass <code>force =&gt; true</code>, so an application should never connect as the owner.</p>
+    <p>Read the rows it returns. <code>covered = f</code> names a <code>pgmind</code> table the enumeration could <em>not</em> put inside the boundary because it carries no <code>vault_id</code> — <code>excision_replay</code> is one, and it holds the identifying data an excision erased. Reporting that is the point: a deployer who saw only a successful call would never learn it.</p>
 
     <h3 id="r-app-role">The grant set an application role actually needs</h3>
     <p><b>Problem.</b> Give the app the least it can work with.</p>
@@ -1687,9 +1765,9 @@ ORDER BY (v.problem IS NULL), n.path LIMIT 6;</code></pre>
 FROM pgmind.note pn
 LEFT JOIN LATERAL pgmind.verify_history(pn.id) AS v(problem) ON true
 WHERE pn.tombstoned_at IS NULL;</code></pre>
-<pre class="out"><code class="out"> clean_notes | problems 
+<pre class="out"><code class="out"> clean_notes | problems
 -------------+----------
-          15 |        0
+          16 |        0
 (1 row)</code></pre>
 </div>
     <p><span class="badge admin">Admin</span> <code>verify_history</code> walks the pre-image chain and the frames for one note. It is O(history), so run it on a schedule rather than in a request, and expect it to report nothing below a retention floor you set yourself.</p>
@@ -2122,8 +2200,8 @@ try {
     <h2 id="sharp-edges">Sharp edges, demonstrated</h2>
     <p>Each of these bit somebody. They are shown running, with the real error where there is one, rather than described. <a href="#r-stable-ids">Whole-note rewrite versus block ops</a> and <a href="#r-repair">delete-does-not-repair</a> are two more, demonstrated earlier on this page.</p>
 
-    <h3 id="r-double-edit"><code>SELECT (f(x)).*</code> applies the edit twice</h3>
-    <p><b>Problem.</b> One statement, one call in the SQL text, two edits in the note.</p>
+    <h3 id="r-double-edit"><code>SELECT (f(x)).*</code> used to apply the edit twice</h3>
+    <p><b>Fixed.</b> This was the sharpest edge on the page, and it is gone. It is kept here because the old advice is still in circulation: the block operations returned a scalar <code>pgmind.op_result</code>, and PostgreSQL expands <code>(f(x)).*</code> into one call per output column — so a two-column result ran the function twice and committed both runs. Three blocks became five. They now return <code>SETOF pgmind.op_result</code>: same name, same columns, one row, evaluated once in a ProjectSet node. The call below is safe.</p>
 <div class="code">
   <div class="cap">psql</div>
 <pre><code class="sql">SELECT knowledge.write('notes/trap', $md$# Trap
@@ -2157,15 +2235,14 @@ SELECT seq, verb, blocks_changed FROM knowledge.history('notes/trap');</code></p
 
  blocks_after 
 --------------
-            5
+            4
 (1 row)
 
  seq |     verb      | blocks_changed 
 -----+---------------+----------------
-   2 | insert_blocks |              1
    1 | insert_blocks |              1
    0 | write         |              3
-(3 rows)</code></pre>
+(2 rows)</code></pre>
 </div>
 <div class="code">
   <div class="cap">psql</div>
@@ -2176,14 +2253,12 @@ SELECT seq, verb, blocks_changed FROM knowledge.history('notes/trap');</code></p
 
 Baseline paragraph.
 
-One appended line.
-
 One appended line.</code></pre>
 </div>
-    <p>PostgreSQL expands <code>(f(x)).*</code> into one call per output column, and <code>op_result</code> has two — so the function ran twice and both runs committed. Three blocks became five, and the history shows two revisions. Call composite-returning operations from <code>FROM</code>, always.</p>
+    <p>One statement, one call, one edit, one revision. Before the return type became a set this same block committed twice and left five blocks. Calling these operations from <code>FROM</code> is still the clearer style, but it is no longer load-bearing for correctness.</p>
 
-    <h3 id="r-empty-section">You cannot append to an empty section</h3>
-    <p><b>Problem.</b> The heading is right there, and <code>append_to_section</code> says the section does not exist.</p>
+    <h3 id="r-empty-section">Appending to an empty section used to fail</h3>
+    <p><b>Fixed.</b> A block's <code>heading_path</code> is its <em>ancestor</em> chain and excludes its own text, so a section holding nothing but its heading matched no row and <code>append_to_section</code> raised <code>PM007</code> — about a section <code>read_section</code> resolved fine and <code>blocks()</code> showed plainly. That was the first write to every freshly created memory document. It now anchors on the heading itself.</p>
 <div class="code">
   <div class="cap">psql</div>
 <pre><code class="sql">SELECT knowledge.write('notes/empty-section', $md$# Empty section demo
@@ -2191,30 +2266,18 @@ One appended line.</code></pre>
 ## Findings
 $md$) AS created;
 
-SELECT knowledge.append_to_section('notes/empty-section',
-    ARRAY['Empty section demo','Findings'], $md$First finding.$md$);</code></pre>
-<pre class="out"><code class="out">               created                
---------------------------------------
- 019fd643-…
-(1 row)
-
-psql:blocks/76_empty_section.sql:7: ERROR:  pgmind: no section with that heading path
-DETAIL:  pgmind_section_not_found — ["Empty section demo", "Findings"] in "notes/empty-section"
-CONTEXT:  PL/pgSQL function pgmind.raise_error(text,text,text) line 3 at RAISE
-SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
-</div>
-<div class="code">
-  <div class="cap">psql</div>
-<pre><code class="sql">SELECT r.revision
-FROM knowledge.blocks('notes/empty-section') b
-CROSS JOIN LATERAL knowledge.insert_blocks('notes/empty-section',
-    $md$First finding.$md$, after =&gt; b.block_id) r
-WHERE b.kind = 'heading' AND b.attrs-&gt;&gt;'text' = 'Findings';
+SELECT * FROM knowledge.append_to_section('notes/empty-section',
+    ARRAY['Empty section demo','Findings'], $md$First finding.$md$);
 
 SELECT ord, kind, heading_path, content FROM knowledge.blocks('notes/empty-section');</code></pre>
-<pre class="out"><code class="out">               revision               
+<pre class="out"><code class="out">               created                
 --------------------------------------
- 019fd643-…
+ 019fea76-…
+(1 row)
+
+               revision               |               block_ids                
+--------------------------------------+----------------------------------------
+ 019fea76-…                           | {019fea76-…}
 (1 row)
 
  ord |   kind    |          heading_path           |       content        
@@ -2224,7 +2287,7 @@ SELECT ord, kind, heading_path, content FROM knowledge.blocks('notes/empty-secti
    2 | paragraph | {"Empty section demo",Findings} | First finding.
 (3 rows)</code></pre>
 </div>
-    <p>A heading's own <code>heading_path</code> lists its ancestors, not itself, so a section with no content blocks has no rows to match and raises PM007 rather than PM005. Seed it once with <code>insert_blocks(after =&gt; ‹the heading's block_id›)</code> and every later append works.</p>
+    <p>The fallback applies only to a genuinely empty section. A section that <em>has</em> content none of which can carry an insert — a multi-block blockquote, say — still raises <code>PM005</code>, because anchoring on the heading there would silently put the append at the <em>top</em> of the section instead of the bottom. A heading path that names no heading at all still raises <code>PM007</code>.</p>
 
     <h3 id="r-list-section">A section that ends in a list appends fine</h3>
     <p><b>Problem.</b> The commonest shape a vault has, and the one that used to fail.</p>
@@ -2348,11 +2411,12 @@ FROM pgmind.note WHERE tombstoned_at IS NULL GROUP BY 1 ORDER BY 1;</code></pre>
                             14
 (1 row)
 
-               vault_id               | note_rows 
+               vault_id               | note_rows
 --------------------------------------+-----------
  00000000-0000-0000-0000-000000000000 |        14
- 3f2b9c14-…                           |         2
-(2 rows)</code></pre>
+ 019fef56-…                           |         2
+ 3f2b9c14-…                           |         1
+(3 rows)</code></pre>
 </div>
     <p>The API filters on the current <code>vault_id</code>, so <code>knowledge.notes()</code> tells the truth — but a role with table privileges reads across vaults unless a policy stops it, and a table owner bypasses policies unless you pass <code>force =&gt; true</code>. The boundary is <a href="#r-enable-rls">RLS plus grants</a>, never the setting on its own.</p>
     <nav class="page-nav" aria-label="Page">

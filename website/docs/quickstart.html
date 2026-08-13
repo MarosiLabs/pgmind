@@ -1054,9 +1054,16 @@ DETAIL:  pgmind_stale_head — note projects/auth: expected 019fd626-a291-…, h
 
     <div class="code">
       <div class="cap">psql</div>
-<pre><code class="sql">SET pgmind.vault_id = '11111111-1111-1111-1111-111111111111';
+<pre><code class="sql">SELECT * FROM knowledge.create_vault('tenant-b',
+    vault_id =&gt; '11111111-1111-1111-1111-111111111111');
+SET pgmind.vault_id = '11111111-1111-1111-1111-111111111111';
 SELECT vault_id, notes, blocks FROM knowledge.stats();</code></pre>
-<pre class="out"><code class="out">SET
+<pre class="out"><code class="out">               vault_id               |   name   
+--------------------------------------+----------
+ 11111111-1111-1111-1111-111111111111 | tenant-b
+(1 row)
+
+SET
                vault_id               | notes | blocks
 --------------------------------------+-------+--------
  11111111-1111-1111-1111-111111111111 |     0 |      0

@@ -1531,6 +1531,655 @@ mod tests {
         verify_clean("cas/quote1");
     }
 
+    /// A section that holds nothing but its own heading still takes an append.
+    ///
+    /// A block's `heading_path` is its ANCESTOR chain and excludes its own
+    /// text, so an empty section matched no row and raised PM007 "no section
+    /// with that heading path" — about a section `read_section` resolved fine.
+    /// That is the first write to every freshly created memory document, which
+    /// is the single most common operation in the multi-agent scenario.
+    #[pg_test]
+    fn append_to_an_empty_section_anchors_on_the_heading() {
+        write("cas/empty", "# Note\n\n## Log\n");
+        Spi::run(
+            "SELECT knowledge.append_to_section('cas/empty', ARRAY['Note','Log'], 'first'::markdown)",
+        )
+        .expect("append into an empty section failed");
+        assert_eq!(read("cas/empty"), "# Note\n\n## Log\n\nfirst\n");
+        verify_clean("cas/empty");
+
+        // A second append still goes after the content, not after the heading.
+        Spi::run(
+            "SELECT knowledge.append_to_section('cas/empty', ARRAY['Note','Log'], 'second'::markdown)",
+        )
+        .expect("second append failed");
+        let body = read("cas/empty");
+        assert!(
+            body.find("first").unwrap() < body.find("second").unwrap(),
+            "appends stay in order: {body:?}"
+        );
+        verify_clean("cas/empty");
+
+        // An empty section nested under another empty one resolves by its own
+        // full path, and a heading that genuinely is not there still raises.
+        write("cas/empty2", "# Note\n\n## Outer\n\n### Inner\n");
+        Spi::run(
+            "SELECT knowledge.append_to_section(
+               'cas/empty2', ARRAY['Note','Outer','Inner'], 'deep'::markdown)",
+        )
+        .expect("append into a nested empty section failed");
+        assert!(read("cas/empty2").ends_with("### Inner\n\ndeep\n"));
+        assert_eq!(
+            sqlstate_of(
+                "SELECT knowledge.append_to_section('cas/empty2', ARRAY['Note','Absent'], 'x'::markdown)"
+            ),
+            "PM007",
+            "a section that really is missing still says so"
+        );
+    }
+
+    /// `SELECT (knowledge.op(…)).*` applies the edit ONCE.
+    ///
+    /// These operations returned the two-column composite `pgmind.op_result`,
+    /// and a VOLATILE composite-returning function is evaluated once per
+    /// output column — so the idiom every SQL example teaches committed two
+    /// revisions and printed one row of correct-looking output. A silently
+    /// doubled append is the worst available failure for an agent memory
+    /// store. They return a single-row TABLE now, which ProjectSet evaluates
+    /// once, so the call site is safe by construction rather than by warning.
+    #[pg_test]
+    fn ops_called_from_the_select_list_apply_once() {
+        write("cas/once", "# Note\n\n## Log\n\nseed\n");
+        let before: i64 = Spi::get_one("SELECT count(*) FROM knowledge.history('cas/once')")
+            .unwrap()
+            .unwrap();
+
+        Spi::run(
+            "SELECT (knowledge.append_to_section(
+               'cas/once', ARRAY['Note','Log'], 'once'::markdown)).*",
+        )
+        .expect("append from the select list failed");
+
+        let after: i64 = Spi::get_one("SELECT count(*) FROM knowledge.history('cas/once')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(after - before, 1, "exactly one revision was committed");
+        let body = read("cas/once");
+        assert_eq!(
+            body.matches("once").count(),
+            1,
+            "the fragment landed exactly once: {body:?}"
+        );
+        verify_clean("cas/once");
+
+        // The same guarantee for a block op, which takes the other code path.
+        let ids = block_ids("cas/once");
+        let seed = ids
+            .iter()
+            .find(|(content, _)| content.contains("seed"))
+            .expect("the seed paragraph is addressable")
+            .1;
+        let rev_before: i64 = Spi::get_one("SELECT count(*) FROM knowledge.history('cas/once')")
+            .unwrap()
+            .unwrap();
+        Spi::run(&format!(
+            "SELECT (knowledge.update_block('{seed}', 'edited'::markdown)).*"
+        ))
+        .expect("update_block from the select list failed");
+        let rev_after: i64 = Spi::get_one("SELECT count(*) FROM knowledge.history('cas/once')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(rev_after - rev_before, 1, "update_block committed once");
+        verify_clean("cas/once");
+    }
+
+    /// Excision stays inside its own vault.
+    ///
+    /// `redact()` built its UPDATEs from every text-bearing column in schema
+    /// `pgmind` with no vault predicate, while the PM012 refusal check was
+    /// scoped to the caller's vault. So a literal that was dead in one tenant
+    /// and LIVE in another passed the refusal and was then rewritten in the
+    /// other tenant's live block content — outside the write path, recording
+    /// no revision, leaving their notes failing `verify_note`. The unscoped
+    /// `sweep()` then found no survivors and the transaction committed with a
+    /// clean attestation.
+    #[pg_test]
+    fn excise_touches_no_other_vault() {
+        let other = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+        let secret = "Refresh tokens rotate every 24h";
+        Spi::run(&format!(
+            "SELECT knowledge.create_vault('other', vault_id => '{other}')"
+        ))
+        .unwrap();
+
+        // The same literal lives in two vaults. In the default vault it is
+        // dead at head (edited away); in the other it is live.
+        write("erase/here", &format!("# Here\n\n{secret}\n"));
+        write("erase/here", "# Here\n\nrotated\n");
+        Spi::run(&format!("SET pgmind.vault_id = '{other}'")).unwrap();
+        write("erase/there", &format!("# There\n\n{secret}\n"));
+        Spi::run("RESET pgmind.vault_id").unwrap();
+
+        Spi::run(&format!(
+            "SELECT pgmind.excise('{{\"literal\":\"{secret}\"}}'::jsonb,
+                                  'test erasure', dry_run => false)"
+        ))
+        .expect("excise failed");
+
+        // The other vault is untouched: bytes, structure and history.
+        Spi::run(&format!("SET pgmind.vault_id = '{other}'")).unwrap();
+        let body = read("erase/there");
+        assert!(
+            body.contains(secret),
+            "another vault's live bytes survived: {body:?}"
+        );
+        verify_clean("erase/there");
+        Spi::run("RESET pgmind.vault_id").unwrap();
+
+        // And the erasure did its job where it was asked to.
+        let survivors: i64 = Spi::get_one(&format!(
+            "SELECT count(*) FROM pgmind.block
+              WHERE vault_id = '00000000-0000-0000-0000-000000000000'
+                AND position('{secret}' in content) > 0"
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(survivors, 0, "the calling vault was erased");
+    }
+
+    /// A listing answers "what is this?", not only "where is it?".
+    ///
+    /// `notes()` used to return a column called `title` that was the path's
+    /// last segment, no note id at all, and no description — so "list every
+    /// document with an id, a name and a short description" was 1-of-3, and
+    /// the note's uuid was reachable only by querying the storage schema.
+    #[pg_test]
+    fn a_listing_carries_an_id_a_name_and_a_description() {
+        // Frontmatter title and description win.
+        write(
+            "guides/escalation",
+            "---\ntitle: Escalation policy\ndescription: When to involve a human\n---\n\n# Ignored H1\n\nbody\n",
+        );
+        // No frontmatter: the first level-1 heading names it.
+        write("guides/refunds", "# Refund policy\n\n## Limits\n\nbody\n");
+        // Neither: the basename, which is all the old column ever was.
+        write("guides/scratch", "some text with no heading\n");
+
+        let rows: Vec<(String, String, Option<String>)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT path, title, description FROM knowledge.notes('guides/**')
+                      ORDER BY path",
+                    None,
+                    &[],
+                )
+                .expect("notes failed")
+                .map(|r| {
+                    (
+                        r.get::<String>(1).unwrap().unwrap(),
+                        r.get::<String>(2).unwrap().unwrap(),
+                        r.get::<String>(3).unwrap(),
+                    )
+                })
+                .collect()
+        });
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    "guides/escalation".into(),
+                    "Escalation policy".into(),
+                    Some("When to involve a human".into())
+                ),
+                ("guides/refunds".into(), "Refund policy".into(), None),
+                ("guides/scratch".into(), "scratch".into(), None),
+            ]
+        );
+
+        // The id is public, round-trips, and reaches the health check that
+        // previously took an argument nothing public could produce.
+        let id: Uuid = Spi::get_one("SELECT knowledge.note_id('guides/refunds')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            Spi::get_one::<String>(&format!("SELECT knowledge.path_of('{id}')"))
+                .unwrap()
+                .unwrap(),
+            "guides/refunds"
+        );
+        let damage: i64 = Spi::get_one(&format!("SELECT count(*) FROM pgmind.verify_note('{id}')"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(damage, 0);
+
+        // The id survives a rename; the basename fallback follows it.
+        Spi::run("SELECT knowledge.move_note('guides/scratch', 'guides/notepad')").unwrap();
+        assert_eq!(
+            Spi::get_one::<String>("SELECT title FROM knowledge.notes('guides/notepad')")
+                .unwrap()
+                .unwrap(),
+            "notepad",
+            "a stored fallback would have gone stale here"
+        );
+        Spi::run("SELECT knowledge.move_note('guides/refunds', 'guides/money-back')").unwrap();
+        assert_eq!(
+            Spi::get_one::<String>(&format!("SELECT knowledge.path_of('{id}')"))
+                .unwrap()
+                .unwrap(),
+            "guides/money-back",
+            "the id is what survives a rename"
+        );
+        assert_eq!(
+            Spi::get_one::<String>("SELECT title FROM knowledge.notes('guides/money-back')")
+                .unwrap()
+                .unwrap(),
+            "Refund policy",
+            "and an explicit title is not clobbered by the rename"
+        );
+
+        // Editing the heading retitles the note — every op reconciles.
+        let h1: Uuid = Spi::get_one(
+            "SELECT block_id FROM knowledge.blocks('guides/money-back')
+              WHERE kind = 'heading' ORDER BY ord LIMIT 1",
+        )
+        .unwrap()
+        .unwrap();
+        Spi::run(&format!(
+            "SELECT revision FROM knowledge.update_block('{h1}', '# Money back'::markdown)"
+        ))
+        .unwrap();
+        assert_eq!(
+            Spi::get_one::<String>("SELECT title FROM knowledge.notes('guides/money-back')")
+                .unwrap()
+                .unwrap(),
+            "Money back"
+        );
+    }
+
+    /// The vault as a PARAMETER, which is what makes these functions
+    /// composable — and what makes the handbook's own scenario-4 query return
+    /// the right rows.
+    ///
+    /// With the vault available only as an ambient GUC, a join over an
+    /// application's own table could not vary the vault per row: every row of
+    /// `app_user u, LATERAL knowledge.notes()` reported whichever vault the
+    /// session happened to be in, silently attributing one user's notes to
+    /// every user. Not slow — WRONG, with no error, in a query shape the
+    /// handbook advertises as the differentiator.
+    #[pg_test]
+    fn the_vault_is_a_parameter_so_a_join_can_vary_it_per_row() {
+        Spi::run(
+            "CREATE TABLE app_user (handle text PRIMARY KEY, vault text NOT NULL);
+             INSERT INTO app_user VALUES
+               ('alice', 'app/alice'), ('bob', 'app/bob');",
+        )
+        .unwrap();
+        Spi::run("SELECT knowledge.create_vault('app/alice')").unwrap();
+        Spi::run("SELECT knowledge.create_vault('app/bob')").unwrap();
+
+        Spi::run("SELECT knowledge.write('a1', '# Alice one'::markdown, vault => 'app/alice')")
+            .unwrap();
+        Spi::run("SELECT knowledge.write('b1', '# Bob one'::markdown, vault => 'app/bob')")
+            .unwrap();
+
+        // One statement, no wrapper, no set_config, correct per row.
+        let pairs: Vec<String> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT u.handle || '=' || n.path
+                       FROM app_user u, LATERAL knowledge.notes('**', vault => u.vault) n
+                      ORDER BY 1",
+                    None,
+                    &[],
+                )
+                .expect("the scenario-4 join failed")
+                .map(|r| r.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert_eq!(
+            pairs,
+            vec!["alice=a1".to_string(), "bob=b1".to_string()],
+            "each user gets their OWN notes"
+        );
+
+        // Reading, writing and block ops all take it, and a note in one vault
+        // is not visible from the other under the same session.
+        assert_eq!(
+            Spi::get_one::<String>("SELECT knowledge.read('a1', vault => 'app/alice')::text")
+                .unwrap()
+                .unwrap(),
+            "# Alice one"
+        );
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read('a1', vault => 'app/bob')"),
+            "PM002",
+            "alice's path does not resolve in bob's vault"
+        );
+
+        // The uuid spelling works too, which is what an application joining on
+        // its own uuid column will pass.
+        let alice: Uuid = Spi::get_one("SELECT knowledge.vault_id('app/alice')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            Spi::get_one::<i64>(&format!(
+                "SELECT count(*) FROM knowledge.notes('**', vault => '{alice}')"
+            ))
+            .unwrap()
+            .unwrap(),
+            1
+        );
+
+        // An unknown vault is PM018 wherever it is passed, not empty results.
+        assert_eq!(
+            sqlstate_of("SELECT * FROM knowledge.notes('**', vault => 'app/nobody')"),
+            "PM018"
+        );
+    }
+
+    /// A vault is an object: it is created, named, listed, and a uuid nobody
+    /// created is an error rather than a brand-new empty vault.
+    #[pg_test]
+    fn a_vault_has_a_name_and_an_id() {
+        let id: Uuid = Spi::get_one(
+            "SELECT vault_id FROM knowledge.create_vault(
+               'acme/alice/agents/billing', 'Billing agent memory')",
+        )
+        .unwrap()
+        .unwrap();
+
+        // Reachable by name, and the name round-trips to the id.
+        let by_name: Uuid = Spi::get_one("SELECT knowledge.vault_id('acme/alice/agents/billing')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(by_name, id);
+
+        // Listed, with its description, and globbable by name — which is how
+        // an application scopes a listing, since pgmind has no tenant concept.
+        Spi::run("SELECT knowledge.create_vault('acme/bob/memory')").unwrap();
+        Spi::run("SELECT knowledge.create_vault('globex/carol/memory')").unwrap();
+        let acme: i64 = Spi::get_one("SELECT count(*) FROM knowledge.vaults('acme/**')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(acme, 2, "the glob scopes the listing by name prefix");
+        let described: String =
+            Spi::get_one("SELECT description FROM knowledge.vaults('acme/alice/**')")
+                .unwrap()
+                .unwrap();
+        assert_eq!(described, "Billing agent memory");
+
+        // Writing into it works once selected.
+        Spi::run(&format!("SET pgmind.vault_id = '{id}'")).unwrap();
+        write("prefs", "# Prefs\n\nlikes short answers\n");
+        assert_eq!(
+            Spi::get_one::<i64>("SELECT count(*) FROM knowledge.notes()")
+                .unwrap()
+                .unwrap(),
+            1
+        );
+        Spi::run("RESET pgmind.vault_id").unwrap();
+
+        // A typo is an error, not a new empty vault. This is the whole point:
+        // before the registry, an unknown uuid read as an empty vault and wrote
+        // into one nobody could find again.
+        assert_eq!(
+            sqlstate_of(
+                "SET pgmind.vault_id = '99999999-9999-9999-9999-999999999999'; \
+                         SELECT count(*) FROM knowledge.notes()"
+            ),
+            "PM018"
+        );
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.vault_id('acme/alice/agents/biling')"),
+            "PM018",
+            "a misspelled name fails the same way"
+        );
+    }
+
+    /// Names and ids are both unique, and `if_not_exists` is what makes
+    /// provisioning idempotent rather than a second vault with one purpose.
+    #[pg_test]
+    fn create_vault_refuses_to_adopt_someone_elses_vault() {
+        let id: Uuid = Spi::get_one("SELECT vault_id FROM knowledge.create_vault('shared')")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.create_vault('shared')"),
+            "PM015",
+            "a duplicate name raises rather than handing back the existing vault"
+        );
+        assert_eq!(
+            sqlstate_of(&format!(
+                "SELECT knowledge.create_vault('other-name', vault_id => '{id}')"
+            )),
+            "PM015",
+            "a duplicate id raises too"
+        );
+
+        let again: Uuid = Spi::get_one(
+            "SELECT vault_id FROM knowledge.create_vault('shared', if_not_exists => true)",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(again, id, "if_not_exists adopts the same vault");
+
+        let n: i64 = Spi::get_one("SELECT count(*) FROM knowledge.vaults('shared')")
+            .unwrap()
+            .unwrap();
+        assert_eq!(n, 1, "and creates nothing new");
+    }
+
+    /// An empty vault GUC denies; it does not break the connection.
+    ///
+    /// After `SET LOCAL pgmind.vault_id = …; COMMIT` a custom GUC holds the
+    /// EMPTY STRING rather than NULL, and never returns to NULL for the life
+    /// of the backend. The policy used to cast that straight to uuid, so the
+    /// second transaction on a pooled connection — the shipped way to scope a
+    /// request — failed with 22P02 and every one after it. `NULLIF` makes the
+    /// predicate NULL instead, which denies rather than errors.
+    #[pg_test]
+    fn an_empty_vault_guc_denies_instead_of_breaking_the_session() {
+        write("pool/note", "seeded\n");
+        Spi::run("SELECT pgmind.enable_vault_rls()").unwrap();
+        Spi::run("CREATE ROLE pgmind_pool_test").unwrap();
+        Spi::run("GRANT USAGE ON SCHEMA pgmind, knowledge TO pgmind_pool_test").unwrap();
+        Spi::run("GRANT SELECT ON ALL TABLES IN SCHEMA pgmind TO pgmind_pool_test").unwrap();
+        Spi::run("SET ROLE pgmind_pool_test").unwrap();
+
+        // What a pooler leaves behind between requests.
+        Spi::run("SET pgmind.vault_id = ''").unwrap();
+        let visible: i64 = Spi::get_one("SELECT count(*) FROM pgmind.note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            visible, 0,
+            "an unset vault sees nothing, and does not raise"
+        );
+
+        // The connection is still usable: the next request scopes normally.
+        Spi::run(&format!(
+            "SET pgmind.vault_id = '{}'",
+            crate::schema::DEFAULT_VAULT
+        ))
+        .unwrap();
+        let after: i64 = Spi::get_one("SELECT count(*) FROM pgmind.note")
+            .unwrap()
+            .unwrap();
+        assert_eq!(after, 1, "the same connection still works afterwards");
+
+        Spi::run("RESET ROLE").unwrap();
+        Spi::run("RESET pgmind.vault_id").unwrap();
+    }
+
+    /// `enable_vault_rls` reports the tables it could not cover rather than
+    /// skipping them in silence. `pgmind.excision_replay` has no `vault_id`
+    /// and is outside the boundary by construction — holding, for the literal
+    /// and note forms, the identifying data an excision erased.
+    #[pg_test]
+    fn enable_vault_rls_reports_what_it_could_not_cover() {
+        let uncovered: Vec<String> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT table_name FROM pgmind.enable_vault_rls() WHERE NOT covered",
+                    None,
+                    &[],
+                )
+                .expect("enable_vault_rls failed")
+                .map(|r| r.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert!(
+            uncovered.iter().any(|t| t == "excision_replay"),
+            "excision_replay is reported as outside the boundary, got {uncovered:?}"
+        );
+    }
+
+    /// The admin surface is not PUBLIC (Law 11, RFC-005 D7). Decided, written
+    /// into the RFC and the product plan, and never implemented until now.
+    #[pg_test]
+    fn admin_functions_are_revoked_from_public() {
+        for sig in [
+            "pgmind.excise(jsonb, text, boolean, boolean)",
+            "pgmind.verify_excision(uuid)",
+            "pgmind.retain(bigint, boolean)",
+            "pgmind.verify_note(uuid)",
+            "pgmind.verify_history(uuid)",
+        ] {
+            let public_may: bool = Spi::get_one(&format!(
+                "SELECT has_function_privilege('public', '{sig}', 'EXECUTE')"
+            ))
+            .unwrap()
+            .unwrap();
+            assert!(!public_may, "{sig} is still executable by PUBLIC");
+        }
+    }
+
+    /// Migration is one call, and it is all-or-nothing.
+    ///
+    /// Requirement 11 of the ease-of-use scenario — "migrating existing local
+    /// .md files must be trivial" — had no answer: the bulk import path lived
+    /// in Phase 4, which was cut, so a 500-note vault was 500 round trips.
+    #[pg_test]
+    fn write_many_ingests_a_batch_and_rolls_it_back_as_one() {
+        let rows: Vec<(String, Uuid)> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT path, revision FROM knowledge.write_many(
+                       ARRAY['guides/refunds', ' guides/escalation ', 'guides/tone'],
+                       ARRAY['# Refunds\n\nwithin 30 days\n',
+                             '# Escalation\n\nask a human #urgent\n',
+                             '# Tone\n\nsee [[guides/refunds]]\n']::markdown[])",
+                    None,
+                    &[],
+                )
+                .expect("write_many failed")
+                .map(|r| {
+                    (
+                        r.get::<String>(1).unwrap().unwrap(),
+                        r.get::<Uuid>(2).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+
+        // One row per input, in input order, carrying the STORED path — the
+        // caller reads back with what it gets, not with what it sent.
+        assert_eq!(
+            rows.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(),
+            vec!["guides/refunds", "guides/escalation", "guides/tone"],
+        );
+        for (path, _) in &rows {
+            verify_clean(path);
+        }
+        assert_eq!(read("guides/refunds"), "# Refunds\n\nwithin 30 days\n");
+
+        // Batched writes are ordinary writes: extraction ran, so the link and
+        // the tag are there, and re-sending byte-identical input is still the
+        // no-op `write()` promises rather than three fresh revisions.
+        let backlinks: i64 =
+            Spi::get_one("SELECT count(*) FROM knowledge.backlinks('guides/refunds')")
+                .unwrap()
+                .unwrap();
+        assert_eq!(backlinks, 1, "extraction ran inside the batch");
+        let again: Uuid = Spi::get_one(
+            "SELECT revision FROM knowledge.write_many(
+               ARRAY['guides/refunds'],
+               ARRAY['# Refunds\n\nwithin 30 days\n']::markdown[])",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(again, rows[0].1, "byte-identical input mints no revision");
+
+        // One bad element takes the whole batch with it. A relative path is the
+        // realistic way this happens: a filesystem walk emits `a/../b`.
+        assert_eq!(
+            sqlstate_of(
+                "SELECT knowledge.write_many(
+                   ARRAY['batch/good', 'batch/../bad'],
+                   ARRAY['ok\n', 'ok\n']::markdown[])"
+            ),
+            "PM001"
+        );
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read('batch/good')"),
+            "PM002",
+            "the element written before the failure did not survive"
+        );
+    }
+
+    /// A batch that is malformed says which element is malformed. PM019 rather
+    /// than PM004: `pgmind_fragment_arity` is frozen to block counts within a
+    /// fragment (RFC-004 A6), and an agent repairing on that code would go
+    /// looking at document structure instead of at its own arrays.
+    #[pg_test]
+    fn write_many_names_the_element_that_is_wrong() {
+        for sql in [
+            // Arrays of different lengths — the silent-truncation trap.
+            "SELECT knowledge.write_many(ARRAY['a', 'b'], ARRAY['x\n']::markdown[])",
+            // A NULL element, which is what a missing join row produces.
+            "SELECT knowledge.write_many(ARRAY['a', NULL], ARRAY['x\n', 'y\n']::markdown[])",
+            "SELECT knowledge.write_many(ARRAY['a', 'b'], ARRAY['x\n', NULL]::markdown[])",
+            // Past the cap.
+            "SELECT knowledge.write_many(
+               (SELECT array_agg('n/' || i) FROM generate_series(1, 1001) i),
+               (SELECT array_agg('x'::markdown) FROM generate_series(1, 1001)))",
+        ] {
+            assert_eq!(sqlstate_of(sql), "PM019", "for {sql}");
+        }
+
+        // The vault argument is honoured, and honoured once: the batch lands
+        // where it was told to, not where the session happens to point.
+        Spi::run("SELECT knowledge.create_vault('import/target')").unwrap();
+        Spi::run(
+            "SELECT knowledge.write_many(
+               ARRAY['a', 'b'], ARRAY['x\n', 'y\n']::markdown[], vault => 'import/target')",
+        )
+        .unwrap();
+        assert_eq!(
+            Spi::get_one::<i64>(
+                "SELECT count(*) FROM knowledge.notes('**', vault => 'import/target')"
+            )
+            .unwrap()
+            .unwrap(),
+            2
+        );
+        assert_eq!(
+            Spi::get_one::<i64>("SELECT count(*) FROM knowledge.notes()")
+                .unwrap()
+                .unwrap(),
+            0,
+            "and nothing landed in the session's vault"
+        );
+        assert_eq!(
+            sqlstate_of(
+                "SELECT knowledge.write_many(
+                   ARRAY['a'], ARRAY['x\n']::markdown[], vault => 'import/nope')"
+            ),
+            "PM018",
+        );
+    }
+
     // ---------- note lifecycle (RFC-005 D6) ----------
 
     /// Delete is a tombstone plus a revision; the live lanes are cleared but
@@ -1809,6 +2458,10 @@ mod tests {
     #[pg_test]
     fn tenant_scoping_and_grant_boundary() {
         let vault_b = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+        Spi::run(&format!(
+            "SELECT knowledge.create_vault('tenant-b', vault_id => '{vault_b}')"
+        ))
+        .unwrap();
         write("public-note", "default vault\n");
         Spi::run(&format!("SET pgmind.vault_id = '{vault_b}'")).unwrap();
         write("secret/tenant-b", "tenant b secret\n");

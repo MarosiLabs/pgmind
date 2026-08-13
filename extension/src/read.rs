@@ -11,6 +11,17 @@ use crate::store::{self, arg};
 use crate::write as write_path;
 use crate::Markdown;
 
+/// How many notes one `write_many()` call accepts.
+///
+/// Not a memory bound — `pgmind.max_document_bytes` already bounds each element
+/// and `text[]` has no per-element ceiling (RFC-003 D6). It bounds *time*: the
+/// whole batch is one statement in one transaction, holding its path locks and
+/// rolling back entirely on any failure. At the write cost D8 publishes — single
+/// digit ms per note — a full batch is a several-second statement, which is a
+/// unit a caller can retry; ten times that is a lock hold long enough to be
+/// somebody else's outage.
+const MAX_BATCH_NOTES: usize = 1000;
+
 /// A literal path prefix as a `LIKE` pattern. Note paths may legitimately
 /// contain `%`, `_` and `\`, so the prefix is escaped before the wildcard is
 /// appended — otherwise a path containing `%` would widen the scan rather
@@ -31,6 +42,160 @@ fn like_prefix_pattern(prefix: &str) -> String {
 mod knowledge {
     use super::*;
 
+    /// Create a vault. Returns its id and name.
+    ///
+    /// `vault_id` is caller-supplied and defaults to a minted UUIDv7: an
+    /// application that already keys tenants, users or agents by id wants the
+    /// vault to carry the id it chose, so its own row and the vault agree
+    /// without a mapping table to keep in sync. Supplying it is also what makes
+    /// provisioning idempotent alongside `if_not_exists`.
+    ///
+    /// A collision on either id or name raises rather than adopting the
+    /// existing vault, unless `if_not_exists` — silently handing back somebody
+    /// else's vault is the failure this registry exists to prevent.
+    #[pg_extern(requires = ["pgmind_storage"])]
+    fn create_vault(
+        name: &str,
+        description: default!(Option<String>, "NULL"),
+        vault_id: default!(Option<Uuid>, "NULL"),
+        if_not_exists: default!(bool, false),
+    ) -> TableIterator<'static, (name!(vault_id, Uuid), name!(name, String))> {
+        let normalized = pgmind_core::path::path_normalize(name);
+        if !pgmind_core::path::path_is_valid(&normalized) {
+            pm_error(
+                Pm::InvalidPath,
+                "invalid vault name",
+                &format!("vault names use the same grammar as note paths; {name:?} does not"),
+            );
+        }
+        let existing: Option<Uuid> = Spi::get_one_with_args(
+            "SELECT id FROM pgmind.vault WHERE name = $1",
+            &[normalized.as_str().into()],
+        )
+        .unwrap_or(None);
+        if let Some(id) = existing {
+            if if_not_exists {
+                return TableIterator::once((id, normalized));
+            }
+            pm_error(
+                Pm::PathTaken,
+                "a vault with that name already exists",
+                &format!("vault {normalized:?} is {id}; pass if_not_exists => true to adopt it"),
+            );
+        }
+        let id = vault_id.unwrap_or_else(crate::ids::mint);
+        let taken: Option<String> =
+            Spi::get_one_with_args("SELECT name FROM pgmind.vault WHERE id = $1", &[arg(id)])
+                .unwrap_or(None);
+        if let Some(other) = taken {
+            if if_not_exists && other == normalized {
+                return TableIterator::once((id, normalized));
+            }
+            pm_error(
+                Pm::PathTaken,
+                "a vault with that id already exists",
+                &format!("id {id} is vault {other:?}"),
+            );
+        }
+        Spi::run_with_args(
+            "INSERT INTO pgmind.vault (id, name, description) VALUES ($1, $2, $3)",
+            &[
+                arg(id),
+                normalized.as_str().into(),
+                description.as_deref().into(),
+            ],
+        )
+        .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure creating vault: {e}"));
+        TableIterator::once((id, normalized))
+    }
+
+    /// Every vault, filtered by a glob over the NAME (RFC-002 D8 `*`/`**`).
+    ///
+    /// This lists every vault in the database. pgmind has no tenant concept —
+    /// applications carry their hierarchy in the name, so scoping a listing is
+    /// `knowledge.vaults('acme/**')` and enforcing that scope is the
+    /// application's job until the isolation RFC lands.
+    #[pg_extern(requires = ["pgmind_storage"])]
+    fn vaults(
+        glob: default!(String, "'**'"),
+    ) -> TableIterator<
+        'static,
+        (
+            name!(vault_id, Uuid),
+            name!(name, String),
+            name!(description, Option<String>),
+            name!(created_at, pgrx::datum::TimestampWithTimeZone),
+        ),
+    > {
+        if !pgmind_core::path::glob_is_valid(&glob) {
+            pm_error(
+                Pm::InvalidPath,
+                "invalid glob",
+                &format!(
+                    "globs are 1..={} bytes; got {}",
+                    pgmind_core::path::MAX_GLOB_BYTES,
+                    glob.len()
+                ),
+            );
+        }
+        let rows: Vec<_> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT id, name, description, created_at FROM pgmind.vault ORDER BY name",
+                    None,
+                    &[],
+                )
+                .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in vaults(): {e}"))
+                .map(|row| {
+                    (
+                        row.get::<Uuid>(1).unwrap().unwrap(),
+                        row.get::<String>(2).unwrap().unwrap(),
+                        row.get::<String>(3).unwrap(),
+                        row.get(4).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        TableIterator::new(rows.into_iter().filter(move |(_, name, ..)| {
+            pgrx::check_for_interrupts!();
+            pgmind_core::path::glob_match(&glob, name)
+        }))
+    }
+
+    /// A note's id, by path. PM002 when there is none.
+    ///
+    /// The public API could not previously produce a note id at all, which is
+    /// why `pgmind.verify_note(note_id uuid)` — the health check — took an
+    /// argument nothing public returned, and why an application keying a row to
+    /// a note had to store mutable text and hope.
+    #[pg_extern(requires = ["pgmind_storage"])]
+    fn note_id(path: &str, vault: default!(Option<String>, "NULL")) -> Uuid {
+        let vault = store::resolve_vault(vault.as_deref());
+        store::note_by_path_or_err(vault, path).id
+    }
+
+    /// A note's current path, by id. The inverse of `note_id`, and the reason
+    /// an id is worth holding: it survives `move_note`, where a path does not.
+    #[pg_extern(requires = ["pgmind_storage"])]
+    fn path_of(note_id: Uuid) -> String {
+        let vault = store::current_vault();
+        let found: Option<String> = Spi::get_one_with_args(
+            "SELECT path FROM pgmind.note
+              WHERE id = $1 AND vault_id = $2 AND tombstoned_at IS NULL",
+            &[arg(note_id), arg(vault)],
+        )
+        .unwrap_or(None);
+        found.unwrap_or_else(|| {
+            pm_error(Pm::NoteNotFound, "note not found", &format!("id {note_id}"))
+        })
+    }
+
+    /// A vault's id, by name. PM018 when there is none.
+    #[pg_extern(requires = ["pgmind_storage"])]
+    fn vault_id(name: &str) -> Uuid {
+        store::resolve_vault(Some(name))
+    }
+
     /// Upsert a whole note (RFC-003 D6). Returns the revision ID; byte-identical
     /// input returns the current head with no new revision.
     ///
@@ -38,14 +203,103 @@ mod knowledge {
     /// read and the write raises PM009 if someone else moved the note first.
     /// Omitting it is last-writer-wins, explicitly and by the caller's choice.
     #[pg_extern]
-    fn write(path: &str, doc: Markdown, expected_head: default!(Option<Uuid>, "NULL")) -> Uuid {
-        write_path::write_note(path, &doc.0, expected_head)
+    fn write(
+        path: &str,
+        doc: Markdown,
+        expected_head: default!(Option<Uuid>, "NULL"),
+        vault: default!(Option<String>, "NULL"),
+    ) -> Uuid {
+        write_path::write_note(path, &doc.0, expected_head, vault.as_deref())
+    }
+
+    /// Write many notes in one call, in input order. Returns one row per input.
+    ///
+    /// Each element is `write()` with `expected_head => NULL`, so the per-note
+    /// semantics are unchanged: upsert, last-writer-wins, byte-identical input
+    /// returns the current head without minting a revision. Compare-and-swap is
+    /// deliberately absent — a batch is for ingestion, where the caller holds no
+    /// prior head, and an `expected_heads uuid[]` would make the one array a
+    /// caller must get exactly right the one they have no values for.
+    ///
+    /// Parallel arrays rather than one `jsonb`: RFC-003 D6's batching amendment
+    /// makes this normative, not stylistic. `jsonb` imposes PostgreSQL's
+    /// `JENTRY_OFFLENMASK` ceiling on the element total, so routing documents
+    /// through it would let a batch reject a note that `write()` accepts —
+    /// batching may not narrow what pgmind stores.
+    ///
+    /// This is one statement in one transaction: a failure anywhere rolls the
+    /// whole batch back. That is the reason for `MAX_BATCH_NOTES` — not memory,
+    /// which `markdown`'s own limit already bounds, but making the unit of retry
+    /// something a caller can re-send.
+    ///
+    /// **This does not make writes faster, and the claim that it would was
+    /// wrong.** Measured on a local socket, 500 notes as 500 autocommit
+    /// statements, as one `SELECT count(write(…)) FROM staging`, and as one
+    /// `write_many` all cost the same 8.4 ms/note — within run-to-run spread of
+    /// each other. Per-note work (parse, hash, extraction, the revision row)
+    /// dominates so completely that removing 499 statements and 499 commits
+    /// changes nothing measurable; a commit on that machine costs 0.16 ms
+    /// against a note's 8.4. What batching removes is `N` round trips and `N`
+    /// commits, so the saving is whatever those cost *you* — real over a network
+    /// or against durable storage, nil over a socket. The ergonomics are the
+    /// point: a migration is one call.
+    #[pg_extern]
+    fn write_many(
+        paths: Vec<Option<String>>,
+        docs: Vec<Option<Markdown>>,
+        vault: default!(Option<String>, "NULL"),
+    ) -> TableIterator<'static, (name!(path, String), name!(revision, Uuid))> {
+        if paths.len() != docs.len() {
+            pm_error(
+                Pm::BatchArity,
+                "paths and docs must have the same length",
+                &format!("{} path(s), {} doc(s)", paths.len(), docs.len()),
+            );
+        }
+        if paths.len() > MAX_BATCH_NOTES {
+            pm_error(
+                Pm::BatchArity,
+                "batch is too large",
+                &format!("{} notes, limit {MAX_BATCH_NOTES}", paths.len()),
+            );
+        }
+        // Resolved once. Resolving per note would re-probe the registry for a
+        // value that cannot change mid-statement, and — worse — a batch that
+        // straddled two vaults would be a silent surprise rather than an error.
+        let vault = store::resolve_vault(vault.as_deref());
+
+        let rows: Vec<(String, Uuid)> = paths
+            .into_iter()
+            .zip(docs)
+            .enumerate()
+            .map(|(i, (path, doc))| {
+                // A NULL element is caught here rather than left to unwrap: the
+                // array is often built by the client's own SQL, where a missing
+                // join row produces NULL, and "element 37 is NULL" names the
+                // input that is wrong.
+                let (path, doc) = match (path, doc) {
+                    (Some(p), Some(d)) => (p, d),
+                    (p, _) => pm_error(
+                        Pm::BatchArity,
+                        "batch element is NULL",
+                        &format!("element {i} ({})", if p.is_none() { "path" } else { "doc" }),
+                    ),
+                };
+                // The stored path, not the submitted one. `write()` normalizes
+                // (NFC, trim) and the caller needs a value it can read back
+                // with; input order already lets it correlate rows to inputs.
+                let path = pgmind_core::path::path_normalize(&path);
+                let rev = write_path::write_note_in(vault, &path, &doc.0, None);
+                (path, rev)
+            })
+            .collect();
+        TableIterator::new(rows)
     }
 
     /// Byte-faithful read: preamble ‖ tiles (RFC-003 D2).
     #[pg_extern]
-    fn read(path: &str) -> Markdown {
-        let vault = store::current_vault();
+    fn read(path: &str, vault: default!(Option<String>, "NULL")) -> Markdown {
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         Markdown(store::load_source(&note))
     }
@@ -53,8 +307,12 @@ mod knowledge {
     /// Heading-delimited subtree slice; first match in document order
     /// (RFC-002 D2). PM007 when the heading path matches nothing.
     #[pg_extern]
-    fn read_section(path: &str, heading_path: Vec<String>) -> Markdown {
-        let vault = store::current_vault();
+    fn read_section(
+        path: &str,
+        heading_path: Vec<String>,
+        vault: default!(Option<String>, "NULL"),
+    ) -> Markdown {
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         let source = store::load_source(&note);
         let doc = pgmind_core::parse(&source);
@@ -115,18 +373,21 @@ mod knowledge {
     #[pg_extern]
     fn notes(
         glob: default!(String, "'**'"),
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
+            name!(note_id, Uuid),
             name!(path, String),
             name!(title, String),
+            name!(description, Option<String>),
             name!(properties, JsonB),
             name!(head_revision, Uuid),
             name!(created_at, pgrx::datum::TimestampWithTimeZone),
             name!(updated_at, Option<pgrx::datum::TimestampWithTimeZone>),
         ),
     > {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         if !pgmind_core::path::glob_is_valid(&glob) {
             pm_error(
                 Pm::InvalidPath,
@@ -146,8 +407,8 @@ mod knowledge {
         let rows: Vec<_> = Spi::connect(|client| {
             client
                 .select(
-                    "SELECT n.path, n.basename, n.properties, n.head_revision, n.created_at,
-                            r.created_at
+                    "SELECT n.path, coalesce(n.title, n.basename), n.properties,
+                            n.head_revision, n.created_at, r.created_at, n.id, n.description
                      FROM pgmind.note n
                      LEFT JOIN pgmind.revision r ON r.id = n.head_revision
                      WHERE n.vault_id = $1 AND n.tombstoned_at IS NULL
@@ -159,8 +420,10 @@ mod knowledge {
                 .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in notes(): {e}"))
                 .map(|row| {
                     (
+                        row.get::<Uuid>(7).unwrap().unwrap(),
                         row.get::<String>(1).unwrap().unwrap(),
                         row.get::<String>(2).unwrap().unwrap(),
+                        row.get::<String>(8).unwrap(),
                         JsonB(row.get::<JsonB>(3).unwrap().unwrap().0),
                         row.get::<Uuid>(4).unwrap().unwrap(),
                         row.get(5).unwrap().unwrap(),
@@ -169,7 +432,7 @@ mod knowledge {
                 })
                 .collect()
         });
-        TableIterator::new(rows.into_iter().filter(move |(path, ..)| {
+        TableIterator::new(rows.into_iter().filter(move |(_, path, ..)| {
             // The matcher is linear now, but it still runs once per candidate
             // row against a caller-supplied pattern; stay cancellable.
             pgrx::check_for_interrupts!();
@@ -183,6 +446,7 @@ mod knowledge {
     #[pg_extern(name = "blocks")]
     fn blocks_by_path(
         path: &str,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -199,7 +463,7 @@ mod knowledge {
             name!(attrs, JsonB),
         ),
     > {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         let tiles = store::tiles_of(note.id);
         let preamble_len = note.preamble.len() as i64;
@@ -249,6 +513,7 @@ mod knowledge {
     #[pg_extern(name = "links")]
     fn links_by_path(
         path: &str,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -261,7 +526,7 @@ mod knowledge {
             name!(dangling_reason, Option<String>),
         ),
     > {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         let rows: Vec<_> = Spi::connect(|client| {
             client
@@ -299,6 +564,7 @@ mod knowledge {
     #[pg_extern]
     fn backlinks(
         path: &str,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -309,7 +575,7 @@ mod knowledge {
             name!(excerpt, String),
         ),
     > {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         let note = store::note_by_path_or_err(vault, path);
         let rows: Vec<_> = Spi::connect(|client| {
             client
@@ -344,8 +610,9 @@ mod knowledge {
     /// the lexicographically-first variant (deterministic — RFC-003 D7).
     #[pg_extern(name = "tags")]
     fn tags_vault(
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<'static, (name!(tag, String), name!(notes, i64), name!(blocks, i64))> {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         let rows: Vec<_> = Spi::connect(|client| {
             client
                 .select(
@@ -372,6 +639,7 @@ mod knowledge {
     #[pg_extern]
     fn tagged(
         tag: &str,
+        vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
         (
@@ -380,7 +648,7 @@ mod knowledge {
             name!(tag, String),
         ),
     > {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         let rows: Vec<_> = Spi::connect(|client| {
             client
                 .select(
@@ -408,8 +676,10 @@ mod knowledge {
     /// Live notes with zero resolved incoming edges from OTHER notes
     /// (self-links and dangling edges never count — RFC-003 D7).
     #[pg_extern]
-    fn orphans() -> TableIterator<'static, (name!(path, String),)> {
-        let vault = store::current_vault();
+    fn orphans(
+        vault: default!(Option<String>, "NULL"),
+    ) -> TableIterator<'static, (name!(path, String),)> {
+        let vault = store::resolve_vault(vault.as_deref());
         let rows: Vec<_> = Spi::connect(|client| {
             client
                 .select(
@@ -432,7 +702,9 @@ mod knowledge {
     /// Vault-level counts (RFC-003 D7).
     #[allow(clippy::type_complexity)] // pgrx TableIterator signatures are nominal
     #[pg_extern]
-    fn stats() -> TableIterator<
+    fn stats(
+        vault: default!(Option<String>, "NULL"),
+    ) -> TableIterator<
         'static,
         (
             name!(vault_id, Uuid),
@@ -445,7 +717,7 @@ mod knowledge {
             name!(bytes, i64),
         ),
     > {
-        let vault = store::current_vault();
+        let vault = store::resolve_vault(vault.as_deref());
         // Every count is over the SAME population: live notes in this vault.
         // Filtering tombstones on the note count alone made the published
         // capacity ratios (bytes/block, notes/s) describe two different sets

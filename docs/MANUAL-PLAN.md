@@ -111,7 +111,7 @@ write(path text, doc markdown, expected_head uuid DEFAULT NULL) -> uuid
 **`pgmind` — admin surface (Law 11)**
 
 ```
-enable_vault_rls(force boolean DEFAULT false) -> void
+enable_vault_rls(force boolean DEFAULT false) -> TABLE (table_name, covered, detail)
 excise(target jsonb, reason text, and_head boolean DEFAULT false, dry_run boolean DEFAULT true) -> uuid
 path_is_valid(path text) -> boolean
 path_normalize(path text) -> text

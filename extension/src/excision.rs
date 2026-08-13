@@ -20,12 +20,15 @@ use crate::store::{self, arg};
 /// 46 columns as the extension owner and 24 as a Law-11 erasure admin, so the
 /// live `pgmind.block` lane was never opened and a canary still sitting in it
 /// went unseen. `verify_excision` returned a positive attestation of erasure.
-fn text_columns() -> Vec<(String, String, String, bool)> {
+fn text_columns() -> Vec<TextColumn> {
     Spi::connect(|client| {
         client
             .select(
                 "SELECT c.relname::text, a.attname::text, format_type(a.atttypid, NULL),
-                        a.attgenerated <> ''
+                        a.attgenerated <> '',
+                        EXISTS (SELECT 1 FROM pg_catalog.pg_attribute v
+                                 WHERE v.attrelid = c.oid AND v.attname = 'vault_id'
+                                   AND v.attnum > 0 AND NOT v.attisdropped)
                    FROM pg_catalog.pg_class c
                    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
                    JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
@@ -38,39 +41,90 @@ fn text_columns() -> Vec<(String, String, String, bool)> {
                 &[],
             )
             .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure enumerating columns: {e}"))
-            .map(|r| {
-                (
-                    r.get::<String>(1).unwrap().unwrap(),
-                    r.get::<String>(2).unwrap().unwrap(),
-                    r.get::<String>(3).unwrap().unwrap(),
-                    r.get::<bool>(4).unwrap().unwrap_or(false),
-                )
+            .map(|r| TextColumn {
+                table: r.get::<String>(1).unwrap().unwrap(),
+                column: r.get::<String>(2).unwrap().unwrap(),
+                ty: r.get::<String>(3).unwrap().unwrap(),
+                generated: r.get::<bool>(4).unwrap().unwrap_or(false),
+                vault_scoped: r.get::<bool>(5).unwrap().unwrap_or(false),
             })
             .collect()
     })
+}
+
+/// One text-bearing column of the storage schema, as enumerated from
+/// `pg_catalog` (never a literal list — see `sweep`).
+struct TextColumn {
+    table: String,
+    column: String,
+    ty: String,
+    generated: bool,
+    /// Whether the owning table carries `vault_id`, i.e. whether excision can
+    /// confine itself to one tenant when it touches this column.
+    vault_scoped: bool,
+}
+
+/// Tables excision does NOT touch, each named and each for a stated reason.
+///
+/// Excision operates on the note-content lanes, which are exactly the tables
+/// carrying `vault_id`. These two carry none, and neither holds note content:
+///
+///   `excision_replay`  holds the executable excision target, which for the
+///                      literal and note forms IS the identifying data the
+///                      excision erased (RFC-005 D2 H4b).
+///   `vault`            the registry: names and descriptions of containers,
+///                      not content. Redacting it would rename vaults across
+///                      the database and break every name-based lookup that
+///                      depends on them — including, via `note.vault_id`'s
+///                      foreign key, the notes themselves.
+///
+/// A list, not a filter, because anything else without `vault_id` is a table
+/// that slipped past the boundary and must stop the transaction rather than be
+/// swept unscoped — the silent-skip failure the D7 amendment exists for.
+const NOT_CONTENT: [&str; 2] = ["excision_replay", "vault"];
+
+/// `AND vault_id = $n`, or a hard stop.
+///
+/// Excision that leaves its own vault rewrites another tenant's bytes outside
+/// the write path, recording no revision and leaving their notes failing
+/// `verify_note`. So a table that cannot be scoped does not get scanned
+/// unscoped — it aborts the transaction and names itself.
+fn vault_predicate(col: &TextColumn, param: usize) -> String {
+    if !col.vault_scoped {
+        pgrx::error!(
+            "pgmind: pgmind.{} carries no vault_id, so excision cannot confine itself \
+             to one vault — refusing rather than sweeping every tenant",
+            col.table
+        );
+    }
+    format!("AND vault_id = ${param}")
 }
 
 /// Count occurrences of `needle` across every text-bearing column, skipping the
 /// one table that holds the target by design (D2 H4b) — named, never silently
 /// skipped, because a silent exemption is how this check reports green on a
 /// broken system.
-pub fn sweep(needle: &str) -> Vec<String> {
+pub fn sweep(vault: Uuid, needle: &str) -> Vec<String> {
     let mut hits = Vec::new();
-    for (table, column, ty, _generated) in text_columns() {
-        if table == "excision_replay" {
+    for col in text_columns() {
+        if NOT_CONTENT.contains(&col.table.as_str()) {
             continue;
         }
+        let TextColumn {
+            table, column, ty, ..
+        } = &col;
         let expr = match ty.as_str() {
             "text[]" => format!("array_to_string({column}, ' ')"),
             "bytea" => format!("encode({column}, 'escape')"),
             _ => format!("{column}::text"),
         };
+        let scope = vault_predicate(&col, 2);
         let n: Option<i64> = Spi::get_one_with_args(
             &format!(
                 "SELECT count(*) FROM pgmind.{table}
-                  WHERE {expr} IS NOT NULL AND position($1 in {expr}) > 0"
+                  WHERE {expr} IS NOT NULL AND position($1 in {expr}) > 0 {scope}"
             ),
-            &[needle.into()],
+            &[needle.into(), arg(vault)],
         )
         .unwrap_or(Some(0));
         if n.unwrap_or(0) > 0 {
@@ -124,7 +178,7 @@ mod pgmind {
                 &format!("{live} live row(s); pass and_head => true to remove it first"),
             );
         }
-        let history_hits = sweep(&literal).len() as i64;
+        let history_hits = sweep(vault, &literal).len() as i64;
         if dry_run {
             pgrx::warning!(
                 "pgmind: dry run — would erase {live} live and touch {history_hits} history surface(s) for {kind} target"
@@ -157,11 +211,11 @@ mod pgmind {
         if and_head && live > 0 {
             remove_live(vault, kind, &literal);
         }
-        redact(&literal, id);
+        redact(vault, &literal, id);
 
         // Verification runs INSIDE the transaction: survivors abort it, so an
         // incomplete excision is never committed and no log row survives one.
-        let survivors = sweep(&literal);
+        let survivors = sweep(vault, &literal);
         if !survivors.is_empty() {
             pm_error(
                 Pm::ExcisionIncomplete,
@@ -182,6 +236,21 @@ mod pgmind {
     /// way this function would report success on a broken system.
     #[pg_extern(requires = ["pgmind_storage"])]
     fn verify_excision(excision: Uuid) -> pgrx::iter::SetOfIterator<'static, String> {
+        // Scoped to the CURRENT vault, and deliberately not to the vault
+        // recorded on the excision: verifying somebody else's erasure is
+        // reading whether their content survived. An excision belonging to
+        // another vault is reported exactly as one that never existed.
+        let vault = store::current_vault();
+        let known: Option<Uuid> = Spi::get_one_with_args(
+            "SELECT id FROM pgmind.excision_log WHERE id = $1 AND vault_id = $2",
+            &[arg(excision), arg(vault)],
+        )
+        .unwrap_or(None);
+        if known.is_none() {
+            return pgrx::iter::SetOfIterator::new(vec![format!(
+                "no excision {excision} in this vault"
+            )]);
+        }
         let target: Option<JsonB> = Spi::get_one_with_args(
             "SELECT target FROM pgmind.excision_replay WHERE excision_id = $1",
             &[arg(excision)],
@@ -201,7 +270,7 @@ mod pgmind {
                 .unwrap_or_default()
                 .to_string();
         let scanned = super::text_columns().len();
-        let mut out = super::sweep(&needle);
+        let mut out = super::sweep(vault, &needle);
         if scanned == 0 {
             out.push("swept zero columns — the enumeration is broken".into());
         }
@@ -402,7 +471,7 @@ fn remove_live(vault: Uuid, kind: &str, needle: &str) {
                 let note = store::note_by_path_or_err(vault, &p);
                 let src = store::load_source(&note);
                 let cleaned = src.replace(needle, "");
-                crate::write::write_note(&p, &cleaned, None);
+                crate::write::write_note_in(vault, &p, &cleaned, None);
             }
         }
     }
@@ -412,15 +481,19 @@ fn remove_live(vault: Uuid, kind: &str, needle: &str) {
 /// rather than NULLed: a tile pre-image holds a whole top-level child, so
 /// nulling it would erase every OTHER block that shared the tile and leave
 /// `read_as_of` reassembling a document with a hole.
-fn redact(needle: &str, excision: Uuid) {
+fn redact(vault: Uuid, needle: &str, excision: Uuid) {
     let marker = format!("⟨redacted pgmind:{excision}⟩");
-    for (table, column, ty, generated) in text_columns() {
+    for col in text_columns() {
         // Generated columns cannot be updated, and need not be: they are
         // derived from a column this sweep already redacts (note.basename from
         // note.path). They stay in the SWEEP, which is what must be exhaustive.
-        if table == "excision_replay" || generated {
+        if NOT_CONTENT.contains(&col.table.as_str()) || col.generated {
             continue;
         }
+        let scope = vault_predicate(&col, 3);
+        let TextColumn {
+            table, column, ty, ..
+        } = &col;
         let sql = match (ty.as_str(), column.as_str()) {
             // Effect rows keep their skeleton so history still knows THAT a
             // block existed and when; `redacted` marks the NULLs as erasure
@@ -428,26 +501,27 @@ fn redact(needle: &str, excision: Uuid) {
             ("text", "prev_content") => format!(
                 "UPDATE pgmind.{table} SET prev_content = NULL, prev_content_hash = NULL,
                         prev_attrs = NULL, prev_block_ref_id = NULL, redacted = true
-                  WHERE position($1 in prev_content) > 0"
+                  WHERE position($1 in prev_content) > 0 {scope}"
             ),
             ("text[]", _) => format!(
                 "UPDATE pgmind.{table} SET {column} = (
                      SELECT array_agg(replace(e, $1, $2) ORDER BY o)
                        FROM unnest({column}) WITH ORDINALITY AS u(e, o))
-                  WHERE array_to_string({column}, ' ') LIKE '%' || $1 || '%'"
+                  WHERE array_to_string({column}, ' ') LIKE '%' || $1 || '%' {scope}"
             ),
             ("text", _) => format!(
                 "UPDATE pgmind.{table} SET {column} = replace({column}, $1, $2)
-                  WHERE position($1 in {column}) > 0"
+                  WHERE position($1 in {column}) > 0 {scope}"
             ),
             ("jsonb", _) => format!(
                 "UPDATE pgmind.{table} SET {column} = replace({column}::text, $1, $2)::jsonb
-                  WHERE position($1 in {column}::text) > 0"
+                  WHERE position($1 in {column}::text) > 0 {scope}"
             ),
             _ => continue,
         };
-        Spi::run_with_args(&sql, &[needle.into(), marker.as_str().into()]).unwrap_or_else(|e| {
-            pgrx::error!("pgmind: SPI failure redacting {table}.{column}: {e}")
-        });
+        Spi::run_with_args(&sql, &[needle.into(), marker.as_str().into(), arg(vault)])
+            .unwrap_or_else(|e| {
+                pgrx::error!("pgmind: SPI failure redacting {table}.{column}: {e}")
+            });
     }
 }
