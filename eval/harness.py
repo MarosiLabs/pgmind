@@ -1122,6 +1122,12 @@ def suite_search_quality():
     phrase = one("SELECT path FROM knowledge.search('\"signing key\"') LIMIT 1;")
     scoped = int(one("SELECT count(*) FROM knowledge.search('key', path => 's/other');"))
     front = int(one("SELECT count(*) FROM knowledge.search('key', tags => ARRAY['policy']);"))
+    # Tags without a text query. Before this worked, the tags argument was
+    # reachable only in the company of a text query, and tag intersection was
+    # inexpressible in one call because tagged() takes a single tag.
+    tags_only = int(one("SELECT count(*) FROM knowledge.search('', tags => ARRAY['billing']);"))
+    unranked = one("SELECT rank IS NULL FROM knowledge.search('', tags => ARRAY['billing']);")
+    no_predicate = int(one("SELECT count(*) FROM knowledge.search('');"))
 
     # No result may be an ancestor of another result. A list item's content
     # includes its own paragraph, so without the innermost-match rule every
@@ -1190,6 +1196,9 @@ We rotate the signing key.'::markdown, vault => 'search/elsewhere');
         "phrase_query_finds_the_right_note": phrase == "s/auth",
         "path_filter_excludes_other_notes": scoped == 0,
         "a_frontmatter_tag_scopes_the_whole_note": front >= 1,
+        "tags_alone_are_a_filter_not_a_failure": tags_only >= 1,
+        "an_unranked_hit_reports_no_rank_rather_than_zero": unranked == "t",
+        "no_predicate_returns_nothing_not_everything": no_predicate == 0,
         "no_result_contains_another_result": ancestors == 0,
         "no_query_can_make_search_raise": not raised,
         "search_stays_in_its_vault": mine == 1 and theirs == 1,

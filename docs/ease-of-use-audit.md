@@ -665,8 +665,8 @@ Ordered by what unblocks the most for the least risk:
 | 2b | **Identifiers** — `note_id` on `notes()`, real `title`, stored `description`, `section_path` | Split out of row 2: these need two new `note` columns and parser work, where the parameter needed neither. | M |
 | 3 | ~~**Registry + `create_vault`/`vaults`/`vault_id`**~~ | **Done 2026-08-10.** Four columns, no `tenant`, caller-supplied ids, FK from `note.vault_id`, and `PM018` when a vault is not registered. | ✅ |
 | 4 | ~~**`write_many`**~~ | **Done 2026-08-11.** Requirement 11's answer, capped at 1000, `PM019` when a batch is malformed. Not a throughput win — see the correction in §6.5. | ✅ |
-| 5 | **Search** (`tsvector` + `pg_trgm`), then **tokenizer** | Phase 5, RFC-007. Search is the largest remaining gap against the scenario; sizing can follow it. | M |
-| 6 | **MCP surface**, carrying the §7 deployment pattern as its documented tenancy story | Phase 5 ⇒ **0.1.0 ships here.** | M |
+| 5 | ~~**Search**~~ | **Done 2026-08-13.** `knowledge.search()` over a bounded expression GIN index, `tagged(path)`, the missing tag index; ratified in [RFC-007](rfcs/RFC-007-query-api-and-mcp-surface.md) D4 and gated by `search-quality`. The **tokenizer is not row 5's** — token budgeting is RFC-008 (*Deterministic Context Assembly & Token Budgeting*), which is where §8 belongs. | ✅ |
+| 6 | **MCP surface**, carrying the §7 deployment pattern as its documented tenancy story | Phase 5 ⇒ **0.1.0 ships here.** Designed in [RFC-007](rfcs/RFC-007-query-api-and-mcp-surface.md) D6–D9 — eight tools — and **awaiting review before implementation**. | M |
 | 7 | **Isolation — the real boundary** | *Deferred past 0.1.0* by decision. Needs the pool-cardinality question answered against a real deployment. | L |
 
 The one sequencing argument to reject: the synthesis put the vault parameter *behind* the
@@ -767,7 +767,31 @@ open question in it.
    FTS half has shipped and you can see what it does not cover.
 3. **Isolation** (§7) — the real boundary, and the pool-cardinality question underneath it,
    after 0.1.0.
-4. **RFC-003 D8's published numbers no longer match its published artifact** — found while
+4. **`knowledge.vaults()` enumerates every tenant, and RLS cannot stop it** — found 2026-08-13 while
+   designing the MCP surface, and **measured**, not inferred.
+
+   `pgmind.vault` is the one table with no `vault_id` column, and `enable_vault_rls` builds its
+   table list by scanning `pg_catalog` for `attname = 'vault_id'` — so the registry is
+   *structurally* outside the boundary the rest of the schema sits inside. On PG 18.4, with
+   `enable_vault_rls(force => true)` and a non-owner role scoped to one vault: `pgmind.note`
+   returns **0** rows for the other vaults, and `knowledge.vaults()` returns **all of their
+   names**. No note content leaks. The names do — and vault names are exactly where §6.1 tells
+   applications to put their tenant and user hierarchy, so `globex/bob/secrets` discloses a
+   customer and a user.
+
+   The function already reports this (`enable_vault_rls` lists `vault` as `covered = false`) and
+   the reference page now says so explicitly. It is **not** reachable by an agent under the §7
+   deployment pattern, because an agent does not issue SQL and RFC-007 D6.5 forbids exposing this
+   function as a tool. It *is* reachable by anything that can run SQL on that connection — which
+   §7 already lists under "does not defend against".
+
+   The fix is small and is a decision, not a cleanup: a policy on `pgmind.vault` keyed on `id`
+   rather than `vault_id`, which would make `vaults()` return only the current vault under RLS,
+   and would take listing-to-choose away from operators using `force => true`. Under X1 nothing
+   *should* be listing to choose — the server is told its vault by credentials — so the cost is
+   probably zero. Not shipped unilaterally because it changes what a shipped function returns.
+
+5. **RFC-003 D8's published numbers no longer match its published artifact** — found while
    benchmarking `write_many`, and not fixed here because RFC-003 is frozen and the numbers
    are yours to rule on.
 

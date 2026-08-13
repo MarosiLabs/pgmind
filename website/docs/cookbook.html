@@ -1112,7 +1112,7 @@ SELECT path, excerpt FROM knowledge.search('tokens', tags => ARRAY['decision']) 
  projects/auth | Refresh **tokens** rotate every 24h #decision
 (1 row)</code></pre>
 </div>
-    <p>Tag search on its own does not need <code>search()</code> at all: <a href="#r-tag-setops"><code>knowledge.tagged(tag, path =&gt; …)</code></a> answers "which blocks in this note carry this tag" straight out of an index.</p>
+    <p>One tag on its own does not need <code>search()</code> at all: <a href="#r-tag-setops"><code>knowledge.tagged(tag, path =&gt; …)</code></a> answers "which blocks in this note carry this tag" straight out of an index. <em>Several</em> tags do, because <code>tagged()</code> takes one — <code>search('', tags =&gt; ARRAY['a','b'])</code> is every block carrying both, with <code>rank</code> NULL because nothing ranked it.</p>
 
     <h3 id="r-search-function">Wrap search in a function that returns citations</h3>
     <p><b>Problem.</b> Callers should get an address they can resolve later, not a row number.</p>

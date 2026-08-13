@@ -691,13 +691,21 @@ mod knowledge {
     /// phrases"` are literal, `or` and a leading `-` do what they look like.
     /// That parser is chosen over `to_tsquery` because it cannot be made to
     /// raise: a search box is fed whatever a user or an agent types, and a
-    /// syntax error is not an answer. A query with no lexemes in it (empty,
-    /// whitespace, all stop words) matches nothing, the same way an unknown tag
-    /// returns no rows rather than an error.
+    /// syntax error is not an answer.
     ///
     /// `path` narrows to one note, `tags` to blocks carrying every tag listed —
     /// where a tag counts if it is on the block OR on its note, so a
     /// frontmatter tag scopes the whole document the way a reader expects.
+    ///
+    /// **A query with no lexemes in it is a filter, not a failure.** Empty,
+    /// whitespace or all stop words means "no text predicate": with `tags` or
+    /// `path` given, those still apply and `rank` is NULL, because there is no
+    /// ranking function involved and a fabricated 0.0 would be a number the
+    /// caller could sort by and should not. With nothing else given there is no
+    /// predicate at all, and that is an empty result rather than the whole
+    /// vault. This is the only way to ask for the intersection of several tags
+    /// — `tagged()` takes one — and without it the `tags` argument would be
+    /// reachable only in the company of a text query it has nothing to do with.
     ///
     /// Matching, ranking and excerpting are Postgres's own: this function adds
     /// vault scoping, the tag filter, and nothing else (Law 6).
@@ -716,7 +724,7 @@ mod knowledge {
             name!(block_id, Uuid),
             name!(heading_path, Vec<String>),
             name!(excerpt, String),
-            name!(rank, f32),
+            name!(rank, Option<f32>),
         ),
     > {
         let vault = store::resolve_vault(vault.as_deref());
@@ -724,19 +732,26 @@ mod knowledge {
             .as_deref()
             .map(|p| store::note_by_path_or_err(vault, p).id);
 
-        // Answer a query with no lexemes in it here rather than downstream.
-        // Postgres emits one NOTICE saying so — worth keeping, it is the only
-        // explanation a caller gets for an empty result — and returning now
-        // means the main statement never runs it a second and third time.
-        let no_lexemes: bool = Spi::get_one_with_args(
-            "SELECT numnode(websearch_to_tsquery('english', $1)) = 0",
+        // Decide here whether there is a text predicate at all. Postgres emits
+        // one NOTICE when a query has no lexemes — worth keeping, it is the
+        // only explanation a caller gets — and settling it once means the main
+        // statement neither repeats the NOTICE nor evaluates the parser again.
+        let has_text: bool = Spi::get_one_with_args(
+            "SELECT numnode(websearch_to_tsquery('english', $1)) > 0",
             &[q.into()],
         )
-        .unwrap_or(Some(true))
-        .unwrap_or(true);
-        if no_lexemes {
+        .unwrap_or(Some(false))
+        .unwrap_or(false);
+        let has_tags = tags.as_ref().is_some_and(|t| !t.is_empty());
+        if !has_text && !has_tags {
+            // No predicate of any kind. Returning the whole vault here would be
+            // the worst possible reading of an empty search box.
             return TableIterator::new(Vec::new());
         }
+        // NULL rather than the empty string when there is no text predicate:
+        // websearch_to_tsquery is STRICT, so it returns NULL without running,
+        // which is what keeps the NOTICE from firing a second time.
+        let q_arg: Option<&str> = has_text.then_some(q);
 
         let rows: Vec<_> = Spi::connect(|client| {
             client
@@ -757,13 +772,16 @@ mod knowledge {
                      m AS (
                        SELECT n.path, b.id AS block_id, b.parent_block,
                               b.heading_path, b.content, b.ord,
-                              ts_rank_cd(pgmind.search_vector(b.content), tq.q, 32) AS rank
+                              CASE WHEN tq.q IS NULL THEN NULL
+                                   ELSE ts_rank_cd(pgmind.search_vector(b.content), tq.q, 32)
+                              END AS rank
                        FROM tq, pgmind.block b
                        JOIN pgmind.note n ON n.id = b.note_id
                        WHERE b.vault_id = $1
                          AND n.tombstoned_at IS NULL
                          AND ($3::uuid IS NULL OR b.note_id = $3)
-                         AND pgmind.search_vector(b.content) @@ tq.q
+                         AND (tq.q IS NULL
+                              OR pgmind.search_vector(b.content) @@ tq.q)
                          AND ($4::text[] IS NULL OR NOT EXISTS (
                                SELECT 1 FROM unnest($4::text[]) AS want(tag)
                                WHERE NOT EXISTS (
@@ -783,22 +801,28 @@ mod knowledge {
                        SELECT * FROM m
                        WHERE NOT EXISTS (
                          SELECT 1 FROM m child WHERE child.parent_block = m.block_id)
-                       ORDER BY rank DESC, path, ord
+                       ORDER BY rank DESC NULLS LAST, path, ord
                        LIMIT $5
                      )
                      SELECT hit.path, hit.block_id, hit.heading_path,
-                            ts_headline('english', hit.content, tq.q,
-                              'StartSel=**, StopSel=**, MaxFragments=1,
-                               MaxWords=30, MinWords=12') AS excerpt,
+                            CASE WHEN tq.q IS NULL
+                                 -- Nothing was matched, so there is nothing to
+                                 -- highlight; the opening of the block is the
+                                 -- honest excerpt.
+                                 THEN left(hit.content, 200)
+                                 ELSE ts_headline('english', hit.content, tq.q,
+                                        'StartSel=**, StopSel=**, MaxFragments=1,
+                                         MaxWords=30, MinWords=12')
+                            END AS excerpt,
                             hit.rank
                      -- ts_headline runs after the LIMIT, so it is paid for the
                      -- rows returned rather than every row that matched.
                      FROM hit, tq
-                     ORDER BY hit.rank DESC, hit.path, hit.ord",
+                     ORDER BY hit.rank DESC NULLS LAST, hit.path, hit.ord",
                     None,
                     &[
                         arg(vault),
-                        q.into(),
+                        q_arg.into(),
                         note.into(),
                         tags.into(),
                         i64::from(limit_n.max(0)).into(),
@@ -811,7 +835,7 @@ mod knowledge {
                         row.get::<Uuid>(2).unwrap().unwrap(),
                         row.get::<Vec<String>>(3).unwrap().unwrap_or_default(),
                         row.get::<String>(4).unwrap().unwrap_or_default(),
-                        row.get::<f32>(5).unwrap().unwrap_or(0.0),
+                        row.get::<f32>(5).unwrap(),
                     )
                 })
                 .collect()

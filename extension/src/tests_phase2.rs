@@ -2255,6 +2255,32 @@ mod tests {
             "tags are ANDed"
         );
 
+        // A query with no lexemes is a filter, not a failure: without this the
+        // `tags` argument is reachable only alongside a text query it has
+        // nothing to do with, and tag intersection is inexpressible because
+        // tagged() takes one tag.
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('', tags => ARRAY['urgent'])"),
+            1,
+            "tags-only search works"
+        );
+        assert!(
+            Spi::get_one::<f32>("SELECT rank FROM knowledge.search('', tags => ARRAY['urgent'])")
+                .unwrap()
+                .is_none(),
+            "with no text predicate there is no rank to report, and 0.0 would be a lie"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('', tags => ARRAY['policy','billing'])"),
+            1,
+            "tag intersection, which tagged() cannot express"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('')"),
+            0,
+            "no predicate at all is an empty result, not the whole vault"
+        );
+
         // A search box is fed whatever gets typed. None of this may raise.
         for junk in ["((( \"unclosed and -", "   ", "", "&|!<>", "the of and"] {
             assert_eq!(

@@ -779,13 +779,26 @@ $md$) AS invalid_yaml;</code></pre>
       </p>
 
       <div class="note-box trap">
-        <span class="lbl">Scope</span>
+        <span class="lbl">Scope — and RLS does not narrow this one</span>
         <p>
           This lists <strong>every</strong> vault in the database. pgmind has no
           tenant concept, so narrowing a listing is
           <code>knowledge.vaults('acme/**')</code> and <em>enforcing</em> that
           narrowing is the application's job. See
           <a href="cookbook.html#tenancy">Multi-tenancy and access</a>.
+        </p>
+        <p>
+          <strong>Row-level security does not cover it.</strong>
+          <code>pgmind.vault</code> is the one table with no
+          <code>vault_id</code> column to police —
+          <a href="#fn-pgmind-enable-vault-rls"><code>enable_vault_rls</code></a>
+          reports it as <code>covered = false</code> for exactly this reason.
+          Measured: with the policy forced on and the session scoped to one
+          vault, <code>pgmind.note</code> returns zero rows for the others while
+          this function still returns all of their <em>names</em>. Since names
+          are where an application puts its tenant and user hierarchy, treat
+          them as disclosed to anyone who can run SQL on that connection, and do
+          not expose this function through an agent-facing tool.
         </p>
       </div>
 
@@ -1563,7 +1576,8 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
               <td>The query, in <code>websearch_to_tsquery</code> syntax: bare
                   words are ANDed, <code>"quoted phrases"</code> are literal,
                   <code>or</code> and a leading <code>-</code> do what they look
-                  like.</td></tr>
+                  like. <code>''</code> means "no text predicate" — see the
+                  notes.</td></tr>
           <tr><td><code>path</code></td><td><code>text</code></td><td><code>NULL</code></td>
               <td>Narrow to one note. <code>NULL</code> searches the whole
                   vault.</td></tr>
@@ -1602,7 +1616,9 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
               <td><code>ts_rank_cd</code> with length normalisation, so a long
                   block does not out-rank a short one merely by having more
                   words. Comparable within one result set; not a probability and
-                  not comparable across queries.</td></tr>
+                  not comparable across queries. <strong>NULL</strong> when
+                  there was no text predicate — nothing ranked these rows, and
+                  a <code>0.0</code> you could sort by would be a lie.</td></tr>
         </tbody>
       </table>
       </div>
@@ -1627,10 +1643,17 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
             container is dropped when one of its children also matched. The
             block you get back is both the better citation and the simpler
             thing to edit.</li>
-        <li><strong>A query with no lexemes matches nothing</strong> — empty,
-            whitespace, or all stop words. Postgres says so once, as a
-            <code>NOTICE</code>; it is the only explanation you get for an
-            empty result.</li>
+        <li><strong>A query with no lexemes is a filter, not a failure.</strong>
+            Empty, whitespace or all stop words means "no text predicate":
+            <code>tags</code> and <code>path</code> still apply, and
+            <code>rank</code> comes back NULL. With nothing else given there is
+            no predicate at all and you get an empty result — not the whole
+            vault. Postgres notes the lexeme-free query once, which is the only
+            explanation you get for an empty result.</li>
+        <li><strong>This is how you intersect tags.</strong>
+            <a href="#fn-knowledge-tagged"><code>tagged()</code></a> takes one
+            tag; <code>search('', tags =&gt; ARRAY['a','b'])</code> is every
+            block carrying both.</li>
         <li><strong>The text-search configuration is <code>english</code>, and
             it is fixed.</strong> That is the wrong stemmer for a vault that is
             not in English — an honest limitation, not an oversight. It lives in
@@ -1675,6 +1698,16 @@ SELECT path, excerpt FROM knowledge.search('tokens', tags => ARRAY['decision']);
 ---------------+-----------------------------------------------
  projects/auth | Refresh **tokens** rotate every 24h #decision
 (1 row)</code></pre>
+      </div>
+      <p>Tags with no text query at all — an intersection, and unranked:</p>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, rank FROM knowledge.search('', tags => ARRAY['architecture','decision']);</code></pre>
+<pre class="out"><code class="out">     path      | rank 
+---------------+------
+ projects/auth |     
+ rfc/auth-01   |     
+(2 rows)</code></pre>
       </div>
       <p>A phrase, and an exclusion:</p>
       <div class="code">
