@@ -1471,7 +1471,7 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
 
     <div class="fn">
       <h3 id="fn-knowledge-tagged">knowledge.tagged <span class="badge ok">In main</span></h3>
-      <div class="sig"><code>tagged(tag text, vault text DEFAULT NULL) → TABLE(path text, block_id uuid, tag text)</code></div>
+      <div class="sig"><code>tagged(tag text, path text DEFAULT NULL, vault text DEFAULT NULL) → TABLE(path text, block_id uuid, tag text)</code></div>
       <p class="purpose">
         Find everything carrying a tag, note-level and block-level in one
         result.
@@ -1485,6 +1485,10 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
           <tr><td><code>tag</code></td><td><code>text</code></td><td>—</td>
               <td>Tag name, with or without a leading <code>#</code>. Matched
                   case-insensitively.</td></tr>
+          <tr><td><code>path</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Narrow to one note — "which blocks in <em>this</em> document
+                  carry this tag". Index-backed. <code>NULL</code> searches the
+                  whole vault.</td></tr>
                   <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
               <td>Which vault, by name or by id. <code>NULL</code> uses
                   <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
@@ -1508,7 +1512,11 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
 
       <h4>Notes</h4>
       <ul>
-        <li>An unknown tag is an empty result, not an error.</li>
+        <li>An unknown tag is an empty result, not an error — but a
+            <code>path</code> with no live note is
+            <span class="badge err">PM002</span>. A tag nothing carries and a
+            path you mistyped are different answers and should not look
+            alike.</li>
         <li>Tag intersection is a join against this function, not an argument to
             it — see the <a href="cookbook.html#navigation">cookbook</a>.</li>
       </ul>
@@ -1526,7 +1534,164 @@ Body text #alpha and **bold**#notatag$md$::markdown) ORDER BY block;</code></pre
       </div>
 
       <h4>See also</h4>
-      <p><a href="#fn-knowledge-tags">knowledge.tags</a>.</p>
+      <p><a href="#fn-knowledge-tags">knowledge.tags</a>,
+         <a href="#fn-knowledge-search">knowledge.search</a>.</p>
+    </div>
+
+    <div class="fn">
+      <h3 id="fn-knowledge-search">knowledge.search <span class="badge ok">In main</span></h3>
+      <div class="sig"><code>search(q text, path text DEFAULT NULL, tags text[] DEFAULT NULL,
+       limit_n integer DEFAULT 20, vault text DEFAULT NULL)
+  &rarr; TABLE(path text, block_id uuid, heading_path text[], excerpt text, rank real)</code></div>
+      <p class="purpose">
+        Ranked full-text search over blocks, best match first.
+      </p>
+      <p>
+        This is PostgreSQL's own text search — <code>websearch_to_tsquery</code>,
+        <code>ts_rank_cd</code>, <code>ts_headline</code>, a GIN index. pgmind
+        adds vault scoping, the tag filter, and the rule that you get the
+        innermost matching block rather than it and its container. Nothing here
+        is an embedding and nothing calls a model.
+      </p>
+
+      <h4>Parameters</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>q</code></td><td><code>text</code></td><td>—</td>
+              <td>The query, in <code>websearch_to_tsquery</code> syntax: bare
+                  words are ANDed, <code>"quoted phrases"</code> are literal,
+                  <code>or</code> and a leading <code>-</code> do what they look
+                  like.</td></tr>
+          <tr><td><code>path</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Narrow to one note. <code>NULL</code> searches the whole
+                  vault.</td></tr>
+          <tr><td><code>tags</code></td><td><code>text[]</code></td><td><code>NULL</code></td>
+              <td>Keep only blocks carrying <em>every</em> tag listed. A tag
+                  counts if it is on the block <em>or</em> on its note, so a
+                  frontmatter tag scopes the whole document.</td></tr>
+          <tr><td><code>limit_n</code></td><td><code>integer</code></td><td><code>20</code></td>
+              <td>How many rows. The ranking is computed over every match; the
+                  limit is applied to it.</td></tr>
+          <tr><td><code>vault</code></td><td><code>text</code></td><td><code>NULL</code></td>
+              <td>Which vault, by name or by id. <code>NULL</code> uses
+                  <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a>.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Returns</h4>
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Column</th><th scope="col">Type</th><th scope="col">Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>path</code></td><td><code>text</code></td><td>The note the block is in.</td></tr>
+          <tr><td><code>block_id</code></td><td><code>uuid</code></td>
+              <td>The matching block. Feed it to
+                  <a href="#fn-knowledge-update-block"><code>update_block</code></a>,
+                  or keep it as a citation — it survives editing.</td></tr>
+          <tr><td><code>heading_path</code></td><td><code>text[]</code></td>
+              <td>The block's ancestor headings, so you can show where the hit
+                  came from without a second query.</td></tr>
+          <tr><td><code>excerpt</code></td><td><code>text</code></td>
+              <td>One fragment of the block with the matched words wrapped in
+                  <code>**</code>. Drawn from <code>content</code>, so it never
+                  contains a <code>^id</code> marker.</td></tr>
+          <tr><td><code>rank</code></td><td><code>real</code></td>
+              <td><code>ts_rank_cd</code> with length normalisation, so a long
+                  block does not out-rank a short one merely by having more
+                  words. Comparable within one result set; not a probability and
+                  not comparable across queries.</td></tr>
+        </tbody>
+      </table>
+      </div>
+
+      <h4>Raises</h4>
+      <ul>
+        <li><span class="badge err">PM002</span> the <code>path</code> given has
+            no live note.</li>
+        <li><span class="badge err">PM018</span> the <code>vault</code> given is
+            not registered.</li>
+        <li><strong>Nothing for a malformed query.</strong>
+            <code>websearch_to_tsquery</code> cannot be made to raise, which is
+            why it is the parser here: a search box is fed whatever a user or an
+            agent types, and a syntax error is not an answer.</li>
+      </ul>
+
+      <h4>Notes</h4>
+      <ul>
+        <li><strong>You get the innermost match, not its containers.</strong> A
+            list item's <code>content</code> includes its own paragraph
+            (RFC-002 D7), so <code>- rotate the key</code> matches twice; the
+            container is dropped when one of its children also matched. The
+            block you get back is both the better citation and the simpler
+            thing to edit.</li>
+        <li><strong>A query with no lexemes matches nothing</strong> — empty,
+            whitespace, or all stop words. Postgres says so once, as a
+            <code>NOTICE</code>; it is the only explanation you get for an
+            empty result.</li>
+        <li><strong>The text-search configuration is <code>english</code>, and
+            it is fixed.</strong> That is the wrong stemmer for a vault that is
+            not in English — an honest limitation, not an oversight. It lives in
+            one place, <code>pgmind.search_vector(text)</code>, which is also
+            what the index is built on.</li>
+        <li><strong>Very large blocks are indexed by their first 100,000
+            characters.</strong> <code>to_tsvector</code> refuses to build a
+            vector past 1 MB, and a block of distinct words reaches that at
+            around 849 KB — well inside what
+            <a href="#fn-pgmind-max-document-bytes"><code>pgmind.max_document_bytes</code></a>
+            accepts. Truncating for the index means such a block is searchable
+            by its opening rather than unstorable.</li>
+        <li>Fuzzy and typo-tolerant search do not exist; there is no
+            <code>pg_trgm</code> dependency. Deliberate, and revisited when the
+            exact-match half has been used in anger.</li>
+      </ul>
+
+      <h4>Example</h4>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, round(rank::numeric, 4) AS rank, excerpt
+  FROM knowledge.search('rotate keys') LIMIT 3;</code></pre>
+<pre class="out"><code class="out">         path         |  rank  |                               excerpt                                
+----------------------+--------+----------------------------------------------------------------------
+ projects/auth        | 0.0909 | **Key** **rotation** is [[runbooks/rotate-keys|documented separately
+ runbooks/rotate-keys | 0.0323 | **Rotate** the signing **keys**
+(2 rows)</code></pre>
+      </div>
+      <p>Narrowed to one note, and to a tag:</p>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT heading_path, excerpt FROM knowledge.search('rotation', path => 'projects/auth');
+SELECT path, excerpt FROM knowledge.search('tokens', tags => ARRAY['decision']);</code></pre>
+<pre class="out"><code class="out">   heading_path   |                                excerpt                                 
+------------------+------------------------------------------------------------------------
+ {Auth}           | service that issues and **rotates** credentials. Owned by [[people/ada
+ {Auth,Decisions} | Refresh tokens **rotate** every 24h #decision
+ {Auth,Runbook}   | **rotation** is [[runbooks/rotate-keys|documented separately
+(3 rows)
+
+     path      |                    excerpt                    
+---------------+-----------------------------------------------
+ projects/auth | Refresh **tokens** rotate every 24h #decision
+(1 row)</code></pre>
+      </div>
+      <p>A phrase, and an exclusion:</p>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, excerpt FROM knowledge.search('"signing key" -staging');</code></pre>
+<pre class="out"><code class="out">         path         |             excerpt             
+----------------------+---------------------------------
+ runbooks/rotate-keys | Rotate the **signing** **keys**
+(1 row)</code></pre>
+      </div>
+
+      <h4>See also</h4>
+      <p>
+        <a href="#fn-knowledge-tagged">knowledge.tagged</a>,
+        <a href="#fn-knowledge-blocks">knowledge.blocks</a>,
+        <a href="cookbook.html#retrieval">Cookbook: retrieval</a>.
+      </p>
     </div>
 
     <div class="fn">
@@ -4073,6 +4238,68 @@ NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not ex
     </div>
 
     <div class="fn">
+      <h3 id="fn-pgmind-search-vector">pgmind.search_vector <span class="badge admin">Internal</span></h3>
+      <div class="sig"><code>search_vector(content text) &rarr; tsvector     -- IMMUTABLE, PARALLEL SAFE, STRICT</code></div>
+      <p class="purpose">
+        The one definition of what pgmind indexes for full-text search.
+        Documented so you can see what
+        <a href="#fn-knowledge-search"><code>search()</code></a> is actually
+        matching on, not so you call it.
+      </p>
+      <p>
+        It exists as a function rather than as inline SQL because the GIN index
+        <code>block_fts</code> and the query inside <code>search()</code> must
+        spell the expression <em>identically</em> — an expression index is used
+        only on an exact match, and two copies drift into a sequential scan that
+        still returns the right answer.
+      </p>
+
+      <h4>Returns</h4>
+      <p>
+        <code>tsvector</code> — <code>to_tsvector('english', left(content, 100000))</code>.
+        Two deliberate choices are visible in that one line.
+      </p>
+
+      <h4>Notes</h4>
+      <ul>
+        <li><strong>The configuration is <code>english</code> and is not
+            settable.</strong> As a GUC it would let the index and the query
+            disagree about which configuration built which row, which is a
+            silently wrong answer; a fixed and documented English bias is the
+            lesser evil. Changing it is redefining this function and
+            <code>REINDEX</code>ing — no table rewrite, which is why the index
+            is here rather than in a generated column.</li>
+        <li><strong>The 100,000-character bound is load-bearing.</strong>
+            <code>to_tsvector</code> refuses to build a vector past 1 MB, and a
+            block of distinct words reaches that at around 849 KB — inside what
+            <a href="#fn-pgmind-max-document-bytes"><code>pgmind.max_document_bytes</code></a>
+            accepts by default. Without the bound the <em>write</em> would fail
+            on index maintenance, so adding search would have narrowed what
+            pgmind stores. A very large block is searchable by its opening
+            instead.</li>
+        <li>Redefining this function does not rebuild the index. If you change
+            it, <code>REINDEX INDEX pgmind.block_fts;</code> or the index and
+            the function are describing different vaults.</li>
+      </ul>
+
+      <h4>Example</h4>
+      <div class="code">
+        <div class="cap">psql</div>
+<pre><code class="sql">SELECT pgmind.search_vector('Rotating the signing keys every 30 days.');</code></pre>
+<pre class="out"><code class="out">                    search_vector                    
+-----------------------------------------------------
+ '30':6 'day':7 'everi':5 'key':4 'rotat':1 'sign':3
+(1 row)</code></pre>
+      </div>
+
+      <h4>See also</h4>
+      <p>
+        <a href="#fn-knowledge-search">knowledge.search</a>,
+        <a href="cookbook.html#retrieval">Cookbook: retrieval</a>.
+      </p>
+    </div>
+
+    <div class="fn">
       <h3 id="fn-pgmind-raise-error">pgmind.raise_error <span class="badge admin">Internal</span></h3>
       <div class="sig"><code>raise_error(code text, message text, detail text) → void</code></div>
       <p class="purpose">
@@ -4667,16 +4894,16 @@ DO</code></pre>
       </thead>
       <tbody>
         <tr>
-          <td><code>knowledge.context()</code>, <code>search()</code>,
-              <code>traverse()</code>, <code>expand()</code>,
-              <code>context_explain()</code></td>
+          <td><code>knowledge.context()</code>, <code>traverse()</code>,
+              <code>expand()</code>, <code>context_explain()</code></td>
           <td>Handbook §6.1, landing page</td>
           <td><span class="badge next">Phase 5</span></td>
           <td>Assemble context yourself from
-              <a href="#fn-knowledge-blocks"><code>blocks</code></a>,
-              <a href="#fn-knowledge-backlinks"><code>backlinks</code></a> and
-              PostgreSQL full-text search — see
-              <a href="cookbook.html#retrieval">Cookbook: retrieval</a>.</td>
+              <a href="#fn-knowledge-search"><code>search</code></a>,
+              <a href="#fn-knowledge-blocks"><code>blocks</code></a> and
+              <a href="#fn-knowledge-backlinks"><code>backlinks</code></a> — see
+              <a href="cookbook.html#retrieval">Cookbook: retrieval</a>.
+              <code>search()</code> itself now ships.</td>
         </tr>
         <tr>
           <td>A <code>pgmind</code> CLI with <code>import</code>,

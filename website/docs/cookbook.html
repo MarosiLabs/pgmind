@@ -1057,78 +1057,89 @@ tags: runbook
     <p>A transclusion is an edge like any other, with the heading in <code>anchor</code>; resolving it is <code>read_section</code> against the resolved path, and pgmind deliberately does not do it for you. Note that <code>read</code> returns the frontmatter too — strip the preamble if you are composing prose.</p>
 
     <h2 id="retrieval">Retrieval, until <code>context()</code> exists</h2>
-    <p>Everything in this section is <em>your</em> code sitting beside pgmind, not pgmind's. <code>knowledge.context()</code>, <code>search()</code> and <code>expand()</code> are <span class="badge next">Phase 5</span>; these recipes are what you build in the meantime, and each names the function that will replace it.</p>
+    <p><code>knowledge.search()</code> ships and opens this section. Everything after it is <em>your</em> code sitting beside pgmind, not pgmind's: <code>knowledge.context()</code> and <code>expand()</code> are still <span class="badge next">Phase 5</span>, and each recipe below names the function that will replace it.</p>
 
-    <h3 id="r-fts-index">A full-text index over every block</h3>
+    <h3 id="r-fts-index">Search the vault</h3>
     <p><b>Problem.</b> You want ranked search across the vault and you do not have embeddings.</p>
+    <p>This is <code>knowledge.search()</code>, and unlike the rest of this section it is pgmind's, not yours. The index behind it is an ordinary GIN index on <code>pgmind.block</code>, maintained by the write path like every other index — there is nothing to refresh.</p>
 <div class="code">
   <div class="cap">psql</div>
-<pre><code class="sql">CREATE MATERIALIZED VIEW app.block_fts AS
-SELECT n.path, n.head_revision, b.block_id, b.ord, b.kind, b.heading_path,
-       b.content, b.content_hash, b.block_ref_id,
-       to_tsvector('english', b.content) AS tsv
-FROM knowledge.notes() n
-CROSS JOIN LATERAL knowledge.blocks(n.path) b
-WHERE b.kind &lt;&gt; 'list_item';
-
-CREATE UNIQUE INDEX block_fts_id  ON app.block_fts (block_id);
-CREATE INDEX        block_fts_tsv ON app.block_fts USING gin (tsv);</code></pre>
-<pre class="out"><code class="out">SELECT 54
-CREATE INDEX
-CREATE INDEX</code></pre>
-</div>
-    <p>The materialised view is built from <code>knowledge.blocks()</code>, so it stays on the public API and survives a schema change underneath. It is a snapshot: <code>REFRESH MATERIALIZED VIEW CONCURRENTLY app.block_fts;</code> after a batch of writes, or drive it from <a href="#r-listen-notify"><code>LISTEN</code>/<code>NOTIFY</code></a>.</p>
-
-    <h3 id="r-fts-search">Search blocks with highlighted fragments</h3>
-    <p><b>Problem.</b> Show the user which words matched, not only which note.</p>
-<div class="code">
-  <div class="cap">psql</div>
-<pre><code class="sql">SELECT path, round(ts_rank(tsv, q)::numeric, 4) AS rank,
-       ts_headline('english', content, q,
-         'StartSel=«, StopSel=», MaxFragments=1, MaxWords=12, MinWords=4') AS hit
-FROM app.block_fts, websearch_to_tsquery('english', 'rotate keys') q
-WHERE tsv @@ q ORDER BY rank DESC, path LIMIT 5;</code></pre>
-<pre class="out"><code class="out">         path         |  rank  |                                  hit                                  
-----------------------+--------+-----------------------------------------------------------------------
- projects/auth        | 0.0991 | «Key» «rotation» is [[runbooks/rotate-keys|documented separately
- agents/session-7f21  | 0.0974 | «rotate» the staging «key»
- daily/2026-08-06     | 0.0974 | worker-a «rotated» the staging «key»
- notes/identity-demo  | 0.0974 | signing «key» is now «rotated» every thirty days by the platform team
- runbooks/rotate-keys | 0.0974 | «Rotate» the signing «keys»
+<pre><code class="sql">SELECT path, round(rank::numeric, 4) AS rank, excerpt
+  FROM knowledge.search('rotate keys') LIMIT 5;</code></pre>
+<pre class="out"><code class="out">         path         |  rank  |                                  excerpt                                  
+----------------------+--------+---------------------------------------------------------------------------
+ projects/auth        | 0.0909 | **Key** **rotation** is [[runbooks/rotate-keys|documented separately
+ agents/session-7f21  | 0.0323 | **rotate** the staging **key**
+ daily/2026-08-06     | 0.0323 | worker-a **rotated** the staging **key**
+ notes/identity-demo  | 0.0323 | signing **key** is now **rotated** every thirty days by the platform team
+ runbooks/rotate-keys | 0.0323 | **Rotate** the signing **keys**
 (5 rows)</code></pre>
 </div>
-    <p><code>ts_headline</code> works on the block's <code>content</code>, which is the block's own text with its <code>^id</code> marker stripped, so the highlighted fragment is safe to show. Ranking one block at a time is usually better than ranking notes — the block is the citable unit.</p>
+    <p><code>q</code> is <code>websearch_to_tsquery</code> syntax: bare words are ANDed, <code>"quoted phrases"</code> are literal, <code>or</code> and a leading <code>-</code> do what they look like. It cannot be made to raise — a search box gets fed whatever is typed, and a syntax error is not an answer.</p>
+
+    <div class="note-box trap">
+      <span class="lbl">Replaced a recipe that was unsafe</span>
+      <p>
+        This section used to tell you to build <code>app.block_fts</code>, a
+        materialised view over <code>knowledge.blocks()</code>, and to
+        <code>REFRESH</code> it after writes. Do not. That view carried no
+        <code>vault_id</code>, so a <code>REFRESH</code> issued while
+        <code>pgmind.vault_id</code> pointed somewhere else replaced one
+        tenant's search index with another tenant's content — silently, and
+        with no error to notice. If you built it, drop it.
+      </p>
+    </div>
+
+    <h3 id="r-fts-search">Narrow a search to a note or a tag</h3>
+    <p><b>Problem.</b> "Search this document", and "search only what is tagged <code>decision</code>".</p>
+<div class="code">
+  <div class="cap">psql</div>
+<pre><code class="sql">-- Within one note.
+SELECT heading_path, excerpt FROM knowledge.search('rotation', path => 'projects/auth');
+
+-- Only blocks carrying every tag listed. A frontmatter tag counts for the
+-- whole note, so this matches a tagged document as well as a tagged block.
+SELECT path, excerpt FROM knowledge.search('tokens', tags => ARRAY['decision']) LIMIT 3;</code></pre>
+<pre class="out"><code class="out">   heading_path   |                                excerpt                                 
+------------------+------------------------------------------------------------------------
+ {Auth}           | service that issues and **rotates** credentials. Owned by [[people/ada
+ {Auth,Decisions} | Refresh tokens **rotate** every 24h #decision
+ {Auth,Runbook}   | **rotation** is [[runbooks/rotate-keys|documented separately
+(3 rows)
+
+     path      |                    excerpt                    
+---------------+-----------------------------------------------
+ projects/auth | Refresh **tokens** rotate every 24h #decision
+(1 row)</code></pre>
+</div>
+    <p>Tag search on its own does not need <code>search()</code> at all: <a href="#r-tag-setops"><code>knowledge.tagged(tag, path =&gt; …)</code></a> answers "which blocks in this note carry this tag" straight out of an index.</p>
 
     <h3 id="r-search-function">Wrap search in a function that returns citations</h3>
     <p><b>Problem.</b> Callers should get an address they can resolve later, not a row number.</p>
+    <p>This one is still yours: <code>search()</code> returns a <code>block_id</code>, and turning that into a durable citation is an application decision about what you want to be able to resolve later.</p>
 <div class="code">
   <div class="cap">psql</div>
-<pre><code class="sql">CREATE FUNCTION app.search(q text, k int DEFAULT 5)
+<pre><code class="sql">CREATE FUNCTION app.cited_search(q text, k int DEFAULT 5)
 RETURNS TABLE(path text, citation text, rank real, excerpt text)
 LANGUAGE sql STABLE AS $body$
-  SELECT f.path,
-         f.path || '#' || coalesce('^' || f.block_ref_id, 'ord=' || f.ord)
-              || ' @ ' || f.head_revision,
-         ts_rank(f.tsv, tq),
-         left(f.content, 44)
-  FROM app.block_fts f, websearch_to_tsquery('english', q) tq
-  WHERE f.tsv @@ tq
-  ORDER BY ts_rank(f.tsv, tq) DESC, f.path, f.ord
-  LIMIT k;
+  SELECT s.path,
+         s.path || '#' || s.block_id || ' @ ' ||
+           (SELECT head_revision FROM knowledge.notes(s.path)),
+         s.rank, s.excerpt
+  FROM knowledge.search(q, limit_n => k) s;
 $body$;
 
-SELECT split_part(citation, ' @ ', 1) AS anchor,
-       round(rank::numeric, 4) AS rank, excerpt
-FROM app.search('token rotation', 3);</code></pre>
+SELECT split_part(citation, ' @ ', 1) AS anchor, round(rank::numeric, 4) AS rank
+  FROM app.cited_search('token rotation', 3);</code></pre>
 <pre class="out"><code class="out">CREATE FUNCTION
-         anchor          |  rank  |                  excerpt                  
--------------------------+--------+-------------------------------------------
- facts/ledger#ord=2      | 0.0991 | Refresh tokens rotate every 12h.
- projects/auth#^rotation | 0.0991 | Refresh tokens rotate every 12h #decision
- rfc/auth-01#ord=0       | 0.0991 | # RFC-AUTH-01: token rotation
+                       anchor                       |  rank  
+----------------------------------------------------+--------
+ facts/ledger#019ff9b2-8d07-7af2-9980-d3ae6db3231c  | 0.0909
+ projects/auth#019ff9b2-8c71-71c4-872a-383d36c073ea | 0.0909
+ rfc/auth-01#019ff9b2-8c8f-79e0-a012-f2970475722c   | 0.0909
 (3 rows)</code></pre>
 </div>
-    <p>The citation is <code>path#^ref</code> (or <code>#ord=</code>) plus the head revision at the time of the search, which is exactly what <a href="#r-resolve-citation">resolving a citation</a> needs. <code>knowledge.search()</code> is the <a href="sql.html#not-yet">Phase 5</a> replacement.</p>
+    <p>The citation is <code>path#block_id</code> plus the head revision at the time of the search, which is exactly what <a href="#r-resolve-citation">resolving a citation</a> needs. A <code>block_id</code> survives editing — it is re-minted only when nothing carries it forward — so it is a better anchor than an ordinal.</p>
 
     <h3 id="r-context-bundle">Hand-rolled context assembly with a character budget</h3>
     <p><b>Problem.</b> Fill a context window with pinned notes, the anchor note and its neighbours, packed to a budget, every block cited.</p>
@@ -1278,10 +1289,9 @@ SELECT count(*) AS pending_after_one_edit FROM app.needs_embedding;</code></pre>
     <p><b>Problem.</b> One ranking from three weak signals.</p>
 <div class="code">
   <div class="cap">psql</div>
-<pre><code class="sql">WITH q AS (SELECT websearch_to_tsquery('english', 'key rotation') AS tq),
-hits AS (
-  SELECT f.path, max(ts_rank(f.tsv, q.tq)) AS fts, count(*) AS blocks
-  FROM app.block_fts f, q WHERE f.tsv @@ q.tq GROUP BY f.path
+<pre><code class="sql">WITH hits AS (
+  SELECT s.path, max(s.rank) AS fts, count(*) AS blocks
+  FROM knowledge.search('key rotation', limit_n => 200) s GROUP BY s.path
 ),
 touched AS (
   SELECT n.path, max(h.created_at) AS at
@@ -1303,11 +1313,11 @@ JOIN recency rc ON rc.path = h.path
 ORDER BY score DESC, h.path LIMIT 5;</code></pre>
 <pre class="out"><code class="out">         path         | blocks |  fts   | linked | recency_rank | score  
 ----------------------+--------+--------+--------+--------------+--------
- projects/auth        |      1 | 0.0991 | t      |            7 | 0.1562
- runbooks/rotate-keys |      1 | 0.0974 | t      |           11 | 0.1519
- notes/identity-demo  |      1 | 0.0974 | f      |            5 | 0.1074
- agents/session-7f21  |      1 | 0.0974 | f      |            6 | 0.1057
- daily/2026-08-06     |      1 | 0.0974 | f      |            8 | 0.1036
+ projects/auth        |      1 | 0.0909 | t      |           12 | 0.1451
+ runbooks/rotate-keys |      1 | 0.0323 | t      |           10 | 0.0873
+ notes/identity-demo  |      1 | 0.0323 | f      |            5 | 0.0423
+ agents/session-7f21  |      1 | 0.0323 | f      |            6 | 0.0406
+ daily/2026-08-06     |      1 | 0.0323 | f      |            7 | 0.0394
 (5 rows)</code></pre>
 </div>
     <p>Each signal is a CTE, so you can inspect and re-weight them independently — the point of the columns in the output is that you can see why a row won. On a vault this small recency barely separates anything; the shape is what transfers, not the constants.</p>

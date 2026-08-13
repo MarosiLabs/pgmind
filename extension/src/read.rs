@@ -636,9 +636,17 @@ mod knowledge {
     }
 
     /// Everything carrying a tag (case-insensitive match; RFC-002 D3).
+    ///
+    /// `path` narrows to one note — "which blocks in THIS document are tagged
+    /// X", which the vault-wide form could only answer by returning the whole
+    /// vault and making the caller filter. It is index-backed by
+    /// `tag_note_lookup`, and a path with no live note is PM002 rather than an
+    /// empty result: a typo'd path and a tag nothing carries are different
+    /// answers and should not look alike.
     #[pg_extern]
     fn tagged(
         tag: &str,
+        path: default!(Option<String>, "NULL"),
         vault: default!(Option<String>, "NULL"),
     ) -> TableIterator<
         'static,
@@ -649,16 +657,20 @@ mod knowledge {
         ),
     > {
         let vault = store::resolve_vault(vault.as_deref());
+        let note = path
+            .as_deref()
+            .map(|p| store::note_by_path_or_err(vault, p).id);
         let rows: Vec<_> = Spi::connect(|client| {
             client
                 .select(
                     "SELECT n.path, t.block_id, t.tag
                      FROM pgmind.tag t JOIN pgmind.note n ON n.id = t.note_id
                      WHERE t.vault_id = $1 AND lower(t.tag) = lower($2)
+                       AND ($3::uuid IS NULL OR t.note_id = $3)
                        AND n.tombstoned_at IS NULL
                      ORDER BY n.path, t.id",
                     None,
-                    &[arg(vault), tag.into()],
+                    &[arg(vault), tag.into(), note.into()],
                 )
                 .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in tagged(): {e}"))
                 .map(|row| {
@@ -666,6 +678,140 @@ mod knowledge {
                         row.get::<String>(1).unwrap().unwrap(),
                         row.get::<Uuid>(2).unwrap(),
                         row.get::<String>(3).unwrap().unwrap(),
+                    )
+                })
+                .collect()
+        });
+        TableIterator::new(rows)
+    }
+
+    /// Full-text search over blocks, best match first.
+    ///
+    /// `q` is `websearch_to_tsquery` syntax — bare words are ANDed, `"quoted
+    /// phrases"` are literal, `or` and a leading `-` do what they look like.
+    /// That parser is chosen over `to_tsquery` because it cannot be made to
+    /// raise: a search box is fed whatever a user or an agent types, and a
+    /// syntax error is not an answer. A query with no lexemes in it (empty,
+    /// whitespace, all stop words) matches nothing, the same way an unknown tag
+    /// returns no rows rather than an error.
+    ///
+    /// `path` narrows to one note, `tags` to blocks carrying every tag listed —
+    /// where a tag counts if it is on the block OR on its note, so a
+    /// frontmatter tag scopes the whole document the way a reader expects.
+    ///
+    /// Matching, ranking and excerpting are Postgres's own: this function adds
+    /// vault scoping, the tag filter, and nothing else (Law 6).
+    #[allow(clippy::type_complexity)] // pgrx TableIterator signatures are nominal
+    #[pg_extern]
+    fn search(
+        q: &str,
+        path: default!(Option<String>, "NULL"),
+        tags: default!(Option<Vec<String>>, "NULL"),
+        limit_n: default!(i32, 20),
+        vault: default!(Option<String>, "NULL"),
+    ) -> TableIterator<
+        'static,
+        (
+            name!(path, String),
+            name!(block_id, Uuid),
+            name!(heading_path, Vec<String>),
+            name!(excerpt, String),
+            name!(rank, f32),
+        ),
+    > {
+        let vault = store::resolve_vault(vault.as_deref());
+        let note = path
+            .as_deref()
+            .map(|p| store::note_by_path_or_err(vault, p).id);
+
+        // Answer a query with no lexemes in it here rather than downstream.
+        // Postgres emits one NOTICE saying so — worth keeping, it is the only
+        // explanation a caller gets for an empty result — and returning now
+        // means the main statement never runs it a second and third time.
+        let no_lexemes: bool = Spi::get_one_with_args(
+            "SELECT numnode(websearch_to_tsquery('english', $1)) = 0",
+            &[q.into()],
+        )
+        .unwrap_or(Some(true))
+        .unwrap_or(true);
+        if no_lexemes {
+            return TableIterator::new(Vec::new());
+        }
+
+        let rows: Vec<_> = Spi::connect(|client| {
+            client
+                .select(
+                    // Two things this statement must not lose, both measured:
+                    //
+                    // pgmind.search_vector() is repeated VERBATIM from the index
+                    // definition — an expression index is only used when the
+                    // query spells the expression the same way.
+                    //
+                    // And the CTE must stay inlinable. Written AS MATERIALIZED
+                    // it plans as a scan of every live note probing blocks per
+                    // note, because materializing hides the tsquery from
+                    // constant folding and the planner loses any estimate for
+                    // `@@`. Inlined, it is a bitmap index scan on block_fts and
+                    // a note_pkey lookup.
+                    "WITH tq AS (SELECT websearch_to_tsquery('english', $2) AS q),
+                     m AS (
+                       SELECT n.path, b.id AS block_id, b.parent_block,
+                              b.heading_path, b.content, b.ord,
+                              ts_rank_cd(pgmind.search_vector(b.content), tq.q, 32) AS rank
+                       FROM tq, pgmind.block b
+                       JOIN pgmind.note n ON n.id = b.note_id
+                       WHERE b.vault_id = $1
+                         AND n.tombstoned_at IS NULL
+                         AND ($3::uuid IS NULL OR b.note_id = $3)
+                         AND pgmind.search_vector(b.content) @@ tq.q
+                         AND ($4::text[] IS NULL OR NOT EXISTS (
+                               SELECT 1 FROM unnest($4::text[]) AS want(tag)
+                               WHERE NOT EXISTS (
+                                 SELECT 1 FROM pgmind.tag t
+                                 WHERE t.note_id = b.note_id
+                                   AND (t.block_id = b.id OR t.block_id IS NULL)
+                                   AND lower(t.tag) = lower(want.tag))))
+                     ),
+                     hit AS (
+                       -- Report the most specific match and not its containers.
+                       -- A list item's content includes its own paragraph
+                       -- (RFC-002 D7), so `- rotate the key` matches twice and
+                       -- an agent gets the same sentence billed to it twice.
+                       -- Dropping a block when one of its children also matched
+                       -- keeps the innermost — which is also the block whose id
+                       -- is the better citation and the simpler edit target.
+                       SELECT * FROM m
+                       WHERE NOT EXISTS (
+                         SELECT 1 FROM m child WHERE child.parent_block = m.block_id)
+                       ORDER BY rank DESC, path, ord
+                       LIMIT $5
+                     )
+                     SELECT hit.path, hit.block_id, hit.heading_path,
+                            ts_headline('english', hit.content, tq.q,
+                              'StartSel=**, StopSel=**, MaxFragments=1,
+                               MaxWords=30, MinWords=12') AS excerpt,
+                            hit.rank
+                     -- ts_headline runs after the LIMIT, so it is paid for the
+                     -- rows returned rather than every row that matched.
+                     FROM hit, tq
+                     ORDER BY hit.rank DESC, hit.path, hit.ord",
+                    None,
+                    &[
+                        arg(vault),
+                        q.into(),
+                        note.into(),
+                        tags.into(),
+                        i64::from(limit_n.max(0)).into(),
+                    ],
+                )
+                .unwrap_or_else(|e| pgrx::error!("pgmind: SPI failure in search(): {e}"))
+                .map(|row| {
+                    (
+                        row.get::<String>(1).unwrap().unwrap(),
+                        row.get::<Uuid>(2).unwrap().unwrap(),
+                        row.get::<Vec<String>>(3).unwrap().unwrap_or_default(),
+                        row.get::<String>(4).unwrap().unwrap_or_default(),
+                        row.get::<f32>(5).unwrap().unwrap_or(0.0),
                     )
                 })
                 .collect()

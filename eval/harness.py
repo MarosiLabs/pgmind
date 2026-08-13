@@ -1094,6 +1094,121 @@ def suite_provenance_integrity():
     return out
 
 
+def suite_search_quality():
+    """RFC-007 §5: search finds the right block, and cannot narrow what pgmind stores.
+
+    Nothing here scores relevance. Ranking quality against a hand-labelled
+    corpus is RFC-010's problem (the retrieval planner, where a BM25 adapter
+    would be compared against this baseline); what a gate can prove today is
+    that the index exists, is reachable, is scoped, and did not cost us the
+    write path -- which is exactly where the last three defects in this area
+    came from.
+    """
+    c = cluster()
+    c.createdb("pgmind_search")
+
+    def one(sql, db="pgmind_search"):
+        return c.psql(db, sql, tuples_only=True).strip()
+
+    c.psql("pgmind_search", """
+        SELECT knowledge.write('s/auth', E'---\ntags: [policy]\n---\n\n# Auth\n\n'
+               'We rotate the signing key every 30 days. #billing\n\n'
+               '- rotate the staging key\n'::markdown);
+        SELECT knowledge.write('s/other', E'# Other\n\nUnrelated prose about marmalade.\n'::markdown);
+    """)
+
+    # Stemming, phrase, and the tag/path filters all reach the right rows.
+    stemmed = int(one("SELECT count(*) FROM knowledge.search('rotating');"))
+    phrase = one("SELECT path FROM knowledge.search('\"signing key\"') LIMIT 1;")
+    scoped = int(one("SELECT count(*) FROM knowledge.search('key', path => 's/other');"))
+    front = int(one("SELECT count(*) FROM knowledge.search('key', tags => ARRAY['policy']);"))
+
+    # No result may be an ancestor of another result. A list item's content
+    # includes its own paragraph, so without the innermost-match rule every
+    # bullet is billed to the caller twice.
+    ancestors = int(one("""
+        WITH r AS (SELECT block_id FROM knowledge.search('rotate', limit_n => 100))
+        SELECT count(*) FROM r JOIN pgmind.block b ON b.id = r.block_id
+         WHERE EXISTS (SELECT 1 FROM r r2 JOIN pgmind.block c ON c.id = r2.block_id
+                        WHERE c.parent_block = b.id);"""))
+
+    # A search box is fed whatever gets typed. None of it may raise.
+    hostile = ["((( \"unclosed and -", "   ", "", "&|!<>", "the of and", "a' OR 1=1 --"]
+    # Ordinary quoting, not dollar-quoting: sqlstate() strips `$$` out of the
+    # statement before wrapping it, so a dollar-quoted empty string comes back
+    # mangled and the suite reports a syntax error as if search() had raised.
+    raised = [q for q in hostile
+              if sqlstate(c, "pgmind_search",
+                          "SELECT count(*) FROM knowledge.search('"
+                          + q.replace("'", "''") + "')") != "00000"]
+
+    # Vault scoping: the same words in another vault stay there.
+    c.psql("pgmind_search", """
+        SELECT knowledge.create_vault('search/elsewhere');
+        SELECT knowledge.write('s/auth', '# Auth
+
+We rotate the signing key.'::markdown, vault => 'search/elsewhere');
+    """)
+    mine = int(one("SELECT count(*) FROM knowledge.search('signing');"))
+    theirs = int(one("SELECT count(*) FROM knowledge.search('signing', vault => 'search/elsewhere');"))
+    unknown = sqlstate(c, "pgmind_search", "SELECT * FROM knowledge.search('x', vault => 'nope')")
+
+    # NEGATIVE CONTROL (RFC-005 5.0(b)). The bound in pgmind.search_vector is
+    # load-bearing or it is decoration. A block of distinct words builds a
+    # tsvector past the 1 MB ceiling at ~849 KB -- far inside the 8 MiB
+    # max_document_bytes -- so an unbounded expression index would make the
+    # WRITE fail on a note pgmind accepts. Prove three things: the write
+    # succeeds, the unbounded expression on that same content still raises, and
+    # the note is searchable by content inside the bound.
+    big_write = sqlstate(c, "pgmind_search", """
+        SELECT knowledge.write('s/huge',
+          ('# Huge' || chr(10) || chr(10) || 'needleword ' ||
+           (SELECT string_agg('w' || i, ' ') FROM generate_series(1, 120000) i))::markdown)""")
+    unbounded = sqlstate(c, "pgmind_search",
+                         "SELECT to_tsvector('english', knowledge.read('s/huge')::text)")
+    big_found = int(one("SELECT count(*) FROM knowledge.search('needleword');"))
+
+    # The index is reachable by the planner, not merely present. Checked on a
+    # corpus big enough for a seq scan to lose, because on a toy table every
+    # plan is cheap and this assertion would pass without an index at all.
+    c.psql("pgmind_search", """
+        SELECT count(*) FROM knowledge.write_many(
+          (SELECT array_agg('s/bulk/' || i) FROM generate_series(1, 1000) i),
+          (SELECT array_agg(('# N' || i || chr(10) || chr(10) ||
+             'filler prose about widgets and gadgets ' || i)::markdown)
+             FROM generate_series(1, 1000) i));
+        ANALYZE pgmind.block;
+    """)
+    plan = c.psql("pgmind_search", """
+        EXPLAIN (COSTS OFF)
+        WITH tq AS (SELECT websearch_to_tsquery('english', 'widgets') AS q)
+        SELECT b.id FROM pgmind.block b, tq
+         WHERE pgmind.search_vector(b.content) @@ tq.q;""")
+
+    checks = {
+        "stemmed_query_matches_the_stored_word": stemmed >= 1,
+        "phrase_query_finds_the_right_note": phrase == "s/auth",
+        "path_filter_excludes_other_notes": scoped == 0,
+        "a_frontmatter_tag_scopes_the_whole_note": front >= 1,
+        "no_result_contains_another_result": ancestors == 0,
+        "no_query_can_make_search_raise": not raised,
+        "search_stays_in_its_vault": mine == 1 and theirs == 1,
+        "an_unknown_vault_is_pm018": unknown == "PM018",
+        "a_block_too_big_to_index_is_still_written": big_write == "00000",
+        "the_bound_is_load_bearing": unbounded == "54000",
+        "and_that_block_is_still_searchable": big_found == 1,
+        "the_planner_reaches_the_fts_index": "block_fts" in plan,
+    }
+    ok = all(checks.values())
+    out = {"status": "ok" if ok else "fail", "checks": checks,
+           "observed": {"hostile_queries_that_raised": raised,
+                        "unbounded_tsvector_sqlstate": unbounded,
+                        "used_index": "block_fts" in plan}}
+    if not ok:
+        out["reason"] = "; ".join(k for k, v in checks.items() if not v)
+    return out
+
+
 ROUND_TRIP_PATHS = [
     # Every one of these is a legal note path per core/src/path.rs, and every one
     # broke the obvious shell loop. The apostrophe ended a psql statement early and
@@ -1866,8 +1981,10 @@ SUITES = {
     "manual-examples": suite_manual_examples,
     "manual-inventory": suite_manual_inventory,
     "gate-selftest": suite_gate_selftest,
-    # Phase 4 (RFC-006):     sync-round-trip (incl. unicode/case collisions), torture
-    # Phase 5 (RFC-007/008): context-determinism, quality-per-token
+    # Phase 5 (RFC-007 §5)
+    "search-quality": suite_search_quality,
+    # Phase 4 (RFC-006):     cut with the phase; RFC-006 withdrawn
+    # Phase 5 (RFC-008):     context-determinism, quality-per-token
 }
 
 

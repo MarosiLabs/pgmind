@@ -283,6 +283,29 @@ CREATE TABLE pgmind.excision_replay (
   target      jsonb NOT NULL
 );
 
+-- The full-text lane. One definition, used by both the index below and
+-- knowledge.search(), because an expression index is only used when the query
+-- repeats it EXACTLY -- and two copies of a text-search expression drift into
+-- a silent sequential scan that still returns the right answer.
+--
+-- Bounded on purpose. to_tsvector raises 54000 once the tsvector it builds
+-- passes 1048575 bytes, and that is reachable well inside what pgmind accepts:
+-- a 849 KB block of distinct words produces a 1.24 MB tsvector, against a
+-- pgmind.max_document_bytes that defaults to 8 MiB. Unbounded, this index would
+-- make the write path REFUSE a note it stores today -- the same defect RFC-003
+-- D6 froze a rule against after the jsonb ceiling silently narrowed the
+-- accepted document size. Truncating instead means a very large block is
+-- searchable by its first 100k characters rather than not storable at all.
+--
+-- 'english' is the configuration, fixed rather than settable. A generated
+-- column would bake it into the heap and cost a table rewrite to change; here
+-- changing it is REINDEX after redefining this function. It is also the wrong
+-- stemmer for a vault that is not in English -- which is a real limitation,
+-- written down rather than hidden.
+CREATE FUNCTION pgmind.search_vector(content text) RETURNS tsvector
+  LANGUAGE sql IMMUTABLE PARALLEL SAFE STRICT
+  AS $fn$ SELECT to_tsvector('english', left($1, 100000)) $fn$;
+
 -- Indexes (RFC-003 D4)
 CREATE UNIQUE INDEX note_live_path ON pgmind.note (vault_id, path) WHERE tombstoned_at IS NULL;
 CREATE INDEX note_basename    ON pgmind.note (vault_id, basename) WHERE tombstoned_at IS NULL;
@@ -290,12 +313,20 @@ CREATE INDEX note_path_prefix ON pgmind.note (vault_id, path text_pattern_ops);
 CREATE INDEX block_note_hash  ON pgmind.block (note_id, content_hash);
 CREATE INDEX block_note_ref   ON pgmind.block (note_id, block_ref_id) WHERE block_ref_id IS NOT NULL;
 CREATE INDEX block_parent     ON pgmind.block (parent_block) WHERE parent_block IS NOT NULL;
+-- Maintained by the write path like every other index (Law 7), rather than by
+-- a materialized view somebody has to remember to REFRESH.
+CREATE INDEX block_fts        ON pgmind.block USING gin (pgmind.search_vector(content));
 CREATE INDEX edge_src         ON pgmind.edge (src_note);
 CREATE INDEX edge_src_block   ON pgmind.edge (src_block);
 CREATE INDEX edge_dst         ON pgmind.edge (dst_note) WHERE dst_note IS NOT NULL;
 CREATE INDEX edge_path        ON pgmind.edge (vault_id, dst_path);
 CREATE INDEX tag_lookup       ON pgmind.tag (vault_id, lower(tag));
 CREATE INDEX tag_note         ON pgmind.tag (note_id);
+-- "Which blocks in THIS note carry tag X" — an explicit product requirement,
+-- and the one tag question the three indexes above could not answer without a
+-- scan: tag_lookup narrows by vault and then filters every note that uses the
+-- tag, tag_note narrows by note and then filters every tag it carries.
+CREATE INDEX tag_note_lookup  ON pgmind.tag (note_id, lower(tag));
 CREATE INDEX tag_block        ON pgmind.tag (block_id) WHERE block_id IS NOT NULL;
 CREATE INDEX revision_note    ON pgmind.revision (note_id, created_at);
 -- RFC-003 D4 left revision.parent unindexed and flagged it for RFC-005 by

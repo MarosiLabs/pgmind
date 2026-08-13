@@ -57,6 +57,17 @@ mod tests {
         );
     }
 
+    fn count(sql: &str) -> i64 {
+        Spi::get_one::<i64>(sql)
+            .unwrap_or_else(|e| panic!("count failed for {sql}: {e}"))
+            .expect("count returned NULL")
+    }
+
+    /// A SQL string literal, for building statements that carry hostile input.
+    fn quote(s: &str) -> String {
+        format!("'{}'", s.replace('\'', "''"))
+    }
+
     /// Run SQL, returning the SQLSTATE it fails with ('00000' if it succeeds).
     fn sqlstate_of(sql: &str) -> String {
         Spi::run(
@@ -2177,6 +2188,188 @@ mod tests {
                    ARRAY['a'], ARRAY['x\n']::markdown[], vault => 'import/nope')"
             ),
             "PM018",
+        );
+    }
+
+    // ---------- search (RFC-007) ----------
+
+    /// Search is Postgres's own full-text search, scoped to a vault.
+    #[pg_test]
+    fn search_finds_ranks_and_scopes() {
+        write(
+            "guides/refunds",
+            "---\ntags: [policy]\n---\n\n# Refunds\n\n\
+             We refund within 30 days. Rotating the signing key needs approval. #billing\n",
+        );
+        write(
+            "guides/escalation",
+            "# Escalation\n\nEscalate to a human when the customer asks twice. #urgent\n",
+        );
+
+        // Stemming: the query word is not the stored word.
+        let hits: Vec<String> = Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT path FROM knowledge.search('refunding') ORDER BY path",
+                    None,
+                    &[],
+                )
+                .expect("search failed")
+                .map(|r| r.get::<String>(1).unwrap().unwrap())
+                .collect()
+        });
+        assert!(
+            !hits.is_empty() && hits.iter().all(|p| p == "guides/refunds"),
+            "stemmed query should find the refunds note only, got {hits:?}"
+        );
+
+        // The excerpt marks the match and is drawn from the block.
+        let excerpt: String =
+            Spi::get_one("SELECT excerpt FROM knowledge.search('\"signing key\"')")
+                .unwrap()
+                .unwrap();
+        assert!(
+            excerpt.contains("**signing** **key**"),
+            "phrase match should be highlighted, got {excerpt:?}"
+        );
+
+        // path narrows to one note; tags narrow to blocks carrying every tag,
+        // counting a frontmatter tag as covering the whole note.
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('key', path => 'guides/escalation')"),
+            0
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('customer', tags => ARRAY['urgent'])"),
+            1,
+            "block-level tag"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('key', tags => ARRAY['policy'])"),
+            1,
+            "a frontmatter tag scopes the whole note"
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('key', tags => ARRAY['policy','nope'])"),
+            0,
+            "tags are ANDed"
+        );
+
+        // A search box is fed whatever gets typed. None of this may raise.
+        for junk in ["((( \"unclosed and -", "   ", "", "&|!<>", "the of and"] {
+            assert_eq!(
+                sqlstate_of(&format!(
+                    "SELECT count(*) FROM knowledge.search({})",
+                    quote(junk)
+                )),
+                "00000",
+                "search({junk:?}) should not raise"
+            );
+        }
+
+        // Deleting a note removes it from search.
+        Spi::run("SELECT knowledge.delete_note('guides/refunds')").unwrap();
+        assert_eq!(count("SELECT count(*) FROM knowledge.search('refund')"), 0);
+    }
+
+    /// Search never reaches another vault, and an unknown vault is PM018
+    /// rather than an empty result.
+    #[pg_test]
+    fn search_does_not_cross_a_vault_boundary() {
+        write("mine", "# Mine\n\nthe distinctive marmalade paragraph\n");
+        Spi::run("SELECT knowledge.create_vault('other')").unwrap();
+        Spi::run(
+            "SELECT knowledge.write('theirs', '# Theirs
+
+the distinctive marmalade paragraph'::markdown, vault => 'other')",
+        )
+        .unwrap();
+
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('marmalade')"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('marmalade', vault => 'other')"),
+            1
+        );
+        let path: String =
+            Spi::get_one("SELECT path FROM knowledge.search('marmalade', vault => 'other')")
+                .unwrap()
+                .unwrap();
+        assert_eq!(path, "theirs");
+        assert_eq!(
+            sqlstate_of("SELECT * FROM knowledge.search('x', vault => 'no-such-vault')"),
+            "PM018"
+        );
+    }
+
+    /// Indexing may not narrow what pgmind stores.
+    ///
+    /// `to_tsvector` raises `54000` once the vector it builds passes 1048575
+    /// bytes, and a block of distinct words gets there at ~849 KB — well inside
+    /// the 8 MiB `pgmind.max_document_bytes` default. An unbounded expression
+    /// index would therefore make the WRITE fail on a note pgmind accepts
+    /// today, which is the defect RFC-003 D6 froze a rule against. The bound in
+    /// `pgmind.search_vector` is what prevents it; this is its negative control.
+    #[pg_test]
+    fn a_block_too_big_to_index_is_still_stored_and_still_searchable() {
+        // One paragraph, ~1.2 MB, every word distinct — the shape that blows
+        // the tsvector ceiling rather than merely being long.
+        Spi::run(
+            "SELECT knowledge.write('huge',
+               ('# Huge' || chr(10) || chr(10) || 'needleword ' ||
+                (SELECT string_agg('w' || i, ' ') FROM generate_series(1, 120000) i) ||
+                chr(10))::markdown)",
+        )
+        .expect("a note pgmind accepts must not be rejected by the search index");
+
+        verify_clean("huge");
+        let stored: i64 = Spi::get_one("SELECT length(knowledge.read('huge')::text)")
+            .unwrap()
+            .unwrap();
+        assert!(stored > 800_000, "the whole note is stored, got {stored}");
+
+        // The negative control, and the reason the bound exists: this very
+        // content, put through an UNBOUNDED to_tsvector, is what Postgres
+        // refuses with 54000 (program_limit_exceeded). Without the bound that
+        // refusal would happen during INSERT, on index maintenance, and the
+        // write above would never have succeeded.
+        assert_eq!(
+            sqlstate_of("SELECT to_tsvector('english', knowledge.read('huge')::text)"),
+            "54000",
+            "if this stops raising, the bound in pgmind.search_vector is no longer load-bearing"
+        );
+
+        // Searchable by content inside the indexed prefix.
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.search('needleword')"),
+            1
+        );
+        // And honest about the tail: past the bound, it is not indexed.
+        assert_eq!(count("SELECT count(*) FROM knowledge.search('w119999')"), 0);
+    }
+
+    /// `tagged(path => …)` answers "which blocks in THIS note carry tag X".
+    #[pg_test]
+    fn tagged_can_be_scoped_to_one_note() {
+        write("a", "# A\n\nalpha #shared #only-a\n");
+        write("b", "# B\n\nbeta #shared\n");
+
+        assert_eq!(count("SELECT count(*) FROM knowledge.tagged('shared')"), 2);
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.tagged('shared', path => 'a')"),
+            1
+        );
+        assert_eq!(
+            count("SELECT count(*) FROM knowledge.tagged('only-a', path => 'b')"),
+            0,
+            "a tag the note does not carry is an empty result"
+        );
+        assert_eq!(
+            sqlstate_of("SELECT * FROM knowledge.tagged('shared', path => 'nope')"),
+            "PM002",
+            "but a path with no live note is an error, not an empty result"
         );
     }
 
