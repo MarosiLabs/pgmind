@@ -2046,6 +2046,37 @@ mod tests {
         );
     }
 
+    /// A least-privilege role gets PM codes, not a permission error.
+    ///
+    /// Every typed error is raised through `pgmind.raise_error`, so revoking that
+    /// one function replaces the whole error contract with `permission denied` for
+    /// exactly the role the tenancy pattern tells you to run as — and silently, since
+    /// the call still fails, just with the wrong thing. It did, until this test.
+    #[pg_test]
+    fn a_least_privilege_role_still_gets_typed_errors() {
+        write("real/note", "# Real\n");
+        Spi::run("CREATE ROLE pgmind_least_priv").unwrap();
+        Spi::run("GRANT USAGE ON SCHEMA pgmind, knowledge TO pgmind_least_priv").unwrap();
+        Spi::run(
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA pgmind
+             TO pgmind_least_priv",
+        )
+        .unwrap();
+        Spi::run("SET ROLE pgmind_least_priv").unwrap();
+
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.read('no/such/note')"),
+            "PM002",
+            "a role that owns nothing must still receive the typed error"
+        );
+        assert_eq!(
+            sqlstate_of("SELECT knowledge.write('bad//path', 'x'::markdown)"),
+            "PM001"
+        );
+
+        Spi::run("RESET ROLE").unwrap();
+    }
+
     /// The admin surface is not PUBLIC (Law 11, RFC-005 D7). Decided, written
     /// into the RFC and the product plan, and never implemented until now.
     #[pg_test]

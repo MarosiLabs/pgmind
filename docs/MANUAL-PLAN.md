@@ -727,6 +727,21 @@ Stated so that a green `make eval` is not mistaken for more than it is:
   its output is byte-identical to what the page shows. UUIDs and timestamps differ every run,
   so the pages elide them; asserting on the rest would mean a second serialisation format to
   maintain. A query that starts returning the wrong *rows* passes this gate.
+
+  *Measured 2026-08-14, and it is not theoretical.* A one-off checker that replayed every page
+  and diffed stdout with uuids, timestamps and padding normalised found real drift on four
+  pages behind a fully green gate: `notes().title` had changed meaning, so **six of the seven
+  rows** in `sql.html`'s flagship listing were wrong; `internals.html`'s table census was
+  missing a table and had four wrong column counts; `enable_vault_rls` had gained two rows on
+  three pages; and `quickstart.html` still *demonstrated* a double-apply bug that had been
+  fixed, with a pasted transcript showing an append landing twice. None of it was visible to
+  a gate that reads stderr.
+
+  The residual false-positive rate is what stopped that checker becoming a suite: pasted error
+  text goes to stderr and has no stdout counterpart, elided uuids never match, and the
+  database username differs by machine. A real suite has to normalise all three, and
+  `quickstart.html` additionally needs replaying against an **empty** database, because it
+  builds its own vault rather than using the seed. Worth doing; not free.
 - **That a name still badged "not yet" has not since shipped.** At row granularity the checker
   cannot tell a missing function from a missing *overload* of one that exists, and a gate that
   cries wolf gets ignored. §2.2 is the human check for that direction.

@@ -133,7 +133,7 @@
 
     <div class="code">
       <div class="cap">the shape of the data</div>
-<pre><code>vault                  one uuid, on every row (GUC: pgmind.vault_id)
+<pre><code>vault                  a registered row: id, name, description
  └── note              path, preamble, properties, head_revision
       ├── tile[]       byte lane   — the source spans of the top-level nodes
       │                              preamble ‖ tile[0] ‖ tile[1] ‖ … == the file
@@ -253,9 +253,10 @@
 
     <h3 id="basenames-and-globs">Basenames and globs</h3>
     <p>
-      The last segment is the <strong>basename</strong>. It is what
-      <code>knowledge.notes().title</code> reports, and it is the unit of
-      basename link resolution (<a href="#resolution">below</a>).
+      The last segment is the <strong>basename</strong>. It is the unit of basename
+      link resolution (<a href="#resolution">below</a>), and the last fallback for
+      <code>knowledge.notes().title</code> — which prefers the frontmatter
+      <code>title</code>, then the first level-1 heading.
     </p>
     <p>
       <code>knowledge.notes()</code> takes a git-style glob, and only a
@@ -1500,10 +1501,12 @@ SELECT change, before, after
 
     <h2 id="vaults">Vaults and tenancy</h2>
     <p>
-      A vault is one <code>uuid</code> column on every row, selected by the
-      <code>pgmind.vault_id</code> GUC. Every function in
-      <code>knowledge</code> filters by it. Paths are unique per vault, so two
-      tenants can each own <code>projects/auth</code>:
+      A vault is a row in <code>pgmind.vault</code> — an id, a unique name, and an
+      optional description — and every other row carries its id. Select one for the
+      session with the <code>pgmind.vault_id</code> setting, or name it per call: every
+      vault-scoped function takes <code>vault</code> as its last argument, which is what
+      lets one query span several vaults. Paths are unique per vault, so two tenants can
+      each own <code>projects/auth</code>:
     </p>
 
     <div class="code">
@@ -1535,9 +1538,9 @@ SELECT count(*) AS notes_visible FROM knowledge.notes();</code></pre>
              0
 (1 row)
 
-     path      | title
----------------+-------
- projects/auth | auth
+     path      |          title
+---------------+-------------------------
+ projects/auth | Auth, in another tenant
 (1 row)
 
  notes_visible
@@ -1560,8 +1563,18 @@ SELECT count(*) AS notes_visible FROM knowledge.notes();</code></pre>
     </div>
 
     <p>
-      A malformed <code>pgmind.vault_id</code> is <code>PM001</code>, not a
-      silent fallback to the nil uuid.
+      A malformed <code>pgmind.vault_id</code> is <code>PM001</code>; a well-formed id
+      that no vault was ever registered under is <code>PM018</code>. Neither is a silent
+      fallback to an empty vault — which is the failure the registry exists to prevent,
+      because a typo used to create a vault you could never find again.
+    </p>
+    <p>
+      One limit worth knowing before you rely on the policy:
+      <code>pgmind.vault</code> is the one table with no <code>vault_id</code> to
+      police, so <code>knowledge.vaults()</code> lists every vault's <em>name</em>
+      whatever the policy says. <code>enable_vault_rls</code> reports it as
+      <code>covered = false</code> rather than skipping it quietly. Content is scoped;
+      names are not.
     </p>
 
     <div class="note-box">
@@ -1751,22 +1764,29 @@ DETAIL:  pgmind_stale_head — note projects/auth: expected 00000000-…, head i
       <a href="#paths">Shown above.</a>
     </p>
 
-    <h3 id="edge-titles"><code>notes().title</code> is the basename</h3>
+    <h3 id="edge-titles">What a note calls itself</h3>
     <p>
-      It is the path's last segment, not the frontmatter <code>title</code>. The
-      frontmatter value is in <code>properties</code>, where you can query it
-      with the rest of them:
+      <code>notes().title</code> is the frontmatter <code>title</code>; failing that,
+      the text of the note's first level-1 heading; failing that, the basename. The
+      first two are resolved when the note is written, because both need the parse. The
+      basename fallback is applied when you read, so it cannot go stale after a rename.
     </p>
 
     <div class="code">
       <div class="cap">psql</div>
-<pre><code class="sql">SELECT path, title, properties-&gt;&gt;'title' AS frontmatter_title
+<pre><code class="sql">SELECT path, title, description, properties-&gt;&gt;'title' AS frontmatter_title
   FROM knowledge.notes('projects/*');</code></pre>
-<pre class="out"><code class="out">     path      | title | frontmatter_title
----------------+-------+-------------------
- projects/auth | auth  | Auth
+<pre class="out"><code class="out">     path      | title | description | frontmatter_title 
+---------------+-------+-------------+-------------------
+ projects/auth | Auth  |             | Auth
 (1 row)</code></pre>
     </div>
+    <p>
+      <code>description</code> beside it is a generated column over
+      <code>properties-&gt;&gt;'description'</code>, so Postgres maintains it and no
+      write path can forget to. Between them, a listing answers "what is this?" and not
+      only "where is it?".
+    </p>
 
     <h3 id="edge-tags">Tags group case-insensitively</h3>
     <p>

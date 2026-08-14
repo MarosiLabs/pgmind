@@ -154,11 +154,11 @@
     <div class="note-box warn">
       <span class="lbl">Where the project is</span>
       <p>
-        Research pre-alpha, version <code>0.0.1</code>. Phases 0–2 have exited
-        and Phase 3 is in progress. Everything on this page runs today, but the
-        SQL surface is unstable, there is <em>no upgrade path</em> between builds
-        — you drop the extension and rebuild the vault — and the first public
-        release (0.1.0) is two phases out.
+        Research pre-alpha, version <code>0.0.1</code>. Phases 0–3 have exited,
+        Phase 4 was cut, and Phase 5 is in progress — it ends at the first public
+        release, 0.1.0. Everything on this page runs today, but the SQL surface is
+        being frozen for 0.x right now and there is <em>no upgrade path</em> between
+        builds: you drop the extension and rebuild the vault.
       </p>
     </div>
 
@@ -714,6 +714,34 @@ FROM   knowledge.stats();</code></pre>
       — <code>knowledge.tags()</code> above listed the five distinct ones.
     </p>
 
+    <h3 id="find-it">Finding it again</h3>
+
+    <p>
+      Ranked full-text search over blocks, on an index the write path keeps current.
+      Nothing to refresh, and no embedding anywhere.
+    </p>
+
+    <div class="code">
+      <div class="cap">psql</div>
+<pre><code class="sql">SELECT path, round(rank::numeric, 4) AS rank, excerpt
+FROM   knowledge.search('rotate keys');</code></pre>
+<pre class="out"><code class="out">         path         |  rank  |                    excerpt
+----------------------+--------+-------------------------------------------
+ projects/auth        | 0.0909 | **Key** **rotation** is [[runbooks/rotate…
+ runbooks/rotate-keys | 0.0323 | **Rotate** the signing **keys**
+(2 rows)</code></pre>
+    </div>
+
+    <p>
+      The query is <code>websearch_to_tsquery</code> syntax — bare words are ANDed,
+      <code>"quoted phrases"</code> are literal, a leading <code>-</code> excludes. It
+      cannot be made to raise, because a search box is fed whatever gets typed. Narrow
+      with <code>path =&gt;</code> for one note or <code>tags =&gt;</code> for blocks
+      carrying every tag listed; drop the text entirely and it is a pure tag
+      intersection. You get the innermost matching block, so a bullet is not returned
+      twice, and its <code>block_id</code> is both a citation and an edit target.
+    </p>
+
     <h2 id="agent-loop">The five moves an agent makes</h2>
 
     <p>
@@ -773,10 +801,9 @@ FROM   knowledge.stats();</code></pre>
     </div>
 
     <p>
-      Like all six write operations it returns a <code>pgmind.op_result</code>
-      composite, so you call it from <code>FROM</code> and never from the select
-      list. That is not a style preference —
-      <a href="#trap-double-eval">it applies the edit twice</a>.
+      Like all six block operations it returns
+      <a href="#trap-double-eval"><code>SETOF pgmind.op_result</code></a> — one row,
+      <code>(revision, block_ids)</code> — so you read it from <code>FROM</code>.
     </p>
 
     <h3 id="move-patch">3. Patch one block</h3>
@@ -1089,7 +1116,7 @@ SELECT path, title FROM knowledge.notes();</code></pre>
 
      path      | title
 ---------------+-------
- projects/auth | auth
+ projects/auth | Auth
 (1 row)</code></pre>
     </div>
 
@@ -1126,28 +1153,36 @@ SELECT vault_id, notes, blocks FROM knowledge.stats();</code></pre>
 
     <div class="code">
       <div class="cap">psql</div>
-<pre><code class="sql">SELECT pgmind.enable_vault_rls();</code></pre>
-<pre class="out"><code class="out">NOTICE:  policy "vault_isolation" for relation "pgmind.note" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.revision" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.tile" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.block" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.edge" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.tag" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.note_revision" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.block_revision" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.note_frame" does not exist, skipping
-NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not exist, skipping
- enable_vault_rls
-------------------
-
-(1 row)</code></pre>
+<pre><code class="sql">SELECT * FROM pgmind.enable_vault_rls();</code></pre>
+<pre class="out"><code class="out">   table_name    | covered |                            detail                            
+-----------------+---------+--------------------------------------------------------------
+ note            | t       | 
+ revision        | t       | 
+ tile            | t       | 
+ block           | t       | 
+ edge            | t       | 
+ tag             | t       | 
+ note_revision   | t       | 
+ block_revision  | t       | 
+ note_frame      | t       | 
+ excision_log    | t       | 
+ vault           | f       | no vault_id column: this table is outside the vault boundary
+ excision_replay | f       | no vault_id column: this table is outside the vault boundary
+(12 rows)</code></pre>
     </div>
 
     <p>
-      Ten policies, one per table that carries a <code>vault_id</code>. RLS does
-      not apply to a superuser or to a table's owner unless you force it;
-      <code>pgmind.enable_vault_rls(force => true)</code> covers that case. Run
-      your application as a role that owns nothing.
+      One row per table, so you can see what it could <em>not</em> cover. Ten tables
+      carry a <code>vault_id</code> and get a policy. Two do not, and are reported
+      rather than skipped in silence: <code>pgmind.excision_replay</code>, which holds
+      the identifying data an erasure removed, and <code>pgmind.vault</code>, the
+      registry itself — which means <code>knowledge.vaults()</code> lists every vault's
+      <em>name</em> whatever the policy says. Content is scoped; names are not.
+    </p>
+    <p>
+      RLS also does not apply to a superuser, or to a table's owner unless you force it:
+      <code>pgmind.enable_vault_rls(force => true)</code> covers the owner. Run your
+      application as a role that owns nothing.
     </p>
 
     <h2 id="not-yet">What is not here yet</h2>
@@ -1171,11 +1206,12 @@ NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not ex
           <td><code>knowledge.context()</code> — deterministic, token-budgeted
               context assembly with a citation on every block</td>
           <td><span class="badge next">Phase 5</span></td>
-          <td>Assemble it yourself: pins, backlinks and link distance packed to a
-              budget, one citation per block. The
-              <a href="cookbook.html#retrieval">retrieval recipes</a> do this
-              with full-text search and, if you want them, your own pgvector
-              columns.</td>
+          <td>Assemble it yourself out of the pieces that do ship:
+              <a href="sql.html#fn-knowledge-search"><code>search</code></a>,
+              <code>backlinks</code> and link distance, packed to a budget with one
+              citation per block. The
+              <a href="cookbook.html#retrieval">retrieval recipes</a> do exactly that,
+              and add your own pgvector columns if you want them.</td>
         </tr>
         <tr>
           <td>A two-way <code>sync</code> daemon between a folder and a vault</td>
@@ -1301,9 +1337,9 @@ SELECT knowledge.context(root => 'projects/auth', token_budget => 12000);</code>
               plain inline text only — <code>#</code> marks and emphasis dropped,
               wiki-links reduced to alias-else-target, a trailing
               <code>^id</code> stripped, NFC, trimmed.
-              <code>append_to_section</code> additionally needs at least one block
-              <em>inside</em> the section — a heading with nothing under it raises
-              PM007 even though <code>read_section</code> finds it.</td>
+              <code>append_to_section</code> anchors on the heading itself when the
+              section has no content yet, so the first append into a freshly created
+              section works.</td>
         </tr>
         <tr>
           <td><code>PM009</code><br><span class="badge err">conflict</span></td>
@@ -1329,20 +1365,19 @@ SELECT knowledge.context(root => 'projects/auth', token_budget => 12000);</code>
     </div>
 
     <p>
-      All seventeen codes, with the functions that raise each, are in the
+      All nineteen codes, with the functions that raise each, are in the
       <a href="sql.html#errors">SQL reference</a>.
     </p>
 
-    <h3 id="trap-double-eval">The trap: composite returns in the select list</h3>
+    <h3 id="trap-double-eval">Composite returns, and the trap that used to be here</h3>
 
     <p>
-      PostgreSQL expands <code>(f(x)).*</code> by evaluating <code>f</code>
-      <em>once per output column</em>. <code>pgmind.op_result</code> has two
-      columns, so your edit is applied twice:
+      The six block operations return <code>SETOF pgmind.op_result</code> — one row,
+      <code>(revision, block_ids)</code>. Read them from <code>FROM</code>:
     </p>
 
     <div class="code">
-      <div class="cap">psql · do not do this</div>
+      <div class="cap">psql</div>
 <pre><code class="sql">SELECT knowledge.write('notes/trap', $md$# Trap
 
 ## Log
@@ -1350,11 +1385,21 @@ SELECT knowledge.context(root => 'projects/auth', token_budget => 12000);</code>
 First line.
 $md$);
 
-SELECT (knowledge.append_to_section('notes/trap', ARRAY['Trap','Log'],
-        $md$Appended once.$md$)).*;
+SELECT * FROM knowledge.append_to_section('notes/trap', ARRAY['Trap','Log'],
+                                          $md$Appended once.$md$);
 
 SELECT knowledge.read('notes/trap');</code></pre>
-<pre class="out"><code class="out">      read
+<pre class="out"><code class="out">                write                 
+--------------------------------------
+ 019ffe43-8c62-…
+(1 row)
+
+               revision               |               block_ids                
+--------------------------------------+----------------------------------------
+ 019ffe43-8c6b-…                      | {019ffe43-8c69-…}
+(1 row)
+
+      read      
 ----------------
  # Trap        +
                +
@@ -1363,21 +1408,17 @@ SELECT knowledge.read('notes/trap');</code></pre>
  First line.   +
                +
  Appended once.+
-               +
- Appended once.+
+ 
 (1 row)</code></pre>
     </div>
 
     <p>
-      One call, two paragraphs. Measured, not theoretical. Call these functions
-      from <code>FROM</code> and the problem disappears:
-      <code>SELECT * FROM knowledge.append_to_section(…)</code>. It applies to all
-      six functions returning <code>pgmind.op_result</code> —
-      <code>insert_blocks</code>, <code>append_to_section</code>,
-      <code>update_block</code>, <code>move_block</code>,
-      <code>split_block</code>, <code>merge_blocks</code>.
-      <code>knowledge.write</code> and the lifecycle functions return a bare
-      <code>uuid</code> and are safe anywhere.
+      Until recently these returned a <em>scalar</em> composite, and
+      <code>SELECT (knowledge.append_to_section(…)).*</code> applied the edit
+      <strong>twice</strong> — PostgreSQL expands <code>(f(x)).*</code> by evaluating
+      <code>f</code> once per output column. Returning a set fixed it: a set-returning
+      expression in the select list is evaluated once. The select-list form is now safe,
+      and <code>FROM</code> remains the clearer way to read a row.
     </p>
 
     <h3 id="trap-not-unique">"function is not unique"</h3>
@@ -1425,7 +1466,7 @@ HINT:  Could not choose a best candidate function. You might need to add explici
       </a>
       <a href="sql.html">
         <b>SQL reference</b>
-        <span>All 43 functions with signatures, return columns, the errors each
+        <span>Every function with its signature, return columns, the errors each
               raises, and a worked example.</span>
       </a>
       <a href="internals.html">

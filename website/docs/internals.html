@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 
 <title>Internals · pgmind manual</title>
-<meta name="description" content="How pgmind actually works: the two storage lanes, the eleven tables, the write path step by step, identity carry and heuristic rebinding, the history engine, locking, erasure, and the published capacity numbers.">
+<meta name="description" content="How pgmind actually works: the two storage lanes, the twelve tables, the write path step by step, identity carry and heuristic rebinding, the history engine, locking, erasure, and the published capacity numbers.">
 <link rel="canonical" href="https://marosilabs.github.io/pgmind/docs/internals.html">
 <meta name="author" content="Marosi Labs">
 <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
@@ -21,7 +21,7 @@
 <meta property="og:locale" content="en_US">
 <meta property="og:url" content="https://marosilabs.github.io/pgmind/docs/internals.html">
 <meta property="og:title" content="Internals · pgmind manual">
-<meta property="og:description" content="Two storage lanes, eleven tables, the write path in fourteen steps, identity carry, rebinding, the history engine, locking, and audited erasure — every claim cited to a file or an RFC decision.">
+<meta property="og:description" content="Two storage lanes, twelve tables, the write path in fourteen steps, identity carry, rebinding, the history engine, locking, and audited erasure — every claim cited to a file or an RFC decision.">
 <meta property="og:image" content="https://marosilabs.github.io/pgmind/assets/og.png">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Internals · pgmind manual">
@@ -273,7 +273,7 @@
 
     <h2 id="schema">The storage schema</h2>
     <p>
-      Eleven tables in schema <code>pgmind</code>, created in one
+      Twelve tables in schema <code>pgmind</code>, created in one
       <code>extension_sql!</code> block (<code>extension/src/schema.rs</code>).
       Creation order is FK-topological and load-bearing in two separate
       places — the RLS lock order and the write path's own statement order — so
@@ -295,18 +295,19 @@
  GROUP BY c.oid, c.relname ORDER BY c.oid;</code></pre>
 <pre class="out"><code class="out">      table      | cols | indexes | in_dump
 -----------------+------+---------+---------
- note            |   10 |       4 | t
+ vault           |    4 |       2 | t
+ note            |   12 |       4 | t
  revision        |   11 |       5 | t
  tile            |    4 |       2 | t
- block           |   15 |       6 | t
+ block           |   15 |       7 | t
  edge            |   12 |       5 | t
- tag             |    5 |       4 | t
+ tag             |    5 |       5 | t
  note_revision   |   15 |       4 | t
  block_revision  |   14 |       3 | t
  note_frame      |   15 |       3 | t
  excision_log    |   10 |       1 | t
  excision_replay |    2 |       1 | f
-(11 rows)</code></pre>
+(12 rows)</code></pre>
     </div>
 
     <h3 id="tables">What each table holds</h3>
@@ -318,13 +319,28 @@
       </thead>
       <tbody>
         <tr>
+          <td><code>vault</code></td>
+          <td>The registry. <code>id</code>, a <code>name</code> unique across the
+              database and validated by the same grammar as a note path, an optional
+              <code>description</code>, <code>created_at</code>. Every other table's
+              <code>vault_id</code> is a foreign key to it, which is what makes an
+              unregistered id an error rather than an empty vault. It is the one table
+              with no <code>vault_id</code> of its own, so no row policy can scope
+              it.</td>
+        </tr>
+        <tr>
           <td><code>note</code></td>
           <td>The vault namespace. <code>path</code> with a
               <code>CHECK (pgmind.path_is_valid(path))</code> backstop;
               <code>basename</code> is a <code>STORED</code> generated column so
               basename link resolution is an index lookup;
               <code>preamble</code> and <code>properties</code> are the byte lane's
-              head; <code>head_revision</code>; <code>tombstoned_at</code>;
+              head; <code>title</code>, resolved by the write path (frontmatter title,
+              else the first level-1 heading, else NULL — the basename fallback is
+              applied at read, so a rename cannot leave it stale) and
+              <code>description</code>, generated over
+              <code>properties-&gt;&gt;'description'</code>;
+              <code>head_revision</code>; <code>tombstoned_at</code>;
               <code>history_floor</code> (RFC-005 D3) — the oldest
               <code>seq</code> still reconstructable.</td>
         </tr>
@@ -408,7 +424,7 @@
 
     <h3 id="indexes">Indexes</h3>
     <p>
-      Twenty-four <code>CREATE INDEX</code> statements, all in the install script
+      Twenty-six <code>CREATE INDEX</code> statements, all in the install script
       from <code>schema.rs:248</code> onward, none added by a migration afterwards.
       (The <code>indexes</code> column above counts more, because it also sees
       primary keys and unique constraints.) The ones worth knowing about:
@@ -2053,7 +2069,7 @@ DETAIL:  pgmind_history_unavailable — seq 0 &lt; floor 5 on projects/auth</cod
       </thead>
       <tbody>
         <tr><td><code>pgmind.block</code>, heap + indexes</td><td><b>429.9 B</b> per block</td><td>98.9 MB / 230 000 blocks</td></tr>
-        <tr><td>All eleven tables, heap + indexes</td><td><b>975.7 B</b> per block</td><td>224.4 MB / 230 000 blocks, <em>including</em> the Phase-3 history lanes</td></tr>
+        <tr><td>All tables, heap + indexes</td><td><b>975.7 B</b> per block</td><td>224.4 MB / 230 000 blocks, <em>including</em> the Phase-3 history lanes</td></tr>
         <tr><td><code>knowledge.read()</code> p95</td><td>0.318 ms</td><td>whole-note read at head</td></tr>
         <tr><td><code>knowledge.backlinks()</code> p95</td><td>1.21 ms</td><td>&nbsp;</td></tr>
         <tr><td><code>knowledge.tagged()</code> p95</td><td>4.16 ms</td><td>the slowest read surface measured</td></tr>
@@ -2154,11 +2170,12 @@ DETAIL:  pgmind_history_unavailable — seq 0 &lt; floor 5 on projects/auth</cod
  tag             | r       | t
  tag_id_seq      | S       | t
  tile            | r       | t
-(13 rows)</code></pre>
+ vault           | r       | t
+(14 rows)</code></pre>
     </div>
 
     <p>
-      Twelve of thirteen registered, including both identity sequences.
+      Thirteen of fourteen registered, including both identity sequences.
       <code>excision_replay</code> is the one deliberate absence, for the reason in
       <a href="#audit-replay">the audit/replay split</a>.
     </p>
@@ -2218,7 +2235,7 @@ SELECT (SELECT count(*) FROM pg_event_trigger) AS event_triggers,
        current_setting('shared_preload_libraries') = '' AS not_preloaded;</code></pre>
 <pre class="out"><code class="out"> user_triggers | fk_triggers
 ---------------+-------------
-             0 |          62
+             0 |          66
 (1 row)
 
  event_triggers | security_definer | not_preloaded
@@ -2228,7 +2245,7 @@ SELECT (SELECT count(*) FROM pg_event_trigger) AS event_triggers,
     </div>
 
     <p>
-      The 62 are PostgreSQL's own foreign-key enforcement triggers, which every
+      The 66 are PostgreSQL's own foreign-key enforcement triggers, which every
       <code>REFERENCES</code> clause creates. Zero are pgmind's. Everything that
       maintains the link graph, the tag index and the history lanes is an explicit
       statement on the write path you can read in

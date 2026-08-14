@@ -127,11 +127,11 @@
     <div class="note-box warn">
       <span class="lbl">Two conventions that will save you an afternoon</span>
       <p>
-        The six block-level write operations return a composite, so they are always called
-        from <code>FROM</code>, never from the select list —
-        <code>SELECT (knowledge.update_block(…)).*</code> applies the edit once
-        per output column. It is measured in
-        <a href="#r-double-edit">the sharp edges</a>. And several recipes read
+        The six block-level write operations return <code>SETOF pgmind.op_result</code>,
+        so they are read from <code>FROM</code>:
+        <code>SELECT * FROM knowledge.update_block(…)</code>. The select-list form is
+        safe, though it once was not — <a href="#r-double-edit">the sharp edges</a> has
+        the measurement. And several recipes read
         <code>pgmind.*</code> tables directly: that is admin reach
         (<span class="badge admin">Admin</span>, Law 11 in the handbook), it is
         not covered by any stability promise, and it is flagged where it happens.
@@ -966,11 +966,11 @@ SELECT DISTINCT path FROM knowledge.tagged('person');</code></pre>
   <div class="cap">psql</div>
 <pre><code class="sql">SELECT path, title, properties-&gt;&gt;'owner' AS owner, properties-&gt;'tags' AS fm_tags
 FROM knowledge.notes('**/auth*') ORDER BY path;</code></pre>
-<pre class="out"><code class="out">       path        |   title   |  owner   |          fm_tags           
--------------------+-----------+----------+----------------------------
- archive/auth-2018 | auth-2018 |          | 
- projects/auth     | auth      | platform | ["architecture", "active"]
- rfc/auth-01       | auth-01   |          | 
+<pre class="out"><code class="out">       path        |            title            |  owner   |          fm_tags           
+-------------------+-----------------------------+----------+----------------------------
+ archive/auth-2018 | Auth (archived)             |          | 
+ projects/auth     | Auth                        | platform | ["architecture", "active"]
+ rfc/auth-01       | RFC-AUTH-01: token rotation |          | 
 (3 rows)</code></pre>
 </div>
 <div class="code">
@@ -985,7 +985,7 @@ ORDER BY path;</code></pre>
  runbooks/rotate-keys | 
 (2 rows)</code></pre>
 </div>
-    <p>Globs are git-style and nothing more: <code>*</code> inside one segment, <code>**</code> across segments. Note that <code>notes().title</code> is the path's last segment — the frontmatter <code>title</code> is in <code>properties-&gt;&gt;'title'</code>. See <a href="concepts.html#paths">paths and globs</a> and <a href="concepts.html#frontmatter">frontmatter</a>.</p>
+    <p>Globs are git-style and nothing more: <code>*</code> inside one segment, <code>**</code> across segments. <code>notes().title</code> is what the note calls itself: the frontmatter <code>title</code>, else its first level-1 heading, else the basename. See <a href="concepts.html#paths">paths and globs</a> and <a href="concepts.html#frontmatter">frontmatter</a>.</p>
 
     <h3 id="r-transclusions">Expand transclusions into one document</h3>
     <p><b>Problem.</b> A digest note is a list of <code>![[…]]</code> and you want the composed text.</p>
@@ -1075,7 +1075,7 @@ tags: runbook
  runbooks/rotate-keys | 0.0323 | **Rotate** the signing **keys**
 (5 rows)</code></pre>
 </div>
-    <p><code>q</code> is <code>websearch_to_tsquery</code> syntax: bare words are ANDed, <code>"quoted phrases"</code> are literal, <code>or</code> and a leading <code>-</code> do what they look like. It cannot be made to raise — a search box gets fed whatever is typed, and a syntax error is not an answer.</p>
+    <p><code>q</code> is <code>websearch_to_tsquery</code> syntax: bare words are ANDed, <code>"quoted phrases"</code> are literal, <code>or</code> and a leading <code>-</code> do what they look like. No <code>q</code> can make it raise — a search box gets fed whatever is typed, and a syntax error is not an answer. The other arguments still can: an unknown <code>path</code> is <span class="badge err">PM002</span> and an unknown <code>vault</code> is <span class="badge err">PM018</span>, because a mistyped path and a query that found nothing are different answers.</p>
 
     <div class="note-box trap">
       <span class="lbl">Replaced a recipe that was unsafe</span>
@@ -1103,16 +1103,16 @@ SELECT path, excerpt FROM knowledge.search('tokens', tags => ARRAY['decision']) 
 <pre class="out"><code class="out">   heading_path   |                                excerpt                                 
 ------------------+------------------------------------------------------------------------
  {Auth}           | service that issues and **rotates** credentials. Owned by [[people/ada
- {Auth,Decisions} | Refresh tokens **rotate** every 24h #decision
+ {Auth,Decisions} | Refresh tokens **rotate** every 12h #decision
  {Auth,Runbook}   | **rotation** is [[runbooks/rotate-keys|documented separately
 (3 rows)
 
      path      |                    excerpt                    
 ---------------+-----------------------------------------------
- projects/auth | Refresh **tokens** rotate every 24h #decision
+ projects/auth | Refresh **tokens** rotate every 12h #decision
 (1 row)</code></pre>
 </div>
-    <p>One tag on its own does not need <code>search()</code> at all: <a href="#r-tag-setops"><code>knowledge.tagged(tag, path =&gt; …)</code></a> answers "which blocks in this note carry this tag" straight out of an index. <em>Several</em> tags do, because <code>tagged()</code> takes one — <code>search('', tags =&gt; ARRAY['a','b'])</code> is every block carrying both, with <code>rank</code> NULL because nothing ranked it.</p>
+    <p>One tag on its own does not need <code>search()</code> at all: <code>knowledge.tagged(tag, path =&gt; 'projects/auth')</code> answers "which blocks in <em>this</em> note carry this tag" straight out of an index; <a href="#r-tag-setops">tag set operations</a> compose it across a vault. <em>Several</em> tags do, because <code>tagged()</code> takes one — <code>search('', tags =&gt; ARRAY['a','b'])</code> is every block carrying both, with <code>rank</code> NULL because nothing ranked it.</p>
 
     <h3 id="r-search-function">Wrap search in a function that returns citations</h3>
     <p><b>Problem.</b> Callers should get an address they can resolve later, not a row number.</p>
@@ -1641,9 +1641,9 @@ SET
  019fd643-…
 (1 row)
 
-     path      | title 
----------------+-------
- projects/auth | auth
+     path      |      title      
+---------------+-----------------
+ projects/auth | Auth (tenant B)
 (1 row)
 
 COMMIT
@@ -1682,8 +1682,9 @@ psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind
  block_revision  | t       | 
  note_frame      | t       | 
  excision_log    | t       | 
+ vault           | f       | no vault_id column: this table is outside the vault boundary
  excision_replay | f       | no vault_id column: this table is outside the vault boundary
-(11 rows)
+(12 rows)
 
  policies 
 ----------
@@ -1691,7 +1692,7 @@ psql:blocks/55_rls.sql:1: NOTICE:  policy "vault_isolation" for relation "pgmind
 (1 row)</code></pre>
 </div>
     <p><span class="badge admin">Admin</span> <code>enable_vault_rls()</code> creates one policy per <code>vault_id</code>-carrying table — ten on this build — and is idempotent, which is why the first run narrates a <code>DROP POLICY IF EXISTS</code> per table. Table owners still bypass RLS unless you pass <code>force =&gt; true</code>, so an application should never connect as the owner.</p>
-    <p>Read the rows it returns. <code>covered = f</code> names a <code>pgmind</code> table the enumeration could <em>not</em> put inside the boundary because it carries no <code>vault_id</code> — <code>excision_replay</code> is one, and it holds the identifying data an excision erased. Reporting that is the point: a deployer who saw only a successful call would never learn it.</p>
+    <p>Read the rows it returns. <code>covered = f</code> names a <code>pgmind</code> table the enumeration could <em>not</em> put inside the boundary, because it carries no <code>vault_id</code>. Two do. <code>excision_replay</code> holds the identifying data an excision erased. <code>vault</code> is the registry itself, which means <code>knowledge.vaults()</code> lists every vault's <em>name</em> whatever the policy says — content is scoped, names are not. Reporting that is the point: a deployer who saw only a successful call would never learn it.</p>
 
     <h3 id="r-app-role">The grant set an application role actually needs</h3>
     <p><b>Problem.</b> Give the app the least it can work with.</p>
@@ -1712,7 +1713,7 @@ GRANT
 GRANT
 GRANT</code></pre>
 </div>
-    <p>pgmind's functions are not <code>SECURITY DEFINER</code>, so they run as the caller and the caller needs DML on the <code>pgmind</code> tables — the policies, not the grants, are what confine it. Execute rights on <code>knowledge.*</code> come from <code>PUBLIC</code>; <code>pgmind.raise_error</code> is revoked and internal.</p>
+    <p>pgmind's functions are not <code>SECURITY DEFINER</code>, so they run as the caller and the caller needs DML on the <code>pgmind</code> tables — the policies, not the grants, are what confine it. Execute rights on <code>knowledge.*</code> come from <code>PUBLIC</code>, and so does <code>pgmind.raise_error</code> — deliberately, because every typed error is raised through it and revoking it would hand this role <code>permission denied for function raise_error</code> in place of every PM code.</p>
 
     <h3 id="r-prove-isolation">Prove the isolation</h3>
     <p><b>Problem.</b> Do not take the policy's word for it.</p>
@@ -1875,9 +1876,11 @@ SQL statement "SELECT pgmind.raise_error($1, $2, $3)"</code></pre>
 </div>
 <div class="code">
   <div class="cap">psql</div>
-<pre><code class="sql">SELECT id, requested_by, reason, target_kind, scope, escalations,
+<pre><code class="sql">\x on
+SELECT id, requested_by, reason, target_kind, scope, escalations,
        verified_at, survivors
-FROM pgmind.excision_log ORDER BY requested_at DESC LIMIT 1;</code></pre>
+FROM pgmind.excision_log ORDER BY requested_at DESC LIMIT 1;
+\x off</code></pre>
 <pre class="out"><code class="out">-[ RECORD 1 ]+----------------------------------------
 id           | 019fd643-…
 requested_by | amin

@@ -31,7 +31,11 @@ REPO = Path(__file__).resolve().parent.parent
 DOCS = REPO / "website" / "docs"
 SEED = REPO / "eval" / "manual" / "seed.sql"
 
-PAGES = ["index.html", "quickstart.html", "concepts.html",
+# Page names are relative to website/docs, except "../index.html" — the landing page.
+# It is here because it is the most-read page on the site and was, until it was added,
+# the only one nothing checked: it shipped an invented `ERROR: pgmind: head moved`
+# that no code path can produce, and a reader grepping their logs for it found nothing.
+PAGES = ["../index.html", "index.html", "quickstart.html", "concepts.html",
          "internals.html", "sql.html", "cookbook.html"]
 
 # A caption marks a block as unrunnable when it says so. These are the only two
@@ -132,9 +136,14 @@ def code_divs(src: str):
         yield src[start:pos]
 
 
+def page_path(page: str):
+    """Resolve a PAGES entry. `../index.html` reaches the landing page."""
+    return (DOCS / page).resolve()
+
+
 def parse_page(page: str) -> list:
     """Every <div class="code"> on the page, in document order."""
-    src = (DOCS / page).read_text()
+    src = page_path(page).read_text()
     blocks = []
     for ordinal, chunk in enumerate(code_divs(src), 1):
         cap_m = re.search(r'<div class="cap">(.*?)</div>', chunk, re.S)
@@ -351,7 +360,7 @@ def suite_manual_inventory(cluster, db: str) -> dict:
     missing, declared_absent = [], set()
     checked = 0
     for page in PAGES:
-        m, d, n = scan_page((DOCS / page).read_text(), everything)
+        m, d, n = scan_page(page_path(page).read_text(), everything)
         missing += [f"{page}: {name}" for name in m]
         declared_absent |= d
         checked += n

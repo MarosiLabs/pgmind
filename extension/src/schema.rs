@@ -41,7 +41,17 @@ BEGIN
   RAISE EXCEPTION USING ERRCODE = code, MESSAGE = message, DETAIL = detail;
 END
 $fn$;
-REVOKE ALL ON FUNCTION pgmind.raise_error(text, text, text) FROM PUBLIC;
+-- Deliberately NOT revoked, and this is load-bearing rather than an oversight.
+-- Every typed pgmind error is raised through here, so revoking it does not hide
+-- an internal function -- it replaces every PM code with `permission denied for
+-- function raise_error` for exactly the least-privilege application role the
+-- deployment pattern tells you to run as. Measured: a role granted USAGE on both
+-- schemas and DML on pgmind.* got that instead of PM002 from
+-- knowledge.read('no/such/note'), which silently breaks every documented
+-- catch-PM009-and-retry loop. It confers nothing either: the function raises an
+-- exception the caller already supplied, in the caller's own session, which any
+-- caller can do with an inline DO block. Pinned by
+-- `a_least_privilege_role_still_gets_typed_errors`.
 
 CREATE TYPE pgmind.block_kind AS ENUM
   ('heading','paragraph','list_item','code_block','table','thematic_break','html_block');

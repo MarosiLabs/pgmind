@@ -145,7 +145,7 @@
       </a>
       <a href="cookbook.html">
         <b>Cookbook</b>
-        <span>Fifty recipes: concurrent memory, backlinks, graph walks,
+        <span>Seventy-five recipes: concurrent memory, search, backlinks, graph walks,
               retrieval, citations, tenancy.</span>
       </a>
       <a href="../">
@@ -203,20 +203,28 @@ SELECT knowledge.read_as_of('projects/auth', 0::bigint);</code></pre>
             <td>Runs today.</td></tr>
         <tr><td><span class="badge next">Phase 5</span></td>
             <td>Designed, not built. Shown so you can plan around it.</td></tr>
-        <tr><td><span class="badge admin">Admin</span></td>
+        <tr><td><span class="badge next">Cut</span> / <span class="badge next">Unscheduled</span></td>
+            <td>Withdrawn, or not on any phase. Shown because another document
+                names it and you would otherwise go looking.</td></tr>
+        <tr><td><span class="badge admin">Admin</span> / <span class="badge admin">Internal</span></td>
             <td>Lives in the <code>pgmind</code> schema, below the public API.
-                Several are destructive.</td></tr>
+                Several are destructive; some are documented only so you
+                recognise them in a stack trace.</td></tr>
+        <tr><td><span class="badge err">PM0xx</span></td>
+            <td>An error code the call can raise.</td></tr>
       </tbody>
     </table>
     </div>
 
     <div class="note-box trap">
-      <span class="lbl">One rule to learn before your first write</span>
+      <span class="lbl">One habit worth forming before your first write</span>
       <p>
-        The six block operations return a composite. Call them from
-        <code>FROM</code>, never from the select list —
-        <code>SELECT (knowledge.update_block(…)).*</code> evaluates the function
-        once per output column and applies your edit twice.
+        The six block operations return <code>SETOF pgmind.op_result</code> — one row,
+        <code>(revision, block_ids)</code>. Call them from <code>FROM</code>:
+        <code>SELECT * FROM knowledge.update_block(…)</code>. The select-list form is
+        safe too, because a set-returning expression is evaluated once; while these
+        returned a <em>scalar</em> composite it applied the edit twice, which is why
+        every example on this site uses <code>FROM</code>.
       </p>
     </div>
 

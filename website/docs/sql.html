@@ -106,8 +106,8 @@
     <p class="crumbs"><a href="index.html">Manual</a> · SQL reference</p>
     <h1>SQL reference</h1>
     <p class="lede">
-      Everything pgmind 0.0.1 installs: 43 functions across three schemas, four
-      types, four server settings and seventeen error codes. Signatures are
+      Everything pgmind 0.0.1 installs: 51 functions across three schemas, four
+      types, four server settings and nineteen error codes. Signatures are
       copied from <code>pg_get_function_arguments</code>, not from an RFC, so
       what is written here is what your database will accept.
     </p>
@@ -122,6 +122,21 @@
         UUIDs are elided to their first group (<code>019fd627-…</code>) because
         yours will differ. Where an example is meant to fail, the real
         <code>ERROR:</code> and <code>DETAIL:</code> lines are shown.
+      </p>
+    </div>
+
+    <div class="note-box">
+      <span class="lbl">The <code>vault</code> parameter, once</span>
+      <p>
+        Every vault-scoped function takes <code>vault text DEFAULT NULL</code> as its
+        <strong>last</strong> argument. It accepts a vault name or an id in its text
+        spelling; a value that parses as a uuid is looked up by id, otherwise by name.
+        <code>NULL</code> falls back to the
+        <a href="#fn-pgmind-vault-id"><code>pgmind.vault_id</code></a> setting. An id or
+        name no vault was registered under is <span class="badge err">PM018</span> —
+        never an empty result. Passing it per call is what lets one query span several
+        vaults; the setting is the ergonomic choice for a session that stays in one.
+        The per-entry tables below repeat only the default.
       </p>
     </div>
 
@@ -346,9 +361,10 @@
       <h4>Notes</h4>
       <ul>
         <li>Consume it from <code>FROM</code>:
-            <code>SELECT revision FROM knowledge.update_block(…)</code>.
-            Expanding it in the select list with <code>(f(…)).*</code> runs the
-            function once per column and applies the write twice.</li>
+            <code>SELECT revision FROM knowledge.update_block(…)</code>. The
+            select-list form <code>(f(…)).*</code> is safe — a set-returning
+            expression is evaluated once — but reads worse. While these returned a
+            <em>scalar</em> composite it applied the write twice.</li>
         <li>Assigning it to a plpgsql record variable
             (<code>r := knowledge.update_block(…);</code>) evaluates it once and
             is safe.</li>
@@ -745,9 +761,13 @@ $md$) AS invalid_yaml;</code></pre>
         <thead><tr><th scope="col">Code</th><th scope="col">When</th></tr></thead>
         <tbody>
           <tr><td><code>PM001</code></td><td>The name is not a valid path.</td></tr>
-          <tr><td><code>PM015</code></td><td>The name or the id is already taken, and
-              <code>if_not_exists</code> is false. It never silently hands back
-              somebody else's vault.</td></tr>
+          <tr><td><code>PM015</code></td><td>The <em>name</em> is taken and
+              <code>if_not_exists</code> is false — or the <em>id</em> is taken,
+              which raises whatever <code>if_not_exists</code> says. The asymmetry is
+              deliberate: reaching the id check means the id belongs to a vault with a
+              different name, and "create this if it does not exist" is not an
+              instruction to adopt somebody else's vault because you guessed their
+              id.</td></tr>
         </tbody>
       </table>
       </div>
@@ -1016,15 +1036,15 @@ $md$) AS invalid_yaml;</code></pre>
         <div class="cap">psql</div>
 <pre><code class="sql">SELECT path, title, properties->>'title' AS fm_title FROM knowledge.notes()
  ORDER BY path;</code></pre>
-<pre class="out"><code class="out">         path         |    title    | fm_title 
-----------------------+-------------+----------
- daily/2026-08-06     | 2026-08-06  | 
- index                | index       | 
- notes/scratch        | scratch     | 
- people/ada           | ada         | 
- projects/auth        | auth        | Auth
- rfc/auth-01          | auth-01     | 
- runbooks/rotate-keys | rotate-keys | 
+<pre class="out"><code class="out">         path         |            title            | fm_title 
+----------------------+-----------------------------+----------
+ daily/2026-08-06     | 2026-08-06                  | 
+ index                | Index                       | 
+ notes/scratch        | Scratch                     | 
+ people/ada           | Ada Lovelace                | 
+ projects/auth        | Auth                        | Auth
+ rfc/auth-01          | RFC-AUTH-01: token rotation | 
+ runbooks/rotate-keys | Rotate the signing keys     | 
 (7 rows)</code></pre>
       </div>
       <div class="code">
@@ -1873,10 +1893,11 @@ SELECT path, excerpt FROM knowledge.search('tokens', tags => ARRAY['decision']);
         <code>insert_blocks</code>, <code>append_to_section</code>,
         <code>update_block</code>, <code>move_block</code>,
         <code>split_block</code> and <code>merge_blocks</code>.
-        <code>knowledge.write</code> returns a bare <code>uuid</code> and is not
-        affected. Call the six from <code>FROM</code>. <code>SELECT
-        (knowledge.append_to_section(…)).*</code> was measured appending the
-        same fragment twice from one statement.
+        <code>knowledge.write</code> returns a bare <code>uuid</code>. Call the six
+        from <code>FROM</code>. The select-list form is safe now that they return a
+        set; while they returned a scalar composite,
+        <code>SELECT (knowledge.append_to_section(…)).*</code> was measured appending
+        the same fragment twice from one statement.
       </p>
     </div>
 
@@ -4086,16 +4107,30 @@ DETAIL:  pgmind_history_unavailable — seq 0 < floor 2 on projects/auth</code><
       </div>
 
       <h4>Returns</h4>
-      <p><code>void</code>.</p>
+      <p>
+        One row per <code>pgmind</code> table: <code>table_name</code>,
+        <code>covered</code>, and a <code>detail</code> saying why when it is not.
+        Reporting the misses is the point — a table outside the boundary is exactly
+        what a deployer needs to know, and the earlier <code>void</code> return said
+        nothing at all.
+      </p>
 
       <h4>Notes</h4>
       <ul>
         <li>The table list is enumerated from <code>pg_catalog</code> — every
             <code>pgmind</code> table with a <code>vault_id</code> column — so a
             future table is inside the boundary by construction. On this build
-            that is <strong>10 tables</strong>, including the history lanes,
+            that is <strong>10 of 12 tables</strong>, including the history lanes,
             whose <code>prev_content</code> and frame <code>tiles</code> are
             literal copies of note bytes.</li>
+        <li><strong>Two tables cannot be covered, and are reported rather than
+            skipped.</strong> <code>pgmind.excision_replay</code> holds the
+            identifying data an erasure removed, and is outside the boundary by
+            design. <code>pgmind.vault</code> is the registry itself: it has no
+            <code>vault_id</code> to police, so
+            <a href="#fn-knowledge-vaults"><code>knowledge.vaults()</code></a>
+            lists every vault's <em>name</em> whatever the policy says. Content is
+            scoped; names are not.</li>
         <li>It is idempotent by <code>DROP POLICY IF EXISTS</code>, which is why
             the first run emits one <code>NOTICE … skipping</code> per table.
             That is normal.</li>
@@ -4138,8 +4173,9 @@ NOTICE:  policy "vault_isolation" for relation "pgmind.excision_log" does not ex
  block_revision  | t       | 
  note_frame      | t       | 
  excision_log    | t       | 
+ vault           | f       | no vault_id column: this table is outside the vault boundary
  excision_replay | f       | no vault_id column: this table is outside the vault boundary
-(11 rows)</code></pre>
+(12 rows)</code></pre>
       </div>
       <div class="code">
         <div class="cap">psql</div>
@@ -4630,8 +4666,10 @@ DETAIL:  pgmind_invalid_author — 201 characters, limit 200</code></pre>
             plus grants — this setting alone is a convention.</li>
         <li>A value that is not a UUID raises PM001 on the first
             <code>knowledge.*</code> call, not on <code>SET</code>.</li>
-        <li>Vaults do not link to each other. An unknown vault id is an empty
-            vault, not an error.</li>
+        <li>Vaults do not link to each other. An id no vault was registered under is
+            <span class="badge err">PM018</span>, not an empty vault — the failure the
+            registry exists to prevent, because a typo used to create a vault you could
+            never find again.</li>
         <li>Behind a pool, use <code>SET LOCAL</code> inside the transaction so
             the value cannot leak to the next borrower.</li>
       </ul>

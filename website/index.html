@@ -143,8 +143,8 @@
       <h1>A brain for AI agents, <br class="br-wide">inside PostgreSQL.</h1>
 
       <p class="hero-note">
-        Not a model, and it never calls one. pgmind is where the knowledge lives,
-        and how you hand your agent the right context without the hassle.
+        Not a model, and it never calls one. pgmind is where the knowledge lives &mdash;
+        queryable in SQL, so an agent asks for one section instead of the whole folder.
       </p>
 
       <div class="cta">
@@ -203,14 +203,14 @@
       </p>
 
       <ul class="adds reveal">
-        <li><b>No lost writes.</b> If the note changed since you read it, your save fails instead of quietly overwriting someone else.</li>
+        <li><b>Lost writes are refusable.</b> Hand back the version you read and a stale save is rejected instead of quietly overwriting someone. Omit it and you get last-writer-wins, by your choice. Most agent writes need no guard at all &mdash; adding a line under a heading and editing one paragraph do not collide.</li>
         <li><b>Everything is queryable.</b> Every heading, paragraph, link and tag is a row. An outline, one section, or &ldquo;what links here?&rdquo; is a single query.</li>
         <li><b>Nothing is overwritten.</b> Each edit adds a version, so you can see what changed, who changed it, and read the note as it was last week.</li>
         <li><b>Every paragraph has an ID.</b> An agent can point at the exact paragraph it used, and that pointer still works after the note is edited.</li>
-        <li><b>Multi-tenant out of the box.</b> Tag each vault with a tenant ID, and Postgres row security keeps every query inside it.</li>
+        <li><b>Many vaults, one database.</b> A vault is a named object with an id; every row carries it. Scope a session to one vault, or name it per call. Row security enforces the scope against a bug in your application &mdash; not against anything that can run its own SQL.</li>
         <li><b>You can really delete.</b> History is kept by default, but erasing something is a real, logged operation, not a workaround.</li>
         <li><b>It is just your database.</b> Notes, indexes and any embeddings you add all live in Postgres, inside the backup you already take.</li>
-        <li><b>Easy in, easy out.</b> <code class="nowrap">import-vault.sh</code> brings a markdown folder in; <code class="nowrap">export-vault.sh</code> gives it back byte for byte. The round trip is a test, not a promise — and the export refuses rather than half-writing when two note paths would collide on one file.</li>
+        <li><b>A folder goes in and comes back byte for byte.</b> <code class="nowrap">import-vault.sh</code> brings a markdown folder in; <code class="nowrap">export-vault.sh</code> gives it back byte for byte. The round trip is a test, not a promise — and the export refuses rather than half-writing when two note paths would collide on one file.</li>
       </ul>
     </div>
   </section>
@@ -227,6 +227,7 @@
         <div class="tabs" role="tablist" aria-label="pgmind examples">
           <button role="tab" id="tab-write" aria-controls="panel-write" aria-selected="true">Concurrent writes</button>
           <button role="tab" id="tab-query" aria-controls="panel-query" aria-selected="false" tabindex="-1">Navigate</button>
+          <button role="tab" id="tab-search" aria-controls="panel-search" aria-selected="false" tabindex="-1">Search</button>
           <button role="tab" id="tab-history" aria-controls="panel-history" aria-selected="false" tabindex="-1">History</button>
           <button role="tab" id="tab-context" aria-controls="panel-context" aria-selected="false" tabindex="-1">Context</button>
           <button role="tab" id="tab-cite" aria-controls="panel-cite" aria-selected="false" tabindex="-1">Citations</button>
@@ -242,11 +243,12 @@ SELECT knowledge.write('projects/auth', $md$
 - [[oauth2]] over server sessions, see [[rfc/auth-01]] #architecture
 $md$, expected_head => $1);
 
--- ERROR:  pgmind: head moved, re-read and retry
+-- ERROR:  pgmind: expected_head is not the note's current head
+-- DETAIL:  pgmind_stale_head — note projects/auth: expected 019ffa24-…, head is 019ffa24-…
 
 
 -- Add one line under a heading, without reading or rewriting the note.
-SELECT knowledge.append_to_section(
+SELECT * FROM knowledge.append_to_section(
     'projects/auth',
     ARRAY['Auth','Decisions'],
     $md$- Rotate refresh tokens every 24h #decision$md$
@@ -275,6 +277,21 @@ SELECT path FROM knowledge.orphans();</code></pre>
           <p class="note"><span class="badge ok">In main</span> Headings, links and tags are worked out once, when the note is saved. So an outline is just a lookup, and an agent can read the map before asking for the part it actually needs.</p>
         </div>
 
+        <div class="panel" role="tabpanel" id="panel-search" aria-labelledby="tab-search" tabindex="0" hidden>
+<pre><code class="sql">-- Ranked full-text search across the vault, with the match highlighted
+SELECT path, rank, excerpt FROM knowledge.search('rotate keys');
+--         path         |  rank  |                excerpt
+-- projects/auth        | 0.0909 | **Key** **rotation** is [[runbooks/rotate…
+-- runbooks/rotate-keys | 0.0323 | **Rotate** the signing **keys**
+
+-- Narrow it to one note
+SELECT * FROM knowledge.search('rotation', path => 'projects/auth');
+
+-- Or drop the text entirely and intersect tags
+SELECT path FROM knowledge.search('', tags => ARRAY['architecture','decision']);</code></pre>
+          <p class="note"><span class="badge ok">In main</span> This is PostgreSQL&rsquo;s own text search on an index the write path keeps current &mdash; nothing to refresh, no second service, no embedding. It returns the innermost matching block, so a bullet is not billed to you twice, and its id is a citation you can edit through later.</p>
+        </div>
+
         <div class="panel" role="tabpanel" id="panel-history" aria-labelledby="tab-history" tabindex="0" hidden>
 <pre><code class="sql">-- Every version of a note, newest first
 SELECT seq, author, verb, created_at
@@ -290,12 +307,13 @@ FROM   knowledge.blame('projects/auth');
 
 -- The note as it looked a week ago
 SELECT knowledge.read_as_of('projects/auth', now() - interval '7 days');</code></pre>
-          <p class="note"><span class="badge ok">In main</span> Versions are stored as deltas, so keeping all of them is cheap. <code>author</code> and <code>source</code> record who claimed the write and how it arrived, and blame is honest about the rare cases where a paragraph was matched up by guesswork rather than tracked.</p>
+          <p class="note"><span class="badge ok">In main</span> Versions are stored as deltas: at 25 revisions a note, its whole history costs about a fifth of its current size (<a href="https://github.com/MarosiLabs/pgmind/blob/main/eval/published/capacity-model-v2.json">measured</a>). <code>author</code> and <code>source</code> record who claimed the write and how it arrived, and blame is honest about the rare cases where a paragraph was matched up by guesswork rather than tracked.</p>
         </div>
 
         <div class="panel" role="tabpanel" id="panel-context" aria-labelledby="tab-context" tabindex="0" hidden>
 <pre><code class="sql">-- The note, what it pulls in, and what it links to. Packed to a token
 -- budget, with a reference on every paragraph it includes.
+-- Phase 5 · 0.1.0 · not implemented yet
 SELECT knowledge.context(root => 'projects/auth', token_budget => 12000);
 
 
@@ -317,7 +335,7 @@ SELECT knowledge.context(
 
 -- Same notes and same arguments always give the same output. No model
 -- is called here, and nothing leaves the database.</code></pre>
-          <p class="note"><span class="badge next">Phase 5 · 0.1.0</span> Postgres row security applies here like anywhere else, so one policy keeps every tenant inside its own vault. The smaller pieces <code>context</code> uses (<code>search</code>, <code>traverse</code>, <code>backlinks</code>) stay callable on their own, and <code>context_explain</code> shows exactly what went in, what got cut, and why.</p>
+          <p class="note"><span class="badge next">Phase 5 · 0.1.0</span> <code>context</code> is the one thing on this page that does not ship yet. The pieces it will assemble already do and are callable on their own &mdash; <a href="docs/sql.html#fn-knowledge-search"><code>search</code></a>, <a href="docs/sql.html#fn-knowledge-backlinks"><code>backlinks</code></a>, <a href="docs/sql.html#fn-knowledge-blocks"><code>blocks</code></a> &mdash; so you can assemble context yourself today and swap in <code>context</code> when it lands.</p>
         </div>
 
         <div class="panel" role="tabpanel" id="panel-cite" aria-labelledby="tab-cite" tabindex="0" hidden>
@@ -346,15 +364,15 @@ WHERE  block_id = $1;</code></pre>
       <ul class="artifacts">
         <li>
           <b>pgmind</b><span class="where">extension</span>
-          <p>Runs in PostgreSQL. The vault model, storage, identity, versioning, retrieval and context assembly.</p>
+          <p>Runs in PostgreSQL. The vault model, storage, block identity, versioning and search.</p>
         </li>
         <li>
           <b>scripts/</b><span class="where">shell</span>
           <p>Runs anywhere psql does. <code>export-vault.sh</code> and <code>import-vault.sh</code> move a folder of markdown in and out, byte for byte.</p>
         </li>
         <li>
-          <b>pgmind-mcp</b><span class="where">server</span>
-          <p>Runs anywhere. The vault as MCP tools: read, write, append, search, context, history.</p>
+          <b>pgmind-mcp</b><span class="where">server · <span class="badge next">not built</span></span>
+          <p>Will run anywhere. The vault as eight MCP tools, designed in <a href="https://github.com/MarosiLabs/pgmind/blob/main/docs/rfcs/RFC-007-query-api-and-mcp-surface.md">RFC-007</a> and not yet implemented.</p>
         </li>
       </ul>
     </div>

@@ -88,13 +88,16 @@ mod knowledge {
             Spi::get_one_with_args("SELECT name FROM pgmind.vault WHERE id = $1", &[arg(id)])
                 .unwrap_or(None);
         if let Some(other) = taken {
-            if if_not_exists && other == normalized {
-                return TableIterator::once((id, normalized));
-            }
+            // Unconditional, including under `if_not_exists`, and the asymmetry with
+            // the name branch above is deliberate. Reaching here means the id is
+            // taken by a vault with a DIFFERENT name — if the names matched, the
+            // lookup by name would already have returned it. "Create this if it does
+            // not exist" is not an instruction to adopt somebody else's vault
+            // because you guessed their id.
             pm_error(
                 Pm::PathTaken,
                 "a vault with that id already exists",
-                &format!("id {id} is vault {other:?}"),
+                &format!("id {id} is vault {other:?}, not {normalized:?}"),
             );
         }
         Spi::run_with_args(

@@ -11,10 +11,11 @@ carries a stable ID an agent can cite, and the whole vault is queryable in SQL.
 sockets. Embeddings, if you want them, are a lane you fill yourself with pgvector.
 
 > ### 🔬 Research pre-alpha
-> Phases 0–2 have shipped and Phase 3 is in progress. Every example below runs today
-> except the one explicitly marked Phase 5 — but the SQL surface is unstable, there is no
-> upgrade path between versions, and the first public release (0.1.0) is two phases out.
-> Build on it to experiment, not to serve traffic. See [Status](#status).
+> Phases 0–3 have exited with their gates published; Phase 4 was cut; Phase 5 is in
+> progress and ends at the first public release, 0.1.0. Every example below runs today
+> except the one marked Phase 5. The SQL surface is being frozen for 0.x right now
+> ([RFC-007](docs/rfcs/RFC-007-query-api-and-mcp-surface.md)) and there is no upgrade path
+> between versions yet. Build on it to experiment, not to serve traffic.
 
 ---
 
@@ -41,8 +42,10 @@ None of that is markdown's fault. It is the filesystem's.
 
 Keep the markdown. Replace the filesystem.
 
-- **No lost writes.** Writes are compare-and-swap. If the note moved since you read it,
-  your write fails loudly instead of overwriting someone quietly.
+- **Lost writes are refusable.** Pass the revision you read as `expected_head` and a stale
+  write fails loudly instead of overwriting someone. Omit it and you get last-writer-wins —
+  explicitly, and by your choice. Most agent writes need no guard at all: appending to a
+  section and editing one block are separate operations that do not conflict.
 - **Everything is a row.** Every heading, paragraph, list item, link and tag is queryable.
   An outline or a backlink lookup is one query, not a directory walk.
 - **Nothing is overwritten.** Each edit appends a revision. Read a note as it was at any
@@ -50,8 +53,10 @@ Keep the markdown. Replace the filesystem.
 - **Blocks keep their identity.** A paragraph's UUID survives edits to the note around it
   — including whole-document rewrites, where a confidence-scored rebinder carries IDs
   across and marks what it had to infer.
-- **Multi-tenant by column.** Every row carries a `vault_id`; one session GUC scopes the
-  vault, and Postgres row security enforces it.
+- **Many vaults, one database.** A vault is a registered object with a name and an id;
+  every row carries its `vault_id`. Scope a session with one setting, or name the vault
+  per call. Row security enforces the scope against a bug in your application — not
+  against anything that can run its own SQL.
 - **Erasure is a real operation.** History is append-only *by default*, not forever.
   Excision is explicit, audited, scoped to one vault, and verified inside the transaction
   that performs it.
@@ -69,6 +74,10 @@ Administrative operations live in `pgmind`. Markdown goes in; the same bytes com
 
 ```sql
 CREATE EXTENSION pgmind;
+
+-- A vault has a name and an id. Pass the id if your application already has one.
+SELECT * FROM knowledge.create_vault('acme/alice/memory', 'Alice''s agent memory');
+SET pgmind.vault_id = '019feaf0-…';
 
 -- Returns the new revision id. A byte-identical rewrite is a no-op.
 SELECT knowledge.write('projects/auth', $md$
@@ -149,9 +158,30 @@ SELECT kind, target, resolved_path, dangling_reason FROM knowledge.links('projec
 SELECT * FROM knowledge.tagged('architecture');   -- everything carrying a tag
 SELECT * FROM knowledge.tags();                   -- tag → note/block counts
 SELECT * FROM knowledge.orphans();                -- nothing links here
-SELECT * FROM knowledge.notes('projects/**');     -- glob the vault
+SELECT * FROM knowledge.notes('projects/**');     -- id, path, title, description, head
 SELECT * FROM knowledge.stats();                  -- notes, blocks, edges, revisions, bytes
 ```
+
+### Search
+
+Full-text search over blocks, on an index the write path maintains. No refresh, no
+embedding, no second service:
+
+```sql
+SELECT path, rank, excerpt FROM knowledge.search('rotate keys');
+--         path         |  rank  |                     excerpt
+-- projects/auth        | 0.0909 | **Key** **rotation** is [[runbooks/rotate-keys|…
+-- runbooks/rotate-keys | 0.0323 | **Rotate** the signing **keys**
+
+-- Narrow to one note, or to blocks carrying every tag listed. With no text query at
+-- all it is a pure tag intersection, and `rank` comes back NULL rather than a made-up 0.
+SELECT * FROM knowledge.search('rotation', path => 'projects/auth');
+SELECT * FROM knowledge.search('', tags => ARRAY['architecture','decision']);
+```
+
+Typo-tolerant search is deliberately absent: it needs a `pg_trgm` dependency that has not
+been taken. Ranking is `ts_rank_cd`, and the text-search configuration is `english`,
+fixed — the wrong stemmer for a vault that is not in English.
 
 ### History and time travel
 
@@ -193,14 +223,27 @@ ORDER  BY b.ord;
 The measured match rate on the adversarial edit corpus is published in
 [`eval/published/`](eval/published/) — including the first run, which carried **0 of 22**.
 
-### Multi-tenancy
+### Many vaults
+
+pgmind has no tenant concept. Applications have tenants, users and agents; a vault is the
+container, and you put your hierarchy in its name:
 
 ```sql
-SET pgmind.vault_id = '11111111-1111-1111-1111-111111111111';
-SELECT count(*) FROM knowledge.notes();   -- only this tenant's notes, ever
+SELECT * FROM knowledge.vaults('acme/**');   -- id, name, description, created_at
 
-SELECT * FROM pgmind.enable_vault_rls();  -- and enforce it with row security
+-- Scope the session, or name the vault per call — the last argument of every
+-- vault-scoped function, which is what lets one query span several vaults.
+SET pgmind.vault_id = '019feaf0-…';
+SELECT count(*) FROM knowledge.notes(vault => 'acme/alice/memory');
+
+-- Enforce the scope with row security. Returns one row per table with what it covered.
+SELECT * FROM pgmind.enable_vault_rls(force => true);
 ```
+
+An id nobody registered is an error (`PM018`), not a new empty vault — the failure that
+used to turn a typo into a vault you could never find again. Note the honest limit: the
+registry itself has no `vault_id` to police, so `knowledge.vaults()` lists every vault's
+*name* regardless of the policy. Content is scoped; names are not.
 
 ### Erasure
 
@@ -247,12 +290,14 @@ published — including the unflattering ones.
 | 2 | The vault model — notes, blocks, edges, tags, backlinks | ✅ exited |
 | 3 | Versioning & concurrency — revisions, diff, blame, CAS, rebinding, excision | ✅ exited |
 | 4 | ~~Sync bridge~~ — **cut 2026-08-09** ([why](docs/PGMIND.md#11-risks--open-questions)); export/import ship as [scripts/](scripts/) | ✂️ |
-| 5 | MCP server + `knowledge.context()` — **the first public release, 0.1.0** | — |
+| 5 | Query API, MCP server, `knowledge.context()` — **the first public release, 0.1.0** | ▶ in progress |
 | 6 | Optional vector lane (pgvector hooks) | — |
 | 7 | Retrieval planner & context maturation | — |
 
-One artifact beyond the extension is planned but not built: `pgmind-mcp`, the vault as
-MCP tools (Phase 5). Moving a vault in or out needs no CLI — [`scripts/export-vault.sh`](scripts/export-vault.sh)
+Search and the vault registry have landed;
+[RFC-007](docs/rfcs/RFC-007-query-api-and-mcp-surface.md) is the draft that freezes the SQL
+surface for 0.x and designs the rest. One artifact beyond the extension is planned but not
+built: `pgmind-mcp`, the vault as eight MCP tools. Moving a vault in or out needs no CLI — [`scripts/export-vault.sh`](scripts/export-vault.sh)
 and [`scripts/import-vault.sh`](scripts/import-vault.sh) do it, and `make eval`'s
 `folder-round-trip` suite proves the bytes survive paths chosen to break them.
 
@@ -297,6 +342,7 @@ SELECT * FROM knowledge.blocks('hello');
 | [docs/PGMIND.md](docs/PGMIND.md) | The handbook — vision, philosophy, architecture laws (the constitution) |
 | [docs/PRODUCT-PLAN.md](docs/PRODUCT-PLAN.md) | The operating blueprint — system design + phased delivery plan |
 | [docs/rfcs/](docs/rfcs/README.md) | Per-phase RFCs, written and accepted before implementation |
+| [website/docs/](https://marosilabs.github.io/pgmind/docs/) | The user manual — quickstart, concepts, SQL reference, cookbook, internals |
 | [eval/](eval/README.md) | The benchmark gates, corpora, and published results |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Roles, governance, RFC lifecycle |
 | [docs/archive/](docs/archive/) | The original v0.1 handbook and the evidence audit it was rewritten from |
